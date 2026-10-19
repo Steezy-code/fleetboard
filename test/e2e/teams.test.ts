@@ -133,6 +133,47 @@ test('a merge that would overwrite local work is refused and leaves the checkout
   assert.ok((await fleet(projectId)).ready, 'the Ready card stays so the user can merge after cleaning up')
 })
 
+test("Merge while the user is resolving a merge of their own refuses, and leaves their resolution alone", async () => {
+  const { sb, repo, projectId } = await team(TWO_WORKERS)
+  await waitReady(projectId)
+  // the user merges a branch of their own and hits a conflict
+  git(sb, repo, 'checkout', '-q', '-b', 'side')
+  fs.writeFileSync(path.join(repo, 'README.md'), 'side\n')
+  git(sb, repo, 'commit', '-qam', 'side')
+  git(sb, repo, 'checkout', '-q', '-')
+  fs.writeFileSync(path.join(repo, 'README.md'), 'main\n')
+  git(sb, repo, 'commit', '-qam', 'main')
+  assert.throws(() => git(sb, repo, 'merge', 'side'))
+  fs.writeFileSync(path.join(repo, 'README.md'), 'half resolved by the user\n')
+  const res = await app!.invoke('fleet:mergeReady', projectId)
+  assert.equal(res.ok, false)
+  assert.match(res.error, /in the middle of a merge\. Finish or abort it/)
+  assert.equal(fs.readFileSync(path.join(repo, 'README.md'), 'utf8'), 'half resolved by the user\n', "the user's resolution is kept")
+  assert.ok(fs.existsSync(path.join(repo, '.git', 'MERGE_HEAD')), 'their merge is still in progress')
+  assert.ok((await fleet(projectId)).ready, 'the Ready card stays')
+  // once they finish, Merge works
+  git(sb, repo, 'commit', '-qam', 'merged side')
+  const again = await app!.invoke('fleet:mergeReady', projectId)
+  assert.equal(again.ok, true, JSON.stringify(again))
+  assert.ok(fs.existsSync(path.join(repo, 'a.txt')))
+})
+
+test('Merge on a detached HEAD is refused, and pressing it twice merges once', async () => {
+  const { sb, repo, projectId } = await team(TWO_WORKERS)
+  await waitReady(projectId)
+  git(sb, repo, 'checkout', '-q', '--detach')
+  const head = git(sb, repo, 'rev-parse', 'HEAD')
+  const res = await app!.invoke('fleet:mergeReady', projectId)
+  assert.equal(res.ok, false)
+  assert.match(res.error, /not on a branch/)
+  assert.equal(git(sb, repo, 'rev-parse', 'HEAD'), head)
+  git(sb, repo, 'checkout', '-q', '-')
+  // the desktop and the phone at once
+  const both = await Promise.all([app!.invoke('fleet:mergeReady', projectId), app!.invoke('fleet:mergeReady', projectId)])
+  assert.deepEqual(both.map((r: any) => r.ok).sort(), [false, true], JSON.stringify(both))
+  assert.equal(git(sb, repo, 'log', '--merges', '--first-parent', '--oneline').split('\n').filter(Boolean).length, 1, 'one merge commit')
+})
+
 test('two workers editing the same file: the second merge reports the conflict and the lead branch stays clean', async () => {
   const { projectId } = await team({
     lead: {
