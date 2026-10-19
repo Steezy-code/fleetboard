@@ -9,9 +9,10 @@ import { extractLinks, firstHeading, handleMdClick, isMarkdownPath, renderMarkdo
 import { exportMarkdownPdf } from '../workbench/pdf'
 import { baseName, dirname, joinPath, relativeTo, stripExt } from '../workbench/paths'
 import type { FileStat } from '../workbench/useFileText'
+import type { WriteResult } from '@shared/types'
 
 type Mode = 'reading' | 'source' | 'graph'
-type SaveState = 'saved' | 'dirty' | 'saving' | 'error'
+type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
 
 const MD_EXT = ['.md', '.mdx']
 const MAX_NOTES = 800
@@ -75,6 +76,9 @@ export default function MarkdownStudio(props: { path?: string }) {
   const saveTimer = useRef<number>(undefined)
   const pending = useRef<{ path: string; text: string } | null>(null)
   const mtimes = useRef(new Map<string, number>())
+  /** what each note held on disk when last read or saved: a save goes only over that (an agent may write it too) */
+  const onDisk = useRef(new Map<string, string>())
+  const asking = useRef(false)
   const currentRef = useRef<string | null>(null)
   currentRef.current = current
   const readingRef = useRef<HTMLDivElement>(null)
@@ -124,11 +128,39 @@ export default function MarkdownStudio(props: { path?: string }) {
   const flush = useCallback(async () => {
     window.clearTimeout(saveTimer.current)
     const p = pending.current
-    if (!p) return
+    if (!p || asking.current) return
     pending.current = null
     setSave('saving')
     try {
-      await invoke('fs:write', p.path, p.text)
+      const base = onDisk.current.get(p.path)
+      const r = await invoke<WriteResult>('fs:write', p.path, p.text, base === undefined ? undefined : { base })
+      if (!r.ok) {
+        // changed on disk since we read it: never overwrite that silently
+        pending.current ??= p
+        setSave('conflict')
+        asking.current = true
+        try {
+          const app = useApp.getState()
+          const disk = r.current
+          if (await app.confirm({ title: `${baseName(p.path)} changed on disk`, body: `It was ${disk === null ? 'deleted' : 'changed'} while you were editing it, maybe by an agent. Replace it with your version?`, confirm: 'Replace with mine', danger: true })) {
+            const mine = pending.current ?? p
+            await invoke<WriteResult>('fs:write', mine.path, mine.text)
+            onDisk.current.set(mine.path, mine.text)
+            if (pending.current === mine) pending.current = null
+            setSave(pending.current ? 'dirty' : 'saved')
+          } else if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your edits since the last save are lost. Otherwise you keep yours, unsaved, and are asked again on the next save.', confirm: 'Load the version on disk', danger: true }))) {
+            pending.current = null
+            onDisk.current.set(p.path, disk)
+            setNotes((m) => new Map(m).set(p.path, disk))
+            if (currentRef.current === p.path) setText(disk)
+            setSave('saved')
+          }
+        } finally {
+          asking.current = false
+        }
+        return
+      }
+      onDisk.current.set(p.path, p.text)
       const st = await invoke<FileStat | null>('fs:stat', p.path)
       if (st) mtimes.current.set(p.path, st.mtime)
       if (!pending.current) setSave('saved')
@@ -163,6 +195,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       try {
         const [st, fresh] = await Promise.all([invoke<FileStat | null>('fs:stat', path), invoke<string>('fs:read', path)])
         if (st) mtimes.current.set(path, st.mtime)
+        onDisk.current.set(path, fresh)
         if (currentRef.current === path) setText(fresh)
         setNotes((m) => new Map(m).set(path, fresh))
       } catch (e: any) {
@@ -197,6 +230,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       mtimes.current.set(p, st.mtime)
       const fresh = await invoke<string>('fs:read', p).catch(() => null)
       if (fresh == null || pending.current || currentRef.current !== p) return
+      onDisk.current.set(p, fresh)
       setText(fresh)
       setNotes((m) => new Map(m).set(p, fresh))
     }, 3000)
@@ -401,6 +435,8 @@ export default function MarkdownStudio(props: { path?: string }) {
                     'Editing…'
                   ) : save === 'error' ? (
                     'Not saved'
+                  ) : save === 'conflict' ? (
+                    'Changed on disk: not saved'
                   ) : (
                     <>
                       <Check size={11} /> Saved
