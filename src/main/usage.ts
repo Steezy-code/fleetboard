@@ -78,7 +78,7 @@ interface FileEntry {
 }
 
 const CACHE_FILE = path.join(dirs.root, 'usage-cache.json')
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 const HOUR = 3600_000
 const DAY = 24 * HOUR
 
@@ -300,6 +300,9 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
     }
   }
   let n = 0
+  // Gemini CLI rewrites a message as it grows (its tool calls are added in a second line with the
+  // same id), so one id is one model reply: keep the last version
+  const byId = new Map<string, number>()
   const session = path.basename(file).replace(/\.jsonl?$/, '')
   const visit = (o: any, sess: string, depth: number) => {
     if (!o || typeof o !== 'object' || depth > 6) return
@@ -313,7 +316,8 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
       const t = ts(o.timestamp)
       if (t) {
         const cached = num(tk.cached)
-        b.events.push([
+        const id = typeof o.id === 'string' && o.id ? `gm:${o.id}` : `gm${n++}`
+        const ev: Ev = [
           t,
           b.model(String(o.model || 'gemini')),
           Math.max(0, num(tk.input) - cached),
@@ -321,8 +325,14 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
           0,
           cached,
           b.session(sess),
-          `gm${n++}`
-        ])
+          id
+        ]
+        const prev = byId.get(id)
+        if (prev !== undefined) b.events[prev] = ev
+        else {
+          byId.set(id, b.events.length)
+          b.events.push(ev)
+        }
       }
       return
     }
@@ -447,7 +457,7 @@ function eventsOf(agent: UsageAgent): FlatEv[] {
     if (f.agent !== agent) continue
     for (const e of f.events) {
       const id = e[7]
-      if (agent === 'claude' && id !== ':') {
+      if ((agent === 'claude' && id !== ':') || (agent === 'gemini' && id.startsWith('gm:'))) {
         if (seen.has(id)) continue
         seen.add(id)
       }

@@ -1,0 +1,13 @@
+{"timestamp": "2026-10-19T07:20:20.085Z", "type": "session_meta", "payload": {"id": "01a15308-5f43-79b1-ada1-b2069222adae", "timestamp": "2026-10-19T07:20:20.050Z", "cli_version": "0.163.0", "source": "exec"}}
+{"timestamp": "2026-10-19T07:20:20.086Z", "type": "event_msg", "payload": {"type": "task_started"}}
+{"timestamp": "2026-10-19T07:20:20.125Z", "type": "turn_context", "payload": {"model": "mock-model", "approval_policy": "never"}}
+{"timestamp": "2026-10-19T07:20:20.180Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 100, "cached_input_tokens": 30, "cache_write_input_tokens": 0, "output_tokens": 7, "reasoning_output_tokens": 0, "total_tokens": 107}, "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 30, "cache_write_input_tokens": 0, "output_tokens": 7, "reasoning_output_tokens": 0, "total_tokens": 107}, "model_context_window": 258400}}}
+{"timestamp": "2026-10-19T07:20:20.193Z", "type": "event_msg", "payload": {"type": "task_complete"}}
+{"timestamp": "2026-10-19T07:20:28.502Z", "type": "event_msg", "payload": {"type": "task_started"}}
+{"timestamp": "2026-10-19T07:20:28.512Z", "type": "turn_context", "payload": {"model": "mock-model", "approval_policy": "never"}}
+{"timestamp": "2026-10-19T07:20:28.565Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 300, "cached_input_tokens": 90, "cache_write_input_tokens": 0, "output_tokens": 21, "reasoning_output_tokens": 0, "total_tokens": 321}, "last_token_usage": {"input_tokens": 200, "cached_input_tokens": 60, "cache_write_input_tokens": 0, "output_tokens": 14, "reasoning_output_tokens": 0, "total_tokens": 214}, "model_context_window": 258400}}}
+{"timestamp": "2026-10-19T07:20:28.577Z", "type": "event_msg", "payload": {"type": "task_complete"}}
+{"timestamp": "2026-10-19T07:20:29.308Z", "type": "event_msg", "payload": {"type": "task_started"}}
+{"timestamp": "2026-10-19T07:20:29.316Z", "type": "turn_context", "payload": {"model": "mock-model", "approval_policy": "never"}}
+{"timestamp": "2026-10-19T07:20:29.363Z", "type": "event_msg", "payload": {"type": "token_count", "info": {"total_token_usage": {"input_tokens": 600, "cached_input_tokens": 180, "cache_write_input_tokens": 0, "output_tokens": 42, "reasoning_output_tokens": 0, "total_tokens": 642}, "last_token_usage": {"input_tokens": 300, "cached_input_tokens": 90, "cache_write_input_tokens": 0, "output_tokens": 21, "reasoning_output_tokens": 0, "total_tokens": 321}, "model_context_window": 258400}}}
+{"timestamp": "2026-10-19T07:20:29.369Z", "type": "event_msg", "payload": {"type": "task_complete"}}
