@@ -245,6 +245,21 @@ export class App {
     })
   }
 
+  /**
+   * The app dies outright (killed, out of memory, a crash in native code): SIGKILL to it and its helper
+   * processes. Its consoles are sessions of their own, so they are left to what the system does.
+   */
+  async killHard() {
+    this.cdp.close()
+    this.main?.close()
+    try {
+      process.kill(-this.proc.pid!, 'SIGKILL')
+    } catch {
+      /* already gone */
+    }
+    return this.waitExit(5000)
+  }
+
   /** Crash the window's page, as running out of memory would (the protocol never answers this). */
   async crashWindow() {
     void this.cdp.send('Page.crash', {}, 1000).catch(() => {})

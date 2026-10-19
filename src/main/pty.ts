@@ -10,6 +10,7 @@ import { fleetLaunch, isTeamConsole } from './fleet'
 import { TermScreen, type ScreenView } from './screen'
 import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
+import { RunRecord } from './orphans'
 
 /** Pause between keystrokes of an answer: TUIs read one key per input event. */
 const KEY_GAP_MS = 70
@@ -48,6 +49,8 @@ export class PtyManager {
   /** the app is quitting: consoles exit because of that, not on their own */
   private disposing = false
   private tick: NodeJS.Timeout
+  /** the consoles running, on disk: the next launch ends what a crash of this one leaves running */
+  private record = new RunRecord()
   constructor(
     private wc: () => WebContents | null,
     private settings: () => Settings
@@ -150,6 +153,7 @@ export class PtyManager {
       outputAt: startedAt
     }
     this.sessions.set(req.id, s)
+    this.record.add(req.id, proc.pid)
     if (notice) {
       s.buffer += notice
       this.emit('pty:data', req.id, notice)
@@ -177,6 +181,7 @@ export class PtyManager {
     proc.onExit(({ exitCode }) => {
       // a respawn under the same id may already have replaced this session
       if (this.sessions.get(req.id) === s) this.sessions.delete(req.id)
+      this.record.remove(req.id, proc.pid)
       s.screen.dispose()
       this.emit('pty:exit', req.id, exitCode)
       this.emit('pty:status', req.id, 'exited')

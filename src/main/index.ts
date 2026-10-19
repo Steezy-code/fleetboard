@@ -16,7 +16,8 @@ import * as goal from './goal'
 import { initFleet } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
-import { catchStrayErrors } from './errors'
+import { catchStrayErrors, logError } from './errors'
+import { endOrphans } from './orphans'
 
 let win: BrowserWindow | null = null
 
@@ -215,6 +216,9 @@ app.whenReady().then(async () => {
   const web = session.fromPartition(WEB_PARTITION)
   web.setPermissionRequestHandler((_wc, permission, cb, details) => cb(webPermission(permission, details.requestingUrl)))
   web.setPermissionCheckHandler((_wc, permission, origin) => webPermission(permission, origin))
+  // before any console starts: what a run that died left running would otherwise work on unseen
+  const orphans = await endOrphans().catch(() => 0)
+  if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
   for (const m of [store, fsops, cli, agents, git, usage, profiles, goal]) m.register(ctx)
