@@ -17,6 +17,11 @@ export interface LaunchOptions {
   scenario?: object
   /** reuse an existing sandbox (to test a restart) */
   sandbox?: Sandbox
+  /**
+   * Use the real `claude` (next to this node) with this config dir instead of the fake, keeping
+   * this process's API environment. For manual stress runs (test/e2e/real), never in CI.
+   */
+  realClaudeConfig?: string
 }
 
 export interface Sandbox {
@@ -28,7 +33,7 @@ export interface Sandbox {
   scenarioFile: string
 }
 
-export function makeSandbox(): Sandbox {
+export function makeSandbox(opts: { fake?: boolean } = {}): Sandbox {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-e2e-'))
   const sb: Sandbox = {
     dir,
@@ -40,7 +45,7 @@ export function makeSandbox(): Sandbox {
   }
   for (const d of [sb.home, sb.fbHome, sb.bin]) fs.mkdirSync(d, { recursive: true })
   // `claude` on PATH is the fake, started with this same node
-  fs.writeFileSync(path.join(sb.bin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_CLAUDE}" "$@"\n`, { mode: 0o755 })
+  if (opts.fake !== false) fs.writeFileSync(path.join(sb.bin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_CLAUDE}" "$@"\n`, { mode: 0o755 })
   // the app reads PATH from a login shell, and /etc/profile may reset it: set it where a user would
   fs.writeFileSync(path.join(sb.home, '.bash_profile'), `export PATH="${sb.bin}:${path.dirname(process.execPath)}:$PATH"\n`)
   fs.writeFileSync(path.join(sb.home, '.gitconfig'), '[user]\n\tname = Fleetboard Test\n\temail = test@fleetboard.invalid\n[init]\n\tdefaultBranch = main\n')
@@ -117,7 +122,10 @@ export class App {
     const sb = opts.sandbox ?? makeSandbox()
     if (opts.scenario) fs.writeFileSync(sb.scenarioFile, JSON.stringify(opts.scenario))
     const env: Record<string, string> = {}
-    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !/^(CLAUDE|ANTHROPIC|ELECTRON_RUN_AS_NODE)/.test(k)) env[k] = v
+    // the test runner's own variables must not reach the app's consoles (node --test inside them breaks)
+    const keep = opts.realClaudeConfig ? /^(ELECTRON_RUN_AS_NODE|CLAUDECODE|NODE_TEST_CONTEXT|NODE_OPTIONS)$/ : /^(CLAUDE|ANTHROPIC|ELECTRON_RUN_AS_NODE|NODE_TEST_CONTEXT|NODE_OPTIONS)/
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !keep.test(k)) env[k] = v
+    if (opts.realClaudeConfig) env.CLAUDE_CONFIG_DIR = opts.realClaudeConfig
     Object.assign(env, {
       HOME: sb.home,
       FLEETBOARD_HOME: sb.fbHome,

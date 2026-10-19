@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useApp } from './state/store'
+import type { Recovery } from '@shared/types'
 import { on, invoke } from './lib/api'
 import { wireConsoleEvents } from './engine/consoles'
 import { wireFleet } from './engine/fleet'
@@ -41,6 +42,20 @@ export function App() {
         invoke('app:quit')
       }
     })
+  }, [])
+
+  // a state file that could not be read was set aside and restored from a snapshot: say so
+  useEffect(() => {
+    const tell = (r: Recovery) => {
+      const when = r.snapshot ? new Date(Number(/-(\d+)\.json$/.exec(r.snapshot)?.[1])).toLocaleString() : ''
+      const what = r.what === 'app' ? 'The settings file' : "This board's file"
+      const then = r.snapshot ? `restored the copy saved ${when}` : r.what === 'app' ? 'started with default settings' : 'started an empty board'
+      useApp.getState().toast(`${what} could not be read, so Fleetboard ${then}. The damaged file is kept at ${r.corruptCopy}`, 'warn')
+    }
+    invoke<Recovery[]>('store:recoveries')
+      .then((rs) => rs.filter((r) => r.what === 'app').forEach(tell))
+      .catch(() => {})
+    return on('store:recovered', tell)
   }, [])
 
   const Panel = panel ? PANELS[panel.name] : null
