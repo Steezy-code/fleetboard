@@ -8,7 +8,7 @@ import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
 import { fleetLaunch, isTeamConsole } from './fleet'
 import { TermScreen, type ScreenView } from './screen'
-import { StatusTracker, answerKeys, detectPrompt, type Prompt } from './status'
+import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
 
 /** Pause between keystrokes of an answer: TUIs read one key per input event. */
@@ -36,7 +36,6 @@ interface Session {
   outputAt: number
 }
 
-const TERMINAL_REPLY = /^(?:\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d*n|\x1b\[[IO]|\x1bP[\s\S]*?\x1b\\|\x1b\][\s\S]*?(?:\x07|\x1b\\))+$/
 export { stripAnsi } from '@shared/ansi'
 
 type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void

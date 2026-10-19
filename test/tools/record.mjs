@@ -83,6 +83,12 @@ const screenText = () => {
   return out.join('\n')
 }
 const p = pty.spawn(cmd[0], cmd.slice(1), { name: 'xterm-256color', cols: +opt.cols, rows: +opt.rows, cwd: opt.cwd, env })
+// answer the terminal's queries (cursor position, colors, capabilities) like a real terminal does: some
+// TUIs (OpenCode) draw nothing until they hear back. The replies are input, recorded as such.
+term.onData((d) => {
+  p.write(d)
+  events.push([+(((Date.now() - t0) / 1000).toFixed(3)), 'i', d])
+})
 p.onData((d) => {
   events.push([(Date.now() - t0) / 1000, 'o', d])
   term.write(d)
