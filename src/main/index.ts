@@ -113,6 +113,18 @@ function registerCore() {
   })
 }
 
+// One Fleetboard at a time: both would write the same ~/.fleetboard state. A second launch focuses this one.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+  process.exit(0)
+}
+app.on('second-instance', () => {
+  if (!win) return
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+})
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))

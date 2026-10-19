@@ -12,6 +12,7 @@ Icon=$root/resources/icon.png
 Terminal=false
 Type=Application
 Categories=Development;
-StartupWMClass=Fleetboard
+StartupWMClass=fleetboard
 DESKTOP
+update-desktop-database ~/.local/share/applications >/dev/null 2>&1 || true
 echo "Installed ~/.local/share/applications/fleetboard.desktop"

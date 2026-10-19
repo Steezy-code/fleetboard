@@ -1034,3 +1034,35 @@
 .zoom-control .icon-btn.on {
   color: var(--accent);
 }
+
+/* narrow / tiled windows */
+.home-hero h1 {
+  font-size: clamp(30px, 5.2vw, 54px);
+}
+@media (max-width: 900px) {
+  .home-main {
+    padding: 28px 22px 40px;
+  }
+  .home-cols {
+    grid-template-columns: 1fr;
+    gap: 28px;
+    margin-top: 36px;
+  }
+  .home-hero p {
+    font-size: 14px;
+  }
+  .command-bar {
+    min-width: 0;
+    width: calc(100vw - 140px);
+    max-width: none;
+  }
+  .chip-row {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 140px);
+  }
+  .try-hint,
+  .minimap {
+    display: none;
+  }
+}
