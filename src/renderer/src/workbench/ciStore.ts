@@ -2,7 +2,8 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
-import { spawnConsoles } from '../engine/consoles'
+import { sendToConsole, spawnConsoles } from '../engine/consoles'
+import { ownerOf, refreshFeedback, setBranchAgent, useFeedback } from './prFeedback'
 import type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
 export type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
@@ -11,6 +12,7 @@ export type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
 const POLL_RUNNING = 20_000
 const POLL_IDLE = 60_000
+const POLL_FEEDBACK = 120_000
 
 export const useCi = create<{ status: CiStatus | null; path: string | null; loading: boolean }>(() => ({ status: null, path: null, loading: false }))
 
@@ -130,6 +132,7 @@ export function useCiWatcher() {
     if (useCi.getState().path !== path) {
       seen = new Map()
       useCi.setState({ path, status: null })
+      useFeedback.setState({ result: null })
     }
     if (!path) return
     void refreshCi()
@@ -141,6 +144,18 @@ export function useCiWatcher() {
       window.removeEventListener('focus', onFocus)
     }
   }, [path, running])
+  // review comments change slower than CI: every two minutes, and on focus
+  useEffect(() => {
+    if (!path) return
+    void refreshFeedback()
+    const t = window.setInterval(() => void refreshFeedback(), POLL_FEEDBACK)
+    const onFocus = () => void refreshFeedback()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(t)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [path])
 }
 
 // ---------- sending an agent to fix it ----------
@@ -177,12 +192,23 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
       : `Then commit and push to ${item.branch}.`,
     "Never weaken, skip or delete a test to make it pass; if a test itself looks wrong, or the failure isn't in our code (an outage, a secret, a flaky runner), stop and tell me instead."
   ].join('\n\n')
+  // a PR that an agent is already working on goes back to that agent
+  const owner = item.pr ? ownerOf(item.branch) : null
+  if (owner) {
+    const note = `${prompt.replace(/\n\nDon't touch my current checkout[^\n]*|\n\nThen commit and push to [^\n]*/, '')}\n\nFix it on ${item.branch} and push.`
+    if (owner.lead) await invoke('fleet:userMessage', owner.id, note)
+    else sendToConsole(owner.id, note)
+    fixers.set(item.key, owner.id)
+    app.toast(`Sent the CI failure on PR #${item.pr!.number} to ${owner.name}`, 'info')
+    return owner.id
+  }
   const taken = allConsoles().map((c) => c.data.name as string)
   let name = 'CI fixer'
   for (let n = 2; taken.includes(name); n++) name = `CI fixer ${n}`
   const [id] = spawnConsoles({ names: [name], initialPrompt: prompt })
   if (!id) return null
   fixers.set(item.key, id)
+  if (item.pr) setBranchAgent(item.branch, id)
   app.toast(opts.auto ? `CI failed, so ${name} is on it: ${item.label}` : `${name} is on it`, 'info')
   if (!opts.auto) window.setTimeout(() => useApp.getState().focusItem(id), 120)
   return id

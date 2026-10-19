@@ -1,6 +1,7 @@
 // CI watcher: GitHub Actions runs for the current branch and check results for open PRs, through `gh`.
 // The renderer polls ci:status (faster while something is running) and asks for ci:failedLog when an
-// agent is sent to fix a failure.
+// agent is sent to fix a failure. ci:prFeedback reads reviewers' comments on open PRs (one GraphQL
+// call), so new ones can go back to the agent that made the PR.
 import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import type { MainContext } from './context'
@@ -171,6 +172,94 @@ async function status(cwd: string): Promise<CiStatus> {
   return { ok: true, at, branch, slug, runs: [...byWorkflow.values()], prs }
 }
 
+/** Agents start their replies on a PR with this, so their own words are never sent back to them. */
+export const AGENT_MARK = '🤖'
+
+export interface PrComment {
+  /** stable across polls: kind + GitHub's id */
+  id: string
+  kind: 'comment' | 'review' | 'inline'
+  author: string
+  body: string
+  createdAt: string
+  url: string
+  /** a review's verdict: CHANGES_REQUESTED, COMMENTED, APPROVED */
+  state?: string
+  path?: string
+  line?: number | null
+}
+
+export interface PrFeedback {
+  number: number
+  title: string
+  branch: string
+  url: string
+  author: string
+  comments: PrComment[]
+}
+
+export type PrFeedbackResult = { ok: true; at: number; viewer: string; prs: PrFeedback[] } | { ok: false; at: number; error: string }
+
+const FEEDBACK_QUERY = `query($owner:String!,$name:String!){ viewer{login} repository(owner:$owner,name:$name){ pullRequests(states:OPEN, first:20, orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{
+  number title headRefName url author{login}
+  comments(last:30){nodes{databaseId author{login __typename} body createdAt url}}
+  reviews(last:30){nodes{databaseId author{login __typename} body state submittedAt url}}
+  reviewThreads(last:50){nodes{isResolved isOutdated path line comments(first:20){nodes{databaseId author{login __typename} body createdAt url}}}}
+} } } }`
+
+/**
+ * What a reviewer asked for, from one PR's GraphQL node: issue comments, review summaries and inline
+ * comments on unresolved threads. Left out: empty bodies (a bare approval), bots' plain comments
+ * (deploy previews, coverage) but not their reviews, and anything an agent wrote (AGENT_MARK).
+ */
+export function feedbackOf(pr: any): PrComment[] {
+  const out: PrComment[] = []
+  const keep = (body: string, author: any, isReview: boolean) => {
+    const b = String(body ?? '').trim()
+    if (!b || b.startsWith(AGENT_MARK)) return false
+    if (author?.__typename === 'Bot' && !isReview) return false
+    return true
+  }
+  for (const c of pr.comments?.nodes ?? [])
+    if (keep(c.body, c.author, false)) out.push({ id: `c${c.databaseId}`, kind: 'comment', author: c.author?.login ?? 'someone', body: c.body.trim(), createdAt: c.createdAt, url: c.url })
+  for (const r of pr.reviews?.nodes ?? [])
+    if (keep(r.body, r.author, true)) out.push({ id: `r${r.databaseId}`, kind: 'review', author: r.author?.login ?? 'someone', body: r.body.trim(), createdAt: r.submittedAt, url: r.url, state: r.state })
+  for (const t of pr.reviewThreads?.nodes ?? []) {
+    if (t.isResolved) continue
+    for (const c of t.comments?.nodes ?? [])
+      if (keep(c.body, c.author, true))
+        out.push({ id: `i${c.databaseId}`, kind: 'inline', author: c.author?.login ?? 'someone', body: c.body.trim(), createdAt: c.createdAt, url: c.url, path: t.path, line: t.line ?? null })
+  }
+  return out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+}
+
+async function prFeedback(cwd: string): Promise<PrFeedbackResult> {
+  const at = Date.now()
+  if (typeof cwd !== 'string' || !fs.existsSync(cwd)) return { ok: false, at, error: 'Folder not found' }
+  const gh = await which('gh')
+  if (!gh) return { ok: false, at, error: 'GitHub CLI (gh) is not installed' }
+  const env = await ghEnv()
+  const repo = await exec(gh, ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], cwd, env)
+  if (repo.code !== 0) return { ok: false, at, error: firstLine(repo.stderr) || 'gh failed' }
+  const [owner, name] = repo.stdout.trim().split('/')
+  const r = await exec(gh, ['api', 'graphql', '-f', `owner=${owner}`, '-f', `name=${name}`, '-f', `query=${FEEDBACK_QUERY}`], cwd, env, 30000)
+  if (r.code !== 0) return { ok: false, at, error: firstLine(r.stderr) || 'gh api failed' }
+  try {
+    const d = JSON.parse(r.stdout).data
+    const prs: PrFeedback[] = (d.repository?.pullRequests?.nodes ?? []).map((p: any) => ({
+      number: p.number,
+      title: p.title,
+      branch: p.headRefName,
+      url: p.url,
+      author: p.author?.login ?? '',
+      comments: feedbackOf(p)
+    }))
+    return { ok: true, at, viewer: d.viewer?.login ?? '', prs }
+  } catch {
+    return { ok: false, at, error: 'Unexpected gh output' }
+  }
+}
+
 /** The failed steps' log, cleaned up and cut to where it failed (the cleanup steps after it are noise). */
 export function cleanLog(raw: string, maxLines = 160): string {
   let lines = stripAnsi(raw)
@@ -204,6 +293,13 @@ export function register(ctx: MainContext) {
       return await status(cwd)
     } catch (e: any) {
       return { ok: false, at: Date.now(), error: e?.message ?? String(e), reason: 'error' } satisfies CiStatus
+    }
+  })
+  ctx.ipc.handle('ci:prFeedback', async (_e, cwd: string) => {
+    try {
+      return await prFeedback(cwd)
+    } catch (e: any) {
+      return { ok: false, at: Date.now(), error: e?.message ?? String(e) } satisfies PrFeedbackResult
     }
   })
   ctx.ipc.handle('ci:failedLog', async (_e, cwd: string, runId: number) => {

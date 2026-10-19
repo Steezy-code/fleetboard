@@ -1337,3 +1337,62 @@
 .ci-foot {
   font-size: 11px;
 }
+.ci-badge-fb {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(96, 165, 250, 0.16);
+  color: #93c5fd;
+}
+.branch-badge.ci-badge .ci-badge-fb svg {
+  color: #93c5fd;
+}
+.ci-fb {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 22px;
+}
+.ci-fb-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #93c5fd;
+}
+.ci-fb-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  padding: 6px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  font: inherit;
+}
+.ci-fb-item:hover {
+  border-color: var(--line-2);
+}
+.ci-fb-item.new {
+  border-color: rgba(96, 165, 250, 0.45);
+}
+.ci-fb-who {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ci-fb-body {
+  font-size: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.ci-fb .ci-row-actions {
+  padding-left: 0;
+}

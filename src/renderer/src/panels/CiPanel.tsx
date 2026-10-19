@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { ExternalLink, FileText, RefreshCw, Wrench } from 'lucide-react'
+import { Check, ExternalLink, FileText, MessageSquareText, RefreshCw, Send, Wrench } from 'lucide-react'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { Drawer, Switch } from '../ui/Modal'
 import { CiIcon } from '../chrome/CiBadge'
 import { ciItems, fixCi, fixerFor, refreshCi, setCiAutoFix, useCi, type CiItem } from '../workbench/ciStore'
+import { agentMade, autoRouteOn, markSent, ownerOf, refreshFeedback, routeFeedback, setAutoRoute, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
 
 const ago = (iso: string) => {
   const s = (Date.now() - Date.parse(iso)) / 1000
@@ -15,22 +16,23 @@ const ago = (iso: string) => {
   return `${Math.floor(s / 86400)}d ago`
 }
 
-/** Right-side CI drawer: this branch's workflows and every open PR's checks, with "Fix it". */
+/** Right-side CI drawer: this branch's workflows, every open PR's checks and review comments, with "Fix it". */
 export default function CiPanel() {
   const status = useCi((s) => s.status)
   const loading = useCi((s) => s.loading)
   const autoFix = useApp((s) => !!s.project?.extras.ciAutoFix)
+  const autoRoute = useApp((s) => s.project?.extras.prAutoRoute !== false)
   const items = ciItems(status)
   const runs = items.filter((i) => i.run)
   const prs = items.filter((i) => i.pr)
 
   return (
     <Drawer
-      title="CI"
+      title="CI & reviews"
       icon={<CiIcon state={status?.ok ? (runs.find((r) => r.state === 'failing') ? 'failing' : runs.find((r) => r.state === 'running') ? 'running' : runs.length ? 'passing' : 'none') : 'none'} size={14} />}
       width={400}
       headerRight={
-        <button className="icon-btn sm" title="Check now" onClick={() => void refreshCi()}>
+        <button className="icon-btn sm" title="Check now" onClick={() => void Promise.all([refreshCi(), refreshFeedback()])}>
           <RefreshCw size={13} className={loading ? 'ci-spin' : ''} />
         </button>
       }
@@ -58,6 +60,13 @@ export default function CiPanel() {
             </div>
             <Switch on={autoFix} onChange={setCiAutoFix} />
           </div>
+          <div className="ci-auto">
+            <div className="grow">
+              <div>Send review comments to the agent</div>
+              <div className="muted small">New comments on a PR an agent made go straight to it (its Lead or console, or a new one in that branch). Other PRs only notify you.</div>
+            </div>
+            <Switch on={autoRoute} onChange={setAutoRoute} />
+          </div>
           <div className="dim small ci-foot">
             {status.slug} · checked {ago(new Date(status.at).toISOString())} · every {runs.some((r) => r.state === 'running') || prs.some((p) => p.state === 'running') ? '20s while running' : 'minute'}
           </div>
@@ -68,6 +77,7 @@ export default function CiPanel() {
 }
 
 function CiRow({ item }: { item: CiItem }) {
+  const feedback = useFeedback((s) => (s.result?.ok && item.pr ? s.result.prs.find((p) => p.number === item.pr!.number) : undefined))
   const [log, setLog] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const path = useCi((s) => s.path)
@@ -127,6 +137,58 @@ function CiRow({ item }: { item: CiItem }) {
         </div>
       )}
       {log !== null && <pre className="ci-log scrollable">{log}</pre>}
+      {feedback && feedback.comments.length > 0 && <Feedback pr={feedback} />}
+    </div>
+  )
+}
+
+const WHERE = (c: PrFeedback['comments'][number]) =>
+  c.kind === 'inline' ? `${c.path?.split('/').pop()}${c.line ? `:${c.line}` : ''}` : c.kind === 'review' ? (c.state === 'CHANGES_REQUESTED' ? 'changes requested' : 'review') : 'comment'
+
+function Feedback({ pr }: { pr: PrFeedback }) {
+  useApp((s) => s.project?.extras.prSent) // re-render when comments are sent
+  useApp((s) => s.live)
+  const [busy, setBusy] = useState(false)
+  const fresh = unsent(pr)
+  const owner = ownerOf(pr.branch)
+  const shown = (fresh.length ? fresh : pr.comments).slice(-3)
+  const target = owner ? owner.name : 'a new console'
+  return (
+    <div className="ci-fb">
+      <div className="ci-fb-head">
+        <MessageSquareText size={12} />
+        <span className="grow">
+          {fresh.length ? `${fresh.length} new review comment${fresh.length === 1 ? '' : 's'}` : `${pr.comments.length} review comment${pr.comments.length === 1 ? '' : 's'}, all sent`}
+          {agentMade(pr.branch) ? ' · made by an agent' : ''}
+        </span>
+      </div>
+      {shown.map((c) => (
+        <button key={c.id} className={`ci-fb-item ${fresh.includes(c) ? 'new' : ''}`} title="Open on GitHub" onClick={() => invoke('shell:openExternal', c.url)}>
+          <span className="ci-fb-who">
+            @{c.author} · {WHERE(c)}
+          </span>
+          <span className="ci-fb-body">{c.body.replace(/\s+/g, ' ')}</span>
+        </button>
+      ))}
+      <div className="ci-row-actions">
+        <button
+          className="btn sm primary"
+          disabled={busy}
+          title={`Send ${fresh.length ? 'the new' : 'all'} comments to ${target}`}
+          onClick={async () => {
+            setBusy(true)
+            await routeFeedback(pr)
+            setBusy(false)
+          }}
+        >
+          <Send size={12} /> {fresh.length ? 'Send' : 'Send again'} to {target}
+        </button>
+        {fresh.length > 0 && (
+          <button className="btn sm" title="Treat these as handled without sending them" onClick={() => markSent(pr, fresh)}>
+            <Check size={12} /> Mark handled
+          </button>
+        )}
+      </div>
     </div>
   )
 }
