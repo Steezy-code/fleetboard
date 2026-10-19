@@ -8,10 +8,10 @@ const H = 140
 const PAD = 10
 
 const STATUS_FILL: Record<string, string> = {
-  working: '#ff4a2b',
-  'needs-you': '#f5b740',
-  idle: '#3ecf8e',
-  paused: '#a8a29e'
+  working: 'var(--accent)',
+  'needs-you': 'var(--warn)',
+  idle: 'var(--ok)',
+  paused: 'var(--muted)'
 }
 
 /** Overview of the whole board with the current view; click or drag to move the view there. */
@@ -67,11 +67,11 @@ export function Minimap() {
           <rect key={g.id} x={mx(g.x)} y={my(g.y)} width={g.w * k} height={g.h * k} rx={3} fill="none" stroke={ROLE_TINT[g.role]} strokeOpacity={0.6} strokeDasharray="2 2" />
         ))}
         {ws.ink.map((i) => (
-          <rect key={i.id} x={mx(i.x)} y={my(i.y)} width={Math.max(1, i.w * k)} height={Math.max(1, i.h * k)} fill="none" stroke="#f2ede6" strokeOpacity={0.35} />
+          <rect key={i.id} x={mx(i.x)} y={my(i.y)} width={Math.max(1, i.w * k)} height={Math.max(1, i.h * k)} fill="none" style={{ stroke: 'var(--text)' }} strokeOpacity={0.35} />
         ))}
         {ws.nodes.map((n) => {
           const isConsole = n.type === 'console'
-          const fill = isConsole ? STATUS_FILL[statuses[n.id]] ?? '#57504a' : '#3a342f'
+          const fill = isConsole ? STATUS_FILL[statuses[n.id]] ?? 'var(--line-3)' : 'var(--line-2)'
           return (
             <rect
               key={n.id}
@@ -80,7 +80,7 @@ export function Minimap() {
               width={Math.max(2, n.w * k)}
               height={Math.max(2, n.h * k)}
               rx={1.5}
-              fill={fill}
+              style={{ fill }}
               fillOpacity={isConsole ? 0.55 : 0.8}
               stroke={isConsole ? agentColor(n.data.agentId) : 'none'}
               strokeWidth={0.8}

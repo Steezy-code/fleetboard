@@ -17,6 +17,7 @@ import * as goal from './goal'
 import { initFleet } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
+import { themeById } from '@shared/themes'
 import { catchStrayErrors, logError } from './errors'
 import { endOrphans } from './orphans'
 
@@ -75,7 +76,7 @@ function createWindow() {
     height: 1000,
     minWidth: 900,
     minHeight: 600,
-    backgroundColor: '#0d0b0a',
+    backgroundColor: themeById(store.getSettings().theme).tokens.bg,
     frame: false,
     title: 'Fleetboard',
     icon: path.join(__dirname, '../../resources/icon.png'),
@@ -137,6 +138,9 @@ function createWindow() {
 
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
+  ipcMain.on('app:background', (_e, color: string) => {
+    if (/^#[0-9a-f]{6}$/i.test(color)) win?.setBackgroundColor(color)
+  })
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
   ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.send(id, String(text), submit))
   ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
