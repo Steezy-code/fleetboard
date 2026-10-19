@@ -19,7 +19,8 @@ export interface ScreenView {
   cols?: number
 }
 
-const SCROLLBACK = 2000
+// ~2 MB per console; handoffs and loop judges read at most ~12k characters (about 120 lines)
+const SCROLLBACK = 1000
 
 export class TermScreen {
   private term: InstanceType<typeof xterm.Terminal>
