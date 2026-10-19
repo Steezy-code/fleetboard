@@ -2,6 +2,7 @@ import { useApp, allConsoles } from '../state/store'
 import { runCli, uid } from '../lib/api'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
 import type { ConsoleStatus } from '@shared/types'
+import { stripAnsi } from '@shared/ansi'
 
 // Loops: recurring instructions typed into consoles on a schedule, when an agent goes idle, or when
 // its output matches. Stored per project in extras.loops; run by startLoops() (registered engine).
@@ -161,9 +162,10 @@ const OUTPUT_DEBOUNCE_MS = 30_000
 const IDLE_DEBOUNCE_MS = 8000
 const BUF = 4096
 
-const strip = (s: string) =>
-  // eslint-disable-next-line no-control-regex
-  s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+// TUIs place words with cursor moves (Claude Code: ESC[9G before each word); those become spaces,
+// so a pattern like "tests failed" matches what the user sees
+// eslint-disable-next-line no-control-regex
+const strip = (s: string) => stripAnsi(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 
 const buffers = new Map<string, string>()
 const dataSubs = new Map<string, () => void>()
@@ -182,12 +184,18 @@ function compile(t: Extract<LoopTrigger, { kind: 'output' }>): RegExp | null {
   }
 }
 
-/** Consoles this loop may fire into now: live, not paused, active workspace unless background. */
+/**
+ * Statuses a loop never types into. A console that needs you shows a question: the instruction's
+ * keys would land in it and its Enter would pick the highlighted answer (often "Yes").
+ */
+const NOT_NOW = new Set<ConsoleStatus>(['needs-you', 'starting', 'paused', 'exited', 'done'])
+
+/** Consoles this loop may fire into now: live, not asking or stopped, active workspace unless background. */
 function eligible(l: Loop, ids = loopTargets(l)): string[] {
   const app = useApp.getState()
   const activeId = app.project?.activeWorkspaceId
   const wsOf = new Map(allConsoles().map((c) => [c.id, c.workspaceId]))
-  return ids.filter((id) => isLive(id) && app.statuses[id] !== 'paused' && (l.background || wsOf.get(id) === activeId))
+  return ids.filter((id) => isLive(id) && !NOT_NOW.has(app.statuses[id]) && (l.background || wsOf.get(id) === activeId))
 }
 
 function retire(l: Loop, reason: 'goal' | 'runs' | 'time', note?: string) {
