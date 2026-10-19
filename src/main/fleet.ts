@@ -26,8 +26,15 @@ fs.mkdirSync(treesDir, { recursive: true })
 
 let ctx: MainContext
 let port = 0
-/** this run's secret: team consoles send it as a bearer token to the MCP server */
+/** this run's secret, from which each team console's own bearer token for the MCP server is made */
 const secret = newSecret()
+/**
+ * A member's token: good for that member only. The server takes who is calling from the URL, so one
+ * token for all would let any console that reads its own config call as another (a worker as the Lead).
+ */
+const memberToken = (id: string) => crypto.createHmac('sha256', secret).update(id).digest('base64url')
+/** the most a call may send (a report or a plan is a few KB) */
+const MAX_BODY = 4 * 1024 * 1024
 const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
@@ -215,7 +222,7 @@ export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, st
   const url = `http://127.0.0.1:${port}/mcp/${m.id}`
   const env: Record<string, string> = { MCP_TOOL_TIMEOUT: '600000' }
   if (m.agentId === 'claude') {
-    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: `Bearer ${secret}` } } } }, 0o600)
+    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: `Bearer ${memberToken(m.id)}` } } } }, 0o600)
     const lead = m.leadId ? s.members[m.leadId] : undefined
     const args = ['--mcp-config', mcpFile(m.id), '--append-system-prompt', m.role === 'lead' ? leadPrompt(m) : workerPrompt(m, lead)]
     if (m.role === 'worker') args.push('--permission-mode', 'acceptEdits')
@@ -230,14 +237,14 @@ export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, st
     // the fleet tools never ask the user (Claude Code: --allowedTools mcp__fleet); without this Codex asks
     // "Allow the fleet MCP server to run tool …?" before every report, message and wait
     args.push('-c', 'mcp_servers.fleet.default_tools_approval_mode="approve"')
-    env.FB_MCP_TOKEN = secret
+    env.FB_MCP_TOKEN = memberToken(m.id)
     // edits in its worktree without asking, commands sandboxed (what --full-auto was before Codex dropped it)
     if (m.role === 'worker') args.push(...(agentById('codex')?.editsArgs ?? []))
     return { args, env }
   }
   if (m.agentId === 'gemini') {
     // Gemini takes MCP servers only from settings: a home of its own with the fleet server added
-    env.GEMINI_CLI_HOME = geminiTeamHome(m.id, { url, token: secret }, loginEnvFor)
+    env.GEMINI_CLI_HOME = geminiTeamHome(m.id, { url, token: memberToken(m.id) }, loginEnvFor)
     const args: string[] = []
     if (m.role === 'worker') args.push(...(agentById('gemini')?.editsArgs ?? []))
     // its worktree is a new folder: trusted for this session when the user trusts the project itself
@@ -772,8 +779,14 @@ function startServer(): Promise<number> {
     const server = http.createServer((req, res) => {
       const m = /^\/mcp\/([^/?]+)\/?(?:\?|$)/.exec(req.url ?? '')
       if (!m) return res.writeHead(404).end()
+      let caller = m[1]
+      try {
+        caller = decodeURIComponent(m[1])
+      } catch {
+        /* use as is */
+      }
       const token = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''))?.[1]
-      if (!sameSecret(token, secret) || refuse(req, port, { json: true })) {
+      if (!sameSecret(token, memberToken(caller)) || refuse(req, port, { json: true })) {
         req.resume()
         return res.writeHead(403).end()
       }
@@ -786,19 +799,24 @@ function startServer(): Promise<number> {
       res.on('close', () => {
         if (!res.writableFinished) hangup.abort()
       })
-      req.on('data', (d) => (body += d))
+      let tooBig = false
+      req.on('data', (d) => {
+        if (tooBig) return
+        body += d
+        if (body.length > MAX_BODY) {
+          tooBig = true
+          body = ''
+          res.writeHead(413, { Connection: 'close' }).end()
+          req.resume()
+        }
+      })
       req.on('end', async () => {
+        if (tooBig) return
         let parsed: any
         try {
           parsed = JSON.parse(body)
         } catch {
           return res.writeHead(400).end()
-        }
-        let caller = m[1]
-        try {
-          caller = decodeURIComponent(m[1])
-        } catch {
-          /* use as is */
         }
         const batch = Array.isArray(parsed)
         const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
