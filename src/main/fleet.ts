@@ -736,8 +736,10 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
 async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force' | 'keep') {
   // closed first: the console's exit that follows is expected, not news for the lead
   m.status = 'closed'
-  ctx.ptys.kill(m.id)
   ctx.emit('fleet:removeConsoles', [m.id])
+  // its worktree and Gemini home go once its CLI has ended: one still shutting down would write its
+  // session into them again (Gemini CLI saves on SIGHUP)
+  await ctx.ptys.stop(m.id)
   await removeWorktree(s.projectPath, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
   changed(s)
