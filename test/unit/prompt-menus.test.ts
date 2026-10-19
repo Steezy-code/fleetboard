@@ -7,7 +7,7 @@ import type { Prompt } from '../../src/shared/prompt'
 const prompts = new Map<string, Prompt | null>()
 async function promptAt(file: string, mark: string) {
   if (!prompts.size) {
-    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast']) {
+    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast']) {
       for (const m of (await replay(loadCast(f))).marks) prompts.set(`${f}|${m.mark}`, m.prompt)
     }
   }
@@ -68,6 +68,15 @@ test('Codex: options separated by blank lines, with descriptions', async () => {
   assert.deepEqual(menu(p), ['* Sign in with ChatGPT', 'Sign in with Device Code', 'Provide your own API key'])
   assert.equal(p?.options?.[2].detail, 'Pay for what you use')
   assert.equal((await promptAt('codex-first.cast', 'needs-you: api key'))?.kind, 'enter')
+})
+
+test('Codex: folder trust, answered from the Inbox', async () => {
+  const p = await promptAt('codex-session.cast', 'needs-you: trust folder')
+  assert.deepEqual(menu(p), ['* Trust and continue', 'Quit'])
+  const card = approvalFor(p)
+  assert.deepEqual(buttons(card), ['Trust and continue [allow]', 'Quit [deny]'])
+  assert.deepEqual(answerKeys(p, { option: 'Trust and continue' }), ['\r'])
+  assert.deepEqual(answerKeys(p, { option: 'Quit' }), ['\x1b[B', '\r'])
 })
 
 test('shell: y/n questions and a password', async () => {
