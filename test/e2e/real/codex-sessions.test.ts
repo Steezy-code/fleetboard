@@ -4,11 +4,10 @@
 // (FLEETBOARD_CODEX_CATALOG: an optional model catalog JSON for the mock model).
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
-import fs from 'node:fs'
 import path from 'node:path'
 import { App, makeRepo, makeSandbox } from '../harness'
 import { startMockResponses } from '../../support/mock-responses'
+import { setupCodex, stopCodexDaemons } from './codex-setup'
 
 const CODEX = process.env.FLEETBOARD_REAL_CODEX
 
@@ -16,27 +15,7 @@ test('real Codex: each console resumes its own session after a restart', { skip:
   const mock = await startMockResponses()
   const sb = makeSandbox({ fake: false })
   const repo = makeRepo(sb)
-  fs.writeFileSync(path.join(sb.bin, 'codex'), `#!/bin/sh\nexec "${CODEX}" "$@"\n`, { mode: 0o755 })
-  fs.appendFileSync(path.join(sb.home, '.bash_profile'), 'export MOCK_KEY=mock\n')
-  fs.mkdirSync(path.join(sb.home, '.codex'), { recursive: true })
-  fs.writeFileSync(
-    path.join(sb.home, '.codex', 'config.toml'),
-    [
-      'model = "mock-model"',
-      'model_provider = "mock"',
-      ...(process.env.FLEETBOARD_CODEX_CATALOG ? [`model_catalog_json = ${JSON.stringify(process.env.FLEETBOARD_CODEX_CATALOG)}`] : []),
-      'check_for_update_on_startup = false',
-      '[model_providers.mock]',
-      'name = "Mock"',
-      `base_url = "http://127.0.0.1:${mock.port}/v1"`,
-      'wire_api = "responses"',
-      'env_key = "MOCK_KEY"',
-      `[projects.${JSON.stringify(repo)}]`,
-      'trust_level = "trusted"',
-      '[tui]',
-      'screen_reader_detection_done = true'
-    ].join('\n') + '\n'
-  )
+  setupCodex(sb, repo, CODEX!, mock.port)
   let app = await App.launch({ sandbox: sb })
   const nodeData = (id: string) => app.eval((id) => (window as any).__fleetboard.useApp.getState().project.workspaces.flatMap((w: any) => w.nodes).find((n: any) => n.id === id)?.data, id)
   const tell = async (id: string, text: string) => {
@@ -77,11 +56,6 @@ test('real Codex: each console resumes its own session after a restart', { skip:
     if (process.env.E2E_SHOTS) await app.screenshot(path.join(process.env.E2E_SHOTS, 'real-codex-sessions.png')).catch(() => {})
     await app.close()
     await mock.close()
-    // Codex starts a background app-server of its own; it would outlive the test (and hold its pipes)
-    try {
-      execFileSync('pkill', ['-f', `${sb.home}/.codex/`])
-    } catch {
-      /* none left */
-    }
+    stopCodexDaemons(sb)
   }
 })
