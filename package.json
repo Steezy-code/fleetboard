@@ -11,7 +11,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "postinstall": "electron-rebuild -f -w node-pty",
-    "app": "bin/fleetboard --rebuild"
+    "app": "bin/fleetboard --rebuild",
+    "test": "node --enable-source-maps --import ./test/support/register.mjs --test 'test/unit/**/*.test.ts'"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",

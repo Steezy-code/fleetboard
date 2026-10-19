@@ -1,51 +1,47 @@
 import http from 'node:http'
 import path from 'node:path'
-import type { ConsoleStatus } from '@shared/types'
 import { dirs, writeJsonAtomic } from './paths'
 
 // Claude Code reports its own lifecycle through hooks. Each console's CLI gets a settings file
 // (passed with --settings) whose hooks POST to this local server, so the board shows the CLI's
-// own idea of working / idle / needs-you instead of a guess.
+// own idea of working / idle / needs-you instead of a guess. What each event means for the status
+// lives in status.ts (hookStatus); this only receives them.
 
 let port = 0
-let listener: (id: string, status: ConsoleStatus, event: string) => void = () => {}
+let listener: (id: string, event: string, payload: unknown) => void = () => {}
 
-const EVENT_STATUS: Record<string, ConsoleStatus> = {
-  UserPromptSubmit: 'working',
-  PreToolUse: 'working',
-  PostToolUse: 'working',
-  Notification: 'needs-you',
-  Stop: 'idle',
-  SubagentStop: 'working',
-  SessionEnd: 'done',
-  SessionStart: 'idle'
-}
+/**
+ * Hook events the settings file subscribes to. Only events Claude Code has long supported: a version
+ * that does not know one skips it with a warning. SubagentStop is left out on purpose: it fires for
+ * background helpers after the turn ended and says nothing about the console.
+ */
+export const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PermissionRequest', 'PostToolUse', 'Notification', 'PreCompact', 'Stop', 'SessionEnd']
 
-export function startHookServer(onStatus: typeof listener): Promise<number> {
-  listener = onStatus
+const MAX_BODY = 65536
+
+export function startHookServer(onEvent: typeof listener): Promise<number> {
+  listener = onEvent
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const m = /^\/hook\/([^/]+)\/([A-Za-z]+)/.exec(req.url ?? '')
       let body = ''
-      req.on('data', (d) => (body.length < 65536 ? (body += d) : null))
+      req.on('data', (d) => (body.length < MAX_BODY ? (body += d) : null))
       req.on('end', () => {
         res.writeHead(204).end()
         if (!m || req.method !== 'POST') return
-        let status = EVENT_STATUS[m[2]]
-        if (m[2] === 'Notification') {
-          // Claude sends a Notification both when it needs permission and when it has simply been
-          // idle for a while ("waiting for your input"); only the first means the user is needed.
-          let msg = ''
-          try {
-            const j = JSON.parse(body)
-            msg = `${j.message ?? ''} ${j.notification_type ?? ''}`.toLowerCase()
-          } catch {
-            /* no payload */
-          }
-          if (/waiting for your input|idle/.test(msg)) status = 'idle'
-          else if (msg && !/permission|approv|needs your|confirm/.test(msg)) return
+        let payload: unknown = null
+        try {
+          payload = JSON.parse(body)
+        } catch {
+          /* no payload, or cut off at MAX_BODY: the event name still counts */
         }
-        if (status) listener(decodeURIComponent(m[1]), status, m[2])
+        let id = m[1]
+        try {
+          id = decodeURIComponent(m[1])
+        } catch {
+          /* malformed escape: use it as is */
+        }
+        listener(id, m[2], payload)
       })
     })
     server.listen(0, '127.0.0.1', () => {
@@ -64,8 +60,8 @@ function writeSettingsFile() {
     command: `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
   })
   const hooks: Record<string, unknown[]> = {}
-  for (const event of Object.keys(EVENT_STATUS)) {
-    hooks[event] = [{ ...(event.endsWith('ToolUse') ? { matcher: '*' } : {}), hooks: [cmd(event)] }]
+  for (const event of HOOK_EVENTS) {
+    hooks[event] = [{ ...(event.endsWith('ToolUse') || event === 'PermissionRequest' ? { matcher: '*' } : {}), hooks: [cmd(event)] }]
   }
   writeJsonAtomic(settingsFile(), { hooks })
 }

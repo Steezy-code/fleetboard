@@ -6,41 +6,25 @@ import { loginEnv, shellPath, which } from './env'
 import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
 import { fleetLaunch } from './fleet'
+import { TermScreen, type ScreenView } from './screen'
+import { StatusTracker, answerKeys, detectPrompt, type Prompt } from './status'
+import type { AnswerResult, PromptAnswer } from '@shared/prompt'
+
+/** Pause between keystrokes of an answer: TUIs read one key per input event. */
+const KEY_GAP_MS = 70
 
 const MAX_BUFFER = 400_000
-const WORKING_WINDOW_MS = 2500
-
-// Text that means the agent is blocked on the human. Matched against the tail of the screen.
-const NEEDS_YOU = [
-  /do you want to (proceed|make this edit|create|run|allow)/i,
-  /\b(allow|approve|deny)\b.*\?/i,
-  /\(y\/n\)|\[y\/n\]|\[Y\/n\]|\[y\/N\]/,
-  /press enter to (continue|confirm)/i,
-  /waiting for (your )?(input|approval|confirmation)/i,
-  /❯\s*1\.\s*yes/i,
-  /requires? (your )?(approval|permission)/i,
-  /trust (this|the files in this) folder/i,
-  /enter to confirm/i,
-  /\(esc to cancel\)|esc to cancel/i
-]
 
 interface Session {
   id: string
   agentId: string
   proc: pty.IPty
+  /** raw output, replayed into the board's terminal when its node mounts again */
   buffer: string
-  /** bytes of output ever received, and the count at the last keystroke sent to the CLI */
-  total: number
-  inputMark: number
-  lastOutput: number
-  lastInput: number
-  status: ConsoleStatus
-  /** status reported by the CLI's own hooks wins over heuristics for a while */
-  hookStatus?: { status: ConsoleStatus; at: number }
+  /** what the terminal shows (status, Inbox, handoffs read this, not the raw stream) */
+  screen: TermScreen
+  tracker: StatusTracker
   startedAt: number
-  paused: boolean
-  /** the CLI reported it finished starting (Claude Code SessionStart hook) */
-  ready: boolean
   /** the CLI turned on bracketed paste (ESC[?2004h) */
   bracketed: boolean
 }
@@ -119,33 +103,31 @@ export class PtyManager {
       env
     })
 
+    const startedAt = Date.now()
     const s: Session = {
       id: req.id,
       agentId: req.agentId,
       proc,
       buffer: '',
-      lastOutput: Date.now(),
-      lastInput: 0,
-      total: 0,
-      inputMark: 0,
-      status: 'starting',
-      startedAt: Date.now(),
-      paused: false,
-      ready: false,
+      screen: new TermScreen(Math.max(20, req.cols | 0), Math.max(5, req.rows | 0)),
+      // Claude Code reports through hooks when the hook server is up (claudeHookArgs is non-empty)
+      tracker: new StatusTracker(startedAt, agent?.id === 'claude' && !req.command && claudeHookArgs(req.id).length > 0),
+      startedAt,
       bracketed: false
     }
     this.sessions.set(req.id, s)
 
     proc.onData((data) => {
       s.buffer += data
-      s.total += data.length
       if (data.includes('\x1b[?2004')) s.bracketed = data.lastIndexOf('\x1b[?2004h') > data.lastIndexOf('\x1b[?2004l')
       if (s.buffer.length > MAX_BUFFER) s.buffer = s.buffer.slice(-MAX_BUFFER)
-      s.lastOutput = Date.now()
+      s.screen.write(data)
+      s.tracker.output(Date.now())
       this.emit('pty:data', req.id, data)
     })
     proc.onExit(({ exitCode }) => {
       this.sessions.delete(req.id)
+      s.screen.dispose()
       this.emit('pty:exit', req.id, exitCode)
       this.emit('pty:status', req.id, 'exited')
     })
@@ -153,7 +135,7 @@ export class PtyManager {
   }
 
   private info(s: Session): PtyInfo {
-    return { id: s.id, pid: s.proc.pid, agentId: s.agentId, status: s.status, startedAt: s.startedAt }
+    return { id: s.id, pid: s.proc.pid, agentId: s.agentId, status: s.tracker.status, startedAt: s.startedAt }
   }
 
   write(id: string, data: string) {
@@ -161,10 +143,7 @@ export class PtyManager {
     if (!s) return
     // xterm answers terminal queries (device attributes, cursor position, colors, focus) through the
     // same channel; those replies are not the user typing and must not clear "needs you".
-    if (!TERMINAL_REPLY.test(data)) {
-      s.lastInput = Date.now()
-      s.inputMark = s.total
-    }
+    if (!TERMINAL_REPLY.test(data)) s.tracker.input(Date.now())
     s.proc.write(data)
   }
 
@@ -173,6 +152,7 @@ export class PtyManager {
     if (s && cols > 0 && rows > 0) {
       try {
         s.proc.resize(Math.max(20, cols | 0), Math.max(5, rows | 0))
+        s.screen.resize(Math.max(20, cols | 0), Math.max(5, rows | 0))
       } catch {
         /* process may be exiting */
       }
@@ -182,7 +162,7 @@ export class PtyManager {
   kill(id: string) {
     const s = this.sessions.get(id)
     if (!s) return
-    if (s.paused) this.signal(s, 'SIGCONT')
+    if (s.tracker.paused) this.signal(s, 'SIGCONT')
     try {
       s.proc.kill('SIGHUP')
     } catch {
@@ -213,19 +193,18 @@ export class PtyManager {
 
   pause(id: string) {
     const s = this.sessions.get(id)
-    if (!s || s.paused) return
+    if (!s || s.tracker.paused) return
     this.signal(s, 'SIGSTOP')
-    s.paused = true
-    this.setStatus(s, 'paused')
+    s.tracker.paused = true
+    this.evaluate(s)
   }
 
   resume(id: string) {
     const s = this.sessions.get(id)
-    if (!s || !s.paused) return
+    if (!s || !s.tracker.paused) return
     this.signal(s, 'SIGCONT')
-    s.paused = false
-    s.lastOutput = Date.now()
-    this.setStatus(s, 'working')
+    s.tracker.paused = false
+    this.evaluate(s)
   }
 
   /**
@@ -247,68 +226,72 @@ export class PtyManager {
    */
   readyForInput(id: string): boolean {
     const s = this.sessions.get(id)
-    if (!s || s.paused || s.status !== 'idle') return false
+    if (!s || s.tracker.paused || s.tracker.status !== 'idle') return false
+    const quiet = Date.now() - s.tracker.lastOutput
     // wait for the screen to settle: input typed mid-redraw right after startup can get stuck
-    if (s.agentId === 'claude') return s.ready && Date.now() - s.lastOutput > 1200
-    return Date.now() - s.startedAt > 6000 && Date.now() - s.lastOutput > 2000
+    if (s.tracker.hooked) return s.tracker.ready && quiet > 1200
+    return Date.now() - s.startedAt > 6000 && quiet > 2000
   }
 
   status(id: string): ConsoleStatus | null {
-    return this.sessions.get(id)?.status ?? null
+    return this.sessions.get(id)?.tracker.status ?? null
   }
 
   buffer(id: string) {
     return this.sessions.get(id)?.buffer ?? null
   }
 
-  /** Plain text of the last N characters, for handoffs and loop goal checks. */
+  /** Plain text of what the terminal showed, scrollback included: the last N characters. */
   tail(id: string, chars = 12000) {
-    const b = this.sessions.get(id)?.buffer
-    return b ? stripAnsi(b.slice(-chars * 3)).slice(-chars) : ''
+    return this.sessions.get(id)?.screen.text(chars) ?? ''
+  }
+
+  /**
+   * Answer the prompt on screen. Re-read from the live screen first, so a stale Inbox card never
+   * types into a console whose question was already answered in its terminal.
+   */
+  async answer(id: string, answer: PromptAnswer): Promise<AnswerResult> {
+    const s = this.sessions.get(id)
+    if (!s) return { ok: false, reason: 'not-live' }
+    await s.screen.flush()
+    const keys = answerKeys(detectPrompt(s.screen.view()), answer, s.screen.appCursorKeys)
+    if (!Array.isArray(keys)) return keys
+    for (const [i, k] of keys.entries()) {
+      if (i) await new Promise((r) => setTimeout(r, KEY_GAP_MS))
+      if (!this.sessions.has(id)) return { ok: false, reason: 'not-live' }
+      this.write(id, k)
+    }
+    return { ok: true }
+  }
+
+  /** The visible screen and the prompt on it, if the CLI is asking something. */
+  screen(id: string): { view: ScreenView; prompt: Prompt | null } | null {
+    const s = this.sessions.get(id)
+    if (!s) return null
+    const view = s.screen.view()
+    return { view, prompt: detectPrompt(view) }
   }
 
   list(): PtyInfo[] {
     return [...this.sessions.values()].map((s) => this.info(s))
   }
 
-  /** Status pushed by Claude Code hooks (see hooks.ts). */
-  hook(id: string, status: ConsoleStatus, event?: string) {
+  /** An event from Claude Code's hooks (see hooks.ts). */
+  hook(id: string, event: string, payload: unknown) {
     const s = this.sessions.get(id)
     if (!s) return
-    if (event === 'SessionStart' || event === 'UserPromptSubmit' || event === 'Stop') s.ready = true
-    s.hookStatus = { status, at: Date.now() }
-    this.setStatus(s, status)
+    s.tracker.hookEvent(event, payload, Date.now())
+    this.evaluate(s)
   }
 
-  private setStatus(s: Session, status: ConsoleStatus) {
-    if (s.status === status) return
-    s.status = status
-    this.emit('pty:status', s.id, status)
+  private evaluate(s: Session) {
+    const prev = s.tracker.status
+    const next = s.tracker.evaluate(Date.now(), detectPrompt(s.screen.view()))
+    if (next !== prev) this.emit('pty:status', s.id, next)
   }
 
   private refreshStatuses() {
-    const now = Date.now()
-    for (const s of this.sessions.values()) {
-      if (s.paused) continue
-      // Only output since the last keystroke counts: once you answer a prompt, its text no longer
-      // means the agent is blocked, even while it is still in the recent scrollback.
-      const fresh = Math.min(s.total - s.inputMark, s.buffer.length, 6000)
-      const screen = fresh > 0 ? stripAnsi(s.buffer.slice(-fresh)).slice(-1600) : ''
-      const blocked = NEEDS_YOU.some((re) => re.test(screen))
-      // A hook report stays authoritative until new output arrives after it.
-      if (s.hookStatus && s.lastOutput - s.hookStatus.at < 1500 && s.hookStatus.status !== 'working') {
-        if (blocked && s.hookStatus.status !== 'needs-you') this.setStatus(s, 'needs-you')
-        continue
-      }
-      // Output that is only an echo of the user's typing is not "working".
-      const echo = s.lastOutput - s.lastInput < 250
-      let next: ConsoleStatus
-      if (blocked) next = 'needs-you'
-      else if (now - s.lastOutput < WORKING_WINDOW_MS && !echo) next = 'working'
-      else if (now - s.startedAt < 4000) next = 'starting'
-      else next = 'idle'
-      this.setStatus(s, next)
-    }
+    for (const s of this.sessions.values()) this.evaluate(s)
   }
 
   dispose() {
