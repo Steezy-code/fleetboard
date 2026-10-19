@@ -3,7 +3,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { TermScreen } from '../../src/main/screen'
-import { StatusTracker, detectPrompt, type Prompt } from '../../src/main/status'
+import { StatusTracker, TERMINAL_REPLY, detectPrompt, type Prompt } from '../../src/main/status'
 import type { ConsoleStatus } from '../../src/shared/types'
 
 export const CASTS = path.join(import.meta.dirname, '../fixtures/casts')
@@ -60,7 +60,8 @@ export async function replay(cast: Cast, opts: { hooked?: boolean; tick?: number
       await screen.flush()
       tracker.output(e.t)
     } else if (e.kind === 'i') {
-      tracker.input(e.t)
+      // as the app does: the terminal's own answers to queries are not typing
+      if (!TERMINAL_REPLY.test(e.data)) tracker.input(e.t)
     } else if (e.kind === 'h' && !opts.ignoreHooks) {
       tracker.hookEvent(e.data[0], e.data[1], e.t)
     } else if (e.kind === 'm') {

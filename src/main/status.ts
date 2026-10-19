@@ -304,6 +304,12 @@ export const ACTIVE_WINDOW_MS = 3000
 export const QUIET_MS = 2000
 /** Chunks in the activity window that mean a hooked CLI started a turn by itself after stopping. */
 export const SUSTAINED_CHUNKS = 12
+/**
+ * What a terminal sends back on its own (answers to the CLI's queries: device attributes, cursor
+ * position, colors, focus): not the user typing, so it never clears "needs you".
+ */
+export const TERMINAL_REPLY = /^(?:\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d*n|\x1b\[[IO]|\x1bP[\s\S]*?\x1b\\|\x1b\][\s\S]*?(?:\x07|\x1b\\))+$/
+
 /** A CLI is "starting" this long after launch unless it says otherwise. */
 export const STARTING_MS = 4000
 /** Without any hook, a hooked CLI stops counting as starting after this long. */
