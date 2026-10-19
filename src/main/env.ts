@@ -23,6 +23,9 @@ export async function loginEnv(): Promise<Record<string, string>> {
   } catch {
     // fall back to the process env
   }
+  // Launched from inside a Claude Code session (or another agent), the parent's session variables
+  // would leak into every console and change how those CLIs behave. Start them clean.
+  for (const k of Object.keys(base)) if (/^(CLAUDECODE|CLAUDE_CODE_|CODEX_SANDBOX|GEMINI_CLI_)/.test(k)) delete base[k]
   base.TERM = 'xterm-256color'
   base.COLORTERM = 'truecolor'
   base.TERM_PROGRAM = 'Fleetboard'

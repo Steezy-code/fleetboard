@@ -59,6 +59,7 @@ export interface SpawnOptions {
   names?: string[]
   group?: { name: string; role: Role } | string
   autoApprove?: boolean
+  acceptEdits?: boolean
   profileId?: string
   /** first message typed into each new console once it is ready */
   initialPrompt?: string
@@ -95,6 +96,7 @@ export function spawnConsoles(opts: SpawnOptions = {}): string[] {
       name,
       cwd: project.path,
       autoApprove: opts.autoApprove,
+      acceptEdits: opts.acceptEdits,
       profileId: opts.profileId,
       launch: 'fresh',
       createdAt: Date.now()
@@ -125,6 +127,7 @@ export async function startConsole(node: BoardNode<ConsoleData>, cols: number, r
     rows,
     resume,
     autoApprove: node.data.autoApprove,
+    acceptEdits: node.data.acceptEdits,
     profileId: node.data.profileId,
     extraArgs: node.data.extraArgs,
     command: (node.data as any).command

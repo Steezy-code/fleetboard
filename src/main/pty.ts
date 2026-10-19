@@ -28,6 +28,9 @@ interface Session {
   agentId: string
   proc: pty.IPty
   buffer: string
+  /** bytes of output ever received, and the count at the last keystroke sent to the CLI */
+  total: number
+  inputMark: number
   lastOutput: number
   lastInput: number
   status: ConsoleStatus
@@ -42,6 +45,7 @@ const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][0-9
 export const stripAnsi = (s: string) =>
   s
     .replace(/\x1b\[(\d*)C/g, (_m, n) => ' '.repeat(Math.min(200, Number(n || 1))))
+    .replace(/\x1b\[\d*G/g, ' ')
     .replace(/\x1b\[\d+;\d+H/g, '\n')
     .replace(ANSI, '')
     .replace(/\r/g, '')
@@ -57,8 +61,12 @@ export class PtyManager {
   }
 
   private emit(channel: string, ...args: unknown[]) {
-    const wc = this.wc()
-    if (wc && !wc.isDestroyed()) wc.send(channel, ...args)
+    try {
+      const wc = this.wc()
+      if (wc && !wc.isDestroyed()) wc.send(channel, ...args)
+    } catch {
+      // window closing: drop the event
+    }
   }
 
   async spawn(req: PtySpawnRequest): Promise<PtyInfo> {
@@ -82,7 +90,9 @@ export class PtyManager {
       file = (await which(agent.bin)) ?? agent.bin
       args = [...(agent.args ?? [])]
       if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
-      if ((req.autoApprove ?? settings.autoApprove) && agent.yoloArgs) args.push(...agent.yoloArgs)
+      const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
+      if (yolo) args.push(...agent.yoloArgs!)
+      else if (req.acceptEdits && agent.editsArgs) args.push(...agent.editsArgs)
       if (agent.id === 'claude') args.push(...claudeHookArgs(req.id))
       if (req.extraArgs?.length) args.push(...req.extraArgs)
     }
@@ -102,6 +112,8 @@ export class PtyManager {
       buffer: '',
       lastOutput: Date.now(),
       lastInput: 0,
+      total: 0,
+      inputMark: 0,
       status: 'starting',
       startedAt: Date.now(),
       paused: false
@@ -110,6 +122,7 @@ export class PtyManager {
 
     proc.onData((data) => {
       s.buffer += data
+      s.total += data.length
       if (s.buffer.length > MAX_BUFFER) s.buffer = s.buffer.slice(-MAX_BUFFER)
       s.lastOutput = Date.now()
       this.emit('pty:data', req.id, data)
@@ -130,6 +143,7 @@ export class PtyManager {
     const s = this.sessions.get(id)
     if (!s) return
     s.lastInput = Date.now()
+    s.inputMark = s.total
     s.proc.write(data)
   }
 
@@ -225,7 +239,10 @@ export class PtyManager {
     const now = Date.now()
     for (const s of this.sessions.values()) {
       if (s.paused) continue
-      const screen = stripAnsi(s.buffer.slice(-6000)).slice(-1600)
+      // Only output since the last keystroke counts: once you answer a prompt, its text no longer
+      // means the agent is blocked, even while it is still in the recent scrollback.
+      const fresh = Math.min(s.total - s.inputMark, s.buffer.length, 6000)
+      const screen = fresh > 0 ? stripAnsi(s.buffer.slice(-fresh)).slice(-1600) : ''
       const blocked = NEEDS_YOU.some((re) => re.test(screen))
       // A hook report stays authoritative until new output arrives after it.
       if (s.hookStatus && s.lastOutput - s.hookStatus.at < 1500 && s.hookStatus.status !== 'working') {

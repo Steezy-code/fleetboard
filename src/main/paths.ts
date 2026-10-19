@@ -2,7 +2,8 @@ import os from 'node:os'
 import path from 'node:path'
 import fs from 'node:fs'
 
-export const ROOT = path.join(os.homedir(), '.fleetboard')
+// FLEETBOARD_HOME lets a second instance (demos, tests) keep its own state.
+export const ROOT = process.env.FLEETBOARD_HOME || path.join(os.homedir(), '.fleetboard')
 export const dirs = {
   root: ROOT,
   projects: path.join(ROOT, 'projects'),

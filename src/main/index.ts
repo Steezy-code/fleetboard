@@ -21,14 +21,16 @@ app.setName('Fleetboard')
 // fbfile:///abs/path serves local files (images, PDFs) to the renderer, which runs on http in dev.
 protocol.registerSchemesAsPrivileged([{ scheme: 'fbfile', privileges: { standard: false, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }])
 
-const ptys = new PtyManager(() => win?.webContents ?? null, store.getSettings)
+// Output can still arrive while the window is being torn down; never touch a destroyed one.
+const liveContents = () => (win && !win.isDestroyed() && !win.webContents.isDestroyed() ? win.webContents : null)
+const ptys = new PtyManager(liveContents, store.getSettings)
 const ctx: MainContext = {
   ipc: ipcMain,
   win: () => win,
   ptys,
   settings: store.getSettings,
   emit: (channel, ...args) => {
-    if (win && !win.isDestroyed()) win.webContents.send(channel, ...args)
+    liveContents()?.send(channel, ...args)
   }
 }
 
@@ -63,6 +65,9 @@ function createWindow() {
     e.preventDefault()
     if (/^https?:\/\//.test(url)) shell.openExternal(url)
   })
+  win.on('closed', () => {
+    win = null
+  })
   win.on('close', (e) => {
     if (quitConfirmed || ptys.size === 0) return
     e.preventDefault()
@@ -86,7 +91,10 @@ function registerCore() {
   ipcMain.handle('app:quit', () => {
     quitConfirmed = true
     ptys.dispose()
-    app.quit()
+    // the board is already saved; don't let a slow child process keep the app alive
+    win?.destroy()
+    win = null
+    setTimeout(() => app.exit(0), 300)
   })
   ipcMain.handle('app:paths', () => ({ root: dirs.root, home: app.getPath('home'), assets: dirs.assets }))
   ipcMain.handle('win:minimize', () => win?.minimize())

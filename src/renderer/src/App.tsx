@@ -13,6 +13,7 @@ import { Overlays } from './ui/Overlays'
 import { DRAWERS, PANELS } from './panels/registry'
 import { BoardOverlays } from './board/BoardOverlays'
 import './features'
+import './debug'
 
 export function App() {
   const project = useApp((s) => s.project)

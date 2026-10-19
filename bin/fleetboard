@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Launch Fleetboard (builds once if needed). Pass --rebuild to force a fresh build.
+# Launch Fleetboard. Rebuilds first when the source is newer than the last build (or with --rebuild).
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")/.."
-if [[ "${1:-}" == "--rebuild" || ! -f out/main/index.js ]]; then
-  [[ "${1:-}" == "--rebuild" ]] && shift
+# desktop launchers often start without the user's node on PATH
+export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
+rebuild=0
+[[ "${1:-}" == "--rebuild" ]] && { rebuild=1; shift; }
+[[ -f out/main/index.js ]] || rebuild=1
+if [[ $rebuild == 0 ]] && [[ -n "$(find src -newer out/main/index.js -type f -print -quit)" ]]; then rebuild=1; fi
+# never rebuild under a running instance: it would delete files that window still loads
+if [[ $rebuild == 1 ]] && ! pgrep -f "electron/dist/electron \.$" >/dev/null && ! pgrep -f "node_modules/.bin/electron \.$" >/dev/null; then
   npx electron-vite build >/dev/null
 fi
 exec ./node_modules/.bin/electron . "$@"

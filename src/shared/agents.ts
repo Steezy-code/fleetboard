@@ -6,18 +6,18 @@ import type { AgentDef } from './types'
 export const AGENTS: AgentDef[] = [
   {
     id: 'claude', name: 'Claude Code', vendor: 'Anthropic', bin: 'claude', color: '#d97757',
-    resumeArgs: ['--continue'], yoloArgs: ['--dangerously-skip-permissions'], configEnv: 'CLAUDE_CONFIG_DIR',
+    resumeArgs: ['--continue'], yoloArgs: ['--dangerously-skip-permissions'], editsArgs: ['--permission-mode', 'acceptEdits'], configEnv: 'CLAUDE_CONFIG_DIR',
     headless: (p) => ['-p', p], homepage: 'https://claude.com/product/claude-code',
     install: 'npm i -g @anthropic-ai/claude-code'
   },
   {
     id: 'codex', name: 'Codex', vendor: 'OpenAI', bin: 'codex', color: '#6b7cff',
-    resumeArgs: ['resume', '--last'], yoloArgs: ['--dangerously-bypass-approvals-and-sandbox'], configEnv: 'CODEX_HOME',
+    resumeArgs: ['resume', '--last'], yoloArgs: ['--dangerously-bypass-approvals-and-sandbox'], editsArgs: ['--full-auto'], configEnv: 'CODEX_HOME',
     headless: (p) => ['exec', '--skip-git-repo-check', p], homepage: 'https://openai.com/codex/', install: 'npm i -g @openai/codex'
   },
   {
     id: 'gemini', name: 'Gemini CLI', vendor: 'Google', bin: 'gemini', color: '#4f8df7',
-    resumeArgs: ['--resume', 'latest'], yoloArgs: ['--yolo'], headless: (p) => ['-p', p],
+    resumeArgs: ['--resume', 'latest'], yoloArgs: ['--yolo'], editsArgs: ['--approval-mode', 'auto_edit'], headless: (p) => ['-p', p],
     homepage: 'https://github.com/google-gemini/gemini-cli', install: 'npm i -g @google/gemini-cli'
   },
   { id: 'grok', name: 'Grok', vendor: 'xAI', bin: 'grok', color: '#e5e5e5', headless: (p) => ['-p', p], homepage: 'https://x.ai/' },

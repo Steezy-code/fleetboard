@@ -237,6 +237,7 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
       )}
       <span className="node-sub">{agentLabel(node.data.agentId)}</span>
       {yolo && agentById(node.data.agentId)?.yoloArgs && <span className="pill yolo">yolo</span>}
+      {!yolo && node.data.acceptEdits && agentById(node.data.agentId)?.editsArgs && <span className="pill">edits</span>}
       <span className="spacer" />
       <span className="status-pill">
         <span className="status-dot" />

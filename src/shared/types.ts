@@ -141,6 +141,8 @@ export interface ConsoleData {
   cwd: string
   profileId?: string
   autoApprove?: boolean
+  /** auto-accept file edits but keep asking before commands (agents with editsArgs) */
+  acceptEdits?: boolean
   extraArgs?: string[]
   /** true while the console had a live process when the board was last saved */
   wasRunning?: boolean
@@ -158,6 +160,8 @@ export interface AgentDef {
   vendor: string
   resumeArgs?: string[]
   yoloArgs?: string[]
+  /** middle permission level: file edits are auto-accepted, commands still ask */
+  editsArgs?: string[]
   /** env var the CLI reads to move its config dir (enables profiles) */
   configEnv?: string
   /** supports headless one-shot prompts */
@@ -180,6 +184,8 @@ export interface PtySpawnRequest {
   rows: number
   resume?: boolean
   autoApprove?: boolean
+  /** auto-accept file edits but keep asking before commands (agents with editsArgs) */
+  acceptEdits?: boolean
   profileId?: string
   extraArgs?: string[]
   /** shell command used by the custom agent */

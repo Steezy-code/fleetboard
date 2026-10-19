@@ -5,7 +5,7 @@ import { ROLES, ROLE_TINT } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, spawnConsoles } from '../engine/consoles'
-import { Modal, Switch } from '../ui/Modal'
+import { Modal, Seg } from '../ui/Modal'
 import { useInstalledAgents } from '../orchestration/fleet'
 
 const MAX = 12
@@ -22,7 +22,7 @@ export default function ComposerPanel({ count: initialCount, agentId }: { count?
   const [count, setCount] = useState(Math.min(MAX, Math.max(1, initialCount ?? 4)))
   const [slots, setSlots] = useState<string[]>(() => Array.from({ length: MAX }, () => first))
   const [prompt, setPrompt] = useState('')
-  const [yolo, setYolo] = useState(settings.autoApprove)
+  const [perm, setPerm] = useState<'ask' | 'edits' | 'yolo'>(settings.autoApprove ? 'yolo' : 'ask')
   const [picker, setPicker] = useState<number | null>(null)
 
   // agents detection may land after the panel opens
@@ -33,6 +33,7 @@ export default function ComposerPanel({ count: initialCount, agentId }: { count?
 
   const chosen = slots.slice(0, count)
   const anyYolo = chosen.some((a) => agentById(a, settings.customAgents)?.yoloArgs)
+  const anyEdits = chosen.some((a) => agentById(a, settings.customAgents)?.editsArgs)
 
   const pickRole = (r: Role) => {
     setRole(r)
@@ -44,7 +45,8 @@ export default function ComposerPanel({ count: initialCount, agentId }: { count?
       agents: chosen,
       group: { name: name.trim() || 'Team', role },
       initialPrompt: prompt.trim() || undefined,
-      autoApprove: yolo
+      autoApprove: perm === 'yolo',
+      acceptEdits: perm === 'edits'
     })
     const app = useApp.getState()
     app.closePanel()
@@ -171,12 +173,28 @@ export default function ComposerPanel({ count: initialCount, agentId }: { count?
         <div className="settings-rows" style={{ marginTop: 14 }}>
           <div className="settings-row">
             <div className="grow">
-              <div>Auto-approve</div>
+              <div>Permissions</div>
               <div className="muted small">
-                {anyYolo ? 'Agents start with their auto-approval flag and stop asking before edits or commands.' : 'None of the chosen agents has an auto-approval flag.'}
+                {perm === 'ask'
+                  ? 'Agents ask before every edit and command. You approve each one from the board.'
+                  : perm === 'edits'
+                    ? anyEdits
+                      ? 'File edits are accepted automatically; running commands still asks you. A good default for scoped tasks.'
+                      : 'None of the chosen agents has an accept-edits mode; they will ask as usual.'
+                    : anyYolo
+                      ? 'Agents stop asking before edits or commands. Use only on a branch or worktree you can throw away.'
+                      : 'None of the chosen agents has an auto-approval flag.'}
               </div>
             </div>
-            <Switch on={yolo} onChange={setYolo} />
+            <Seg<'ask' | 'edits' | 'yolo'>
+              value={perm}
+              options={[
+                { value: 'ask', label: 'Ask' },
+                { value: 'edits', label: 'Accept edits' },
+                { value: 'yolo', label: 'Auto-approve' }
+              ]}
+              onChange={setPerm}
+            />
           </div>
         </div>
       </div>
