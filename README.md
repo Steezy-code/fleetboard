@@ -91,11 +91,15 @@ Agents wait while you're away from the desk. **Settings → Phone Inbox** serves
 
 The **Morning sweep** (also on the home screen) checks every repo under `~/code`, `~/Github`, … without changing anything: uncommitted work and how old it is, open PRs and their review state, CI on the default branch, stale branches, upstream drift, the next PLAN.md item. *Brief me* turns it into a short morning brief.
 
-## CI watcher
+## CI and review watcher
 
 With the GitHub CLI signed in (`gh auth login`), the badge next to the branch name shows the open repo's GitHub Actions: **CI passing**, **running** or **failing**, plus how many open PRs are red. It checks every minute (every 20s while something is running) and tells you when a run turns red or goes green again, with a desktop notification when Fleetboard isn't in front.
 
 Click the badge for the CI drawer: the latest run of each workflow on your branch and every open PR's checks. On anything red, **Failed log** shows where it failed, and **Fix it** starts a *CI fixer* console with that log, told to fix the cause (never by weakening a test), run the checks locally and push. A PR on another branch gets its own git worktree, so your checkout isn't touched. Switch on **Fix failures automatically** to have that happen on its own whenever a run turns red.
+
+Review comments are watched too (every two minutes): PR comments, review summaries and inline comments on unresolved threads. When new ones land on a PR an agent made (a team's branch, or one Fleetboard already sent an agent to), they go straight to that agent: its Lead or console if it's still running, otherwise a new *PR #N fixer* console in that branch. The agent is told to address each point, push, and reply on the PR starting with 🤖, so its replies are never sent back to it. Comments on other PRs only notify you; the drawer has **Send to …** and **Mark handled** for those. A CI failure on a PR with an agent on it goes to that agent as well. Bots' plain comments (deploy previews, coverage), bare approvals and resolved threads are left out.
+
+Helm sees all of this. Ask "what needs me?" or "what should I work on?" and it weighs open questions, red CI, unsent review comments and PRs waiting on you (plus the last morning sweep of your other repos), then offers one-click **Fix CI** / **Send the comments** options.
 
 ## Navigation (AutoCAD-style by default)
 

@@ -246,6 +246,7 @@ export const PANEL_ALIASES: Record<string, { name: string; drawer?: boolean }> =
   settings: { name: 'settings' }, preferences: { name: 'settings' }, presets: { name: 'presets' }, composer: { name: 'composer' },
   skills: { name: 'skills' }, handoff: { name: 'handoff' }, spawn: { name: 'spawn' },
   orchestrator: { name: 'orchestrator', drawer: true }, git: { name: 'git', drawer: true }, accounts: { name: 'accounts', drawer: true },
+  ci: { name: 'ci', drawer: true }, reviews: { name: 'ci', drawer: true }, checks: { name: 'ci', drawer: true },
   profiles: { name: 'accounts', drawer: true }, chat: { name: 'chat', drawer: true }, thread: { name: 'chat', drawer: true }
 }
 

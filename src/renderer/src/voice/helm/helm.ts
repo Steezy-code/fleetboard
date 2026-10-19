@@ -11,10 +11,12 @@ import { type Action, coerceAction, describe, resolveRefs } from '../actions'
 import { setVoice, useThread, useVoice } from '../thread'
 import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planner'
 import { boardContext, playbookCatalog } from './context'
+import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
+import { routeFeedback, useFeedback } from '../../workbench/prFeedback'
 
 // ---------------------------------------------------------------- types / store
 
-export type HelmKind = 'playbook' | 'team' | 'send' | 'actions' | 'answer' | 'panel'
+export type HelmKind = 'playbook' | 'team' | 'send' | 'actions' | 'answer' | 'panel' | 'github'
 
 export interface HelmOption {
   label: string
@@ -27,6 +29,8 @@ export interface HelmOption {
   submit?: boolean
   actions?: Action[]
   panel?: string
+  /** fix a red CI run / give a PR's review comments to its agent; target is "branch" or "pr:<number>" */
+  github?: { do: 'fix-ci' | 'send-feedback'; target: string }
 }
 
 export interface HelmResult {
@@ -57,7 +61,7 @@ export const useHelm = create<HelmState>(() => ({ card: null, thinking: false, d
 
 export const dismissHelm = () => useHelm.setState({ card: null })
 
-export const HELM_PANELS = ['missionMap', 'loops', 'memory', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
+export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
 
 /** Read-only playbooks Helm may start without a click. */
 const AUTO_PLAYBOOKS = ['morning-sweep', 'pr-review', 'db-safety']
@@ -75,7 +79,9 @@ Option shapes ("label": button text, 2-5 words; "detail": one line on what it do
 - {"kind":"team","label":"...","detail":"...","goal":"<clear, self-contained goal for the Lead>"}  custom multi-step work that no playbook fits; goes to the active lead if there is one, otherwise starts a new Lead.
 - {"kind":"send","label":"...","detail":"...","targets":["<exact console name>"],"text":"<message typed into that console>","submit":true}  message an agent already on the board; submit false only types it (the user presses Enter).
 - {"kind":"actions","label":"...","detail":"...","actions":[<board actions>]}  board operations (schema below).
-- {"kind":"panel","label":"...","detail":"...","panel":"missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|sweep|presets|git|chat|orchestrator"}
+- {"kind":"github","label":"...","detail":"...","github":{"do":"fix-ci","target":"branch|pr:<number>"}}  send an agent to fix a red CI run on this branch or on a PR, with the failed log (a PR's own agent gets it when it has one).
+- {"kind":"github","label":"...","detail":"...","github":{"do":"send-feedback","target":"pr:<number>"}}  give a PR's review comments to the agent that made it (or a new console in that branch).
+- {"kind":"panel","label":"...","detail":"...","panel":"ci|missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|sweep|presets|git|chat|orchestrator"}  (ci = the CI & reviews drawer)
 - {"kind":"answer"}  no button: the answer is the reply itself.
 
 ${ACTION_SCHEMA}
@@ -83,6 +89,8 @@ ${ACTION_SCHEMA}
 Rules:
 - reply: plain spoken English, no markdown, lists, ids or file dumps. Say what you found or what you suggest.
 - Questions about the board, the team or the work ("who needs me?", "what is Maya doing?", "did the tests pass?") → answer directly in "reply" from the snapshot (console output, statuses, plan, questions); options empty or one useful follow-up.
+- CI, PRs and reviews ("is CI green?", "any review comments?", "why is the build red?") → answer from CI AND PULL REQUESTS; offer a "github" option when something is red or has unsent comments.
+- "What should I work on?" / "what needs me?" → weigh, in order: questions waiting for the user, red CI, review comments not yet sent, changes requested, approved PRs to merge, PRs waiting on review, then OTHER REPOS from the morning sweep and the next plan item. Name the top 2-3 concretely, and give each one you can act on as an option (a "github" option for red CI or unsent review comments).
 - Prefer a playbook when one fits. Prefer "send" to an existing console when an agent on the board is already working on that thing or owns that area. Use "team" for custom multi-step work no playbook fits.
 - Only use console names, playbook ids and panels that exist. Never add kill/close/delete steps the user did not ask for.
 - At most 3 options, best first, each meaningfully different. Leave options empty when the reply fully answers.
@@ -101,13 +109,13 @@ User request: ${JSON.stringify(text)}`
 
 const str = (v: any, n = 2000) => (typeof v === 'string' ? v.trim().slice(0, n) : v == null ? '' : String(v).trim().slice(0, n))
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
-const KINDS: HelmKind[] = ['playbook', 'team', 'send', 'actions', 'answer', 'panel']
+const KINDS: HelmKind[] = ['playbook', 'team', 'send', 'actions', 'answer', 'panel', 'github']
 
 function coerceOption(raw: any): HelmOption | null {
   if (!raw || typeof raw !== 'object') return null
   let kind = str(raw.kind).toLowerCase() as HelmKind
   if (!KINDS.includes(kind)) {
-    kind = raw.playbook ? 'playbook' : raw.goal ? 'team' : raw.text && raw.targets ? 'send' : Array.isArray(raw.actions) ? 'actions' : raw.panel ? 'panel' : 'answer'
+    kind = raw.github ? 'github' : raw.playbook ? 'playbook' : raw.goal ? 'team' : raw.text && raw.targets ? 'send' : Array.isArray(raw.actions) ? 'actions' : raw.panel ? 'panel' : 'answer'
   }
   const label = clip(str(raw.label, 200), 48)
   const detail = clip(str(raw.detail, 400), 140)
@@ -150,9 +158,29 @@ function coerceOption(raw: any): HelmOption | null {
       if (!panel) return null
       return { kind, label: label || `Open ${panel}`, detail, panel }
     }
+    case 'github': {
+      const g = raw.github ?? {}
+      const what = str(g.do).toLowerCase()
+      const target = str(g.target ?? g.pr ?? 'branch').toLowerCase().replace(/^#/, 'pr:').replace(/^(\d+)$/, 'pr:$1')
+      if (what !== 'fix-ci' && what !== 'send-feedback') return null
+      if (!githubTarget(what, target)) return null
+      const fallback = what === 'fix-ci' ? (target === 'branch' ? 'Fix CI' : `Fix CI on PR #${target.slice(3)}`) : `Send PR #${target.slice(3)} comments`
+      return { kind, label: label || fallback, detail, github: { do: what, target } }
+    }
     case 'answer':
       return { kind, label, detail }
   }
+}
+
+/** The CI item or PR an option points at, when it (still) exists. */
+function githubTarget(what: string, target: string) {
+  if (what === 'fix-ci') {
+    const items = ciItems(useCi.getState().status).filter((i) => i.state === 'failing')
+    return target === 'branch' ? items.find((i) => i.run) : items.find((i) => i.key === target)
+  }
+  const fb = useFeedback.getState().result
+  const n = Number(target.replace(/^pr:/, ''))
+  return fb?.ok ? fb.prs.find((p) => p.number === n && p.comments.length) : undefined
 }
 
 /** Can this option run without a click? (enforced here, whatever the model said) */
@@ -311,6 +339,13 @@ async function execOption(o: HelmOption, request: string) {
         return await plan(o.actions!, '', request, false)
       case 'panel':
         return await plan([{ type: 'openPanel', name: o.panel! }], '', request, false)
+      case 'github': {
+        const t = githubTarget(o.github!.do, o.github!.target)
+        if (!t) throw new Error('that is no longer red or waiting')
+        if (o.github!.do === 'fix-ci') await fixCi(t as ReturnType<typeof ciItems>[number])
+        else await routeFeedback(t as any)
+        return
+      }
       case 'answer':
         return
     }
