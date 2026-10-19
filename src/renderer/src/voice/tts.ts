@@ -86,6 +86,21 @@ function end(id: number) {
   if (id === current) setVoice({ speaking: false })
 }
 
+/**
+ * Turn text into audio with the on-device voice, without playing it. Null while the model isn't
+ * loaded yet or when synthesis fails (callers fall back to the system voice).
+ */
+export async function synthesize(text: string): Promise<{ audio: Float32Array; rate: number } | null> {
+  const w = getWorker()
+  if (!w || !ready) return null
+  const rid = ++reqId
+  return new Promise((resolve) => {
+    waiting.set(rid, resolve)
+    w.postMessage({ type: 'speak', id: rid, text: text.slice(0, 600), voice: useApp.getState().settings.voiceName || 'af_heart' })
+  })
+}
+export const ttsReady = () => ready
+
 /** Speak a short reply. Resolves when playback starts (or immediately when speech is off). */
 export async function speak(text: string) {
   const t = text.trim()
@@ -97,11 +112,7 @@ export async function speak(text: string) {
   const w = getWorker()
   if (!w || !ready) return systemSpeak(t, id)
   setVoice({ speaking: true })
-  const rid = ++reqId
-  const result = await new Promise<{ audio: Float32Array; rate: number } | null>((resolve) => {
-    waiting.set(rid, resolve)
-    w.postMessage({ type: 'speak', id: rid, text: t.slice(0, 600), voice: useApp.getState().settings.voiceName || 'af_heart' })
-  })
+  const result = await synthesize(t)
   if (id !== current) return
   if (!result) return systemSpeak(t, id)
   try {

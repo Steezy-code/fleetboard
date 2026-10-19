@@ -18,7 +18,10 @@ import { dirs } from './paths'
 let win: BrowserWindow | null = null
 let quitConfirmed = false
 
-app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
+// On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
+// with these flags (Vulkan backend). Without an adapter the models fall back to slower CPU wasm.
+app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,Vulkan')
+app.commandLine.appendSwitch('enable-unsafe-webgpu')
 app.setName('Fleetboard')
 // fbfile:///abs/path serves local files (images, PDFs) to the renderer, which runs on http in dev.
 protocol.registerSchemesAsPrivileged([{ scheme: 'fbfile', privileges: { standard: false, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }])
