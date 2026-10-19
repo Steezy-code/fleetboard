@@ -46,6 +46,7 @@ test("a team console's home: the user's files linked in, their settings plus the
   removeGeminiTeamHome('con_ada')
   assert.equal(fs.existsSync(h), false)
   assert.ok(fs.existsSync(path.join(real, 'oauth_creds.json')), 'removing it leaves the real files alone')
+  assert.ok(fs.existsSync(path.join(real, 'tmp', 'proj', 'chats')), "the user's sessions, reached through a link, are not deleted with it")
 })
 
 test('without any Gemini setup yet, the home holds just the fleet server', () => {
