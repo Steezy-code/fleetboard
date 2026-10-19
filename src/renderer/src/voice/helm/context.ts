@@ -1,6 +1,7 @@
 // Helm's view of the board: a compact plain-text snapshot of the open project (git, workspaces,
-// every console with a short output tail, the team, board content, installed agents) that fits in
-// one headless prompt. Console tails share whatever room is left after the rest.
+// every console with a short output tail, the team, board content, installed agents, CI and pull
+// requests, the last morning sweep of the user's other repos) that fits in one headless prompt.
+// Console tails share whatever room is left after the rest.
 import type { BoardNode, ConsoleStatus, Workspace } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { invoke, relPath } from '../../lib/api'
@@ -10,6 +11,9 @@ import { activeLead, useFleet } from '../../engine/fleet'
 import { PLAYBOOKS } from '../../playbooks/catalog'
 import { currentConsole, nameOf, selectedConsoles } from '../actions'
 import { useThread } from '../thread'
+import { useCi } from '../../workbench/ciStore'
+import { agentMade, ownerOf, unsent, useFeedback } from '../../workbench/prFeedback'
+import type { SweepResult } from '../../../../main/sweep'
 
 const MAX_CHARS = 12000
 const TAIL_CHARS = 500
@@ -153,6 +157,46 @@ function fleetSection(): string {
   return lines.join('\n')
 }
 
+const ago = (ms: number) => (ms < 3_600_000 ? `${Math.max(1, Math.round(ms / 60_000))}m` : ms < 86_400_000 ? `${Math.round(ms / 3_600_000)}h` : `${Math.round(ms / 86_400_000)}d`)
+
+/** GitHub for this repo: CI on the current branch, every open PR's checks and the review comments not yet given to an agent. */
+function ciSection(): string {
+  const s = useCi.getState().status
+  if (!s) return 'not checked yet'
+  if (!s.ok) return s.error
+  const lines: string[] = []
+  const runs = s.runs.map((r) => `${r.workflow} ${r.detail.replace(/_/g, ' ')} (${ago(Date.now() - Date.parse(r.createdAt))} ago)`)
+  lines.push(`this branch ${s.branch}: ${runs.length ? runs.join('; ') : 'no workflow runs'}`)
+  const fb = useFeedback.getState().result
+  for (const pr of s.prs) {
+    const f = fb?.ok ? fb.prs.find((p) => p.number === pr.number) : undefined
+    const owner = ownerOf(pr.branch)
+    const failing = pr.checks.filter((c) => c.state === 'failing').map((c) => c.name)
+    const fresh = f ? unsent(f) : []
+    const bits = [
+      pr.branch,
+      pr.isDraft ? 'draft' : '',
+      owner ? `agent on it: ${owner.name}` : agentMade(pr.branch) ? 'made by an agent' : '',
+      pr.checks.length ? `checks ${pr.state}${failing.length ? ` (${failing.join(', ')})` : ''}` : 'no checks',
+      f?.comments.length ? `${f.comments.length} review comment(s), ${fresh.length} not yet sent to an agent` : ''
+    ].filter(Boolean)
+    lines.push(`PR #${pr.number} "${clip(pr.title, 70)}" · ${bits.join(' · ')}`)
+    for (const c of fresh.slice(-3)) lines.push(`  @${c.author}${c.kind === 'inline' ? ` on ${c.path}${c.line ? `:${c.line}` : ''}` : c.state === 'CHANGES_REQUESTED' ? ' (changes requested)' : ''}: "${clip(c.body, 140)}"`)
+  }
+  if (!s.prs.length) lines.push('no open pull requests')
+  return lines.join('\n')
+}
+
+/** The user's other repos, from the last morning sweep this session (the ones that need something). */
+async function sweepSection(): Promise<string> {
+  const r = await invoke<SweepResult | null>('sweep:last').catch(() => null)
+  if (!r) return 'not run this session (the morning-sweep playbook runs it)'
+  const repos = r.repos.filter((x) => x.attention.length).sort((a, b) => b.score - a.score).slice(0, 8)
+  const head = `swept ${r.repos.length} repos ${ago(Date.now() - r.at)} ago`
+  if (!repos.length) return `${head}; nothing needs attention`
+  return head + '\n' + repos.map((x) => `${x.name} (${x.branch}): ${x.attention.slice(0, 4).join('; ')}${x.plan ? `; next plan item: ${clip(x.plan.item, 80)}` : ''}`).join('\n')
+}
+
 function agentsSection(): string {
   const app = useApp.getState()
   const custom = app.settings.customAgents
@@ -182,8 +226,9 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
   if (!p) return ''
   const ws = activeWs()
   const consoles = allConsoles().sort((a, b) => (STATUS_ORDER[statusOf(a.id)] ?? 9) - (STATUS_ORDER[statusOf(b.id)] ?? 9))
-  const [git, tails] = await Promise.all([
+  const [git, sweep, tails] = await Promise.all([
     gitLine(p.path),
+    sweepSection(),
     Promise.all(consoles.map((c) => (statusOf(c.id) === 'exited' || !isLive(c.id) ? Promise.resolve('') : consoleTail(c.id, 1600).catch(() => ''))))
   ])
   if (isCancelled()) return ''
@@ -202,6 +247,7 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     .join('\n')
 
   const team = `TEAM\n${fleetSection()}`
+  const github = `CI AND PULL REQUESTS (GitHub, this repo)\n${ciSection()}\n\nOTHER REPOS (morning sweep)\n${sweep}`
   const board = boardSection()
   const boardText = board ? `BOARD CONTENT\n${board}` : 'BOARD CONTENT\n(nothing besides consoles)'
   const thread = recentThread()
@@ -220,7 +266,7 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     ].filter(Boolean)
     return `## ${c.data.name} (${bits.join(' · ')})`
   }
-  const fixed = [head, team, boardText, threadText].filter(Boolean).join('\n\n')
+  const fixed = [head, team, github, boardText, threadText].filter(Boolean).join('\n\n')
   const headers = consoles.map(consoleHead)
   const room = MAX_CHARS - fixed.length - headers.join('\n').length - 40
   const withTail = tails.filter(Boolean).length
@@ -229,6 +275,6 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     ? consoles.map((c, i) => (tails[i] && per >= 80 ? `${headers[i]}\n${cleanTail(tails[i], per)}` : headers[i])).join('\n')
     : '(no consoles yet)'
 
-  const all = `${head}\n\nCONSOLES (newest output last)\n${consoleText}\n\n${[team, boardText, threadText].filter(Boolean).join('\n\n')}`
+  const all = `${head}\n\nCONSOLES (newest output last)\n${consoleText}\n\n${[team, github, boardText, threadText].filter(Boolean).join('\n\n')}`
   return all.length > MAX_CHARS ? all.slice(0, MAX_CHARS - 2) + '\n…' : all
 }

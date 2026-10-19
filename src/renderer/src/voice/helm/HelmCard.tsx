@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Check, CornerDownLeft, Pencil, Send, ShipWheel, Users, X, Zap } from 'lucide-react'
+import { AppWindow, Check, CornerDownLeft, Pencil, Send, ShipWheel, Users, Wrench, X, Zap } from 'lucide-react'
 import { useApp } from '../../state/store'
 import { playbookById } from '../../playbooks/catalog'
 import { PlaybookIcon } from '../../playbooks/PlaybooksView'
@@ -177,6 +177,8 @@ function KindIcon({ o }: { o: HelmOption }) {
       return <Zap size={14} />
     case 'panel':
       return <AppWindow size={14} />
+    case 'github':
+      return <Wrench size={14} />
     default:
       return <ShipWheel size={14} />
   }
