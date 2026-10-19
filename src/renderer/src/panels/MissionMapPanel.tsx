@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Frame, Map as MapIcon, Pause, Play, Search, Send, Spline, Trash2 } from 'lucide-react'
 import type { ConsoleStatus, PtyInfo } from '@shared/types'
 import { ROLE_TINT } from '@shared/types'
@@ -38,6 +38,8 @@ const ROW_GAP = 6
 const SECTION_GAP = 22
 const TOP = 18
 const GRAPH_W = COL2.x + COL2.w + 16
+// below this the labels get hard to read, so the map fits its width and scrolls down instead
+const MIN_FIT = 0.7
 
 interface Section {
   key: string
@@ -71,6 +73,16 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
   const [sel, setSel] = useState<Sel>(null)
   const [ptys, setPtys] = useState<Record<string, PtyInfo>>({})
   const [, setNow] = useState(0)
+  const graphRef = useRef<HTMLDivElement>(null)
+  const [avail, setAvail] = useState({ w: GRAPH_W, h: 600 })
+
+  useEffect(() => {
+    const el = graphRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setAvail({ w: el.clientWidth - 24, h: el.clientHeight - 12 }))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     const load = () => invoke<PtyInfo[]>('pty:list').then((l) => setPtys(Object.fromEntries(l.map((p) => [p.id, p]))))
@@ -187,6 +199,10 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layout, statuses, live])
 
+  // scale the whole graph to the space it has: never larger than 1:1, never so small it's unreadable
+  const sW = Math.min(1, avail.w / GRAPH_W)
+  const scale = Math.max(Math.min(sW, avail.h / layout.height), Math.min(sW, MIN_FIT))
+
   const workingCount = counts.working
   const teamsCount = fleet.teams.length
   const sub = `${plural(fleet.orchestrators.length, 'orchestrator')} · ${plural(teamsCount, 'team')} · ${plural(fleet.consoles.length, 'console')} · ${workingCount} working`
@@ -196,8 +212,8 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
       title="Mission Map"
       sub={sub}
       icon={<MapIcon size={17} />}
-      width={1120}
-      height={720}
+      width="min(1320px, calc(100vw - 48px))"
+      height="min(860px, calc(100vh - 96px))"
       bare
       footer={
         <div className="mm-legend">
@@ -231,7 +247,7 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
               <input className="input" placeholder="Find a console or team" value={q} onChange={(e) => setQ(e.target.value)} />
             </div>
           </div>
-          <div className="mm-graph scrollable" onPointerDown={(e) => e.target === e.currentTarget && setSel(null)}>
+          <div ref={graphRef} className="mm-graph scrollable" onPointerDown={(e) => e.target === e.currentTarget && setSel(null)}>
             {!fleet.consoles.length && !fleet.teams.length ? (
               <div className="empty">
                 <div>Nothing on the board yet.</div>
@@ -240,98 +256,101 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
                 </button>
               </div>
             ) : (
-              <div className="mm-canvas" style={{ width: GRAPH_W, height: layout.height }}>
-                <svg className="mm-edges" width={GRAPH_W} height={layout.height}>
-                  {edges.map((e) => (
-                    <path key={e.key} d={e.d} className={`mm-edge ${e.tone}`} />
-                  ))}
-                </svg>
-                {layout.lefts.map((l) => {
-                  const on = sel?.id === l.key
-                  const style = { left: COL0.x, top: l.y - COL0.h / 2, width: COL0.w, height: COL0.h }
-                  if (l.kind === 'root')
+              <div className="mm-fit" style={{ width: GRAPH_W * scale, height: layout.height * scale }}>
+                <div className="mm-canvas" style={{ width: GRAPH_W, height: layout.height, transform: scale === 1 ? undefined : `scale(${scale})` }}>
+
+                  <svg className="mm-edges" width={GRAPH_W} height={layout.height}>
+                    {edges.map((e) => (
+                      <path key={e.key} d={e.d} className={`mm-edge ${e.tone}`} />
+                    ))}
+                  </svg>
+                  {layout.lefts.map((l) => {
+                    const on = sel?.id === l.key
+                    const style = { left: COL0.x, top: l.y - COL0.h / 2, width: COL0.w, height: COL0.h }
+                    if (l.kind === 'root')
+                      return (
+                        <div key="root" className={`mm-node mm-root ${on ? 'on' : ''}`} style={style} onClick={() => setSel({ kind: 'root', id: 'root' })}>
+                          <span className="mm-ring dim">▣</span>
+                          <span className="grow">
+                            <span className="mm-node-title">{projectName}</span>
+                            <span className="mm-node-sub">{fleet.orchestrators.length ? 'not orchestrated' : 'board'}</span>
+                          </span>
+                        </div>
+                      )
+                    const o = l.orch!
                     return (
-                      <div key="root" className={`mm-node mm-root ${on ? 'on' : ''}`} style={style} onClick={() => setSel({ kind: 'root', id: 'root' })}>
-                        <span className="mm-ring dim">▣</span>
+                      <div
+                        key={o.id}
+                        className={`mm-node mm-orch ${on ? 'on' : ''}`}
+                        style={style}
+                        onClick={() => setSel({ kind: 'orch', id: o.id })}
+                        onDoubleClick={() => goToItem(o.id, o.workspaceId)}
+                      >
+                        <span className="mm-ring">◎</span>
                         <span className="grow">
-                          <span className="mm-node-title">{projectName}</span>
-                          <span className="mm-node-sub">{fleet.orchestrators.length ? 'not orchestrated' : 'board'}</span>
+                          <span className="mm-node-title">{o.title}</span>
+                          <span className="mm-node-sub">{o.wiredIds.length ? plural(o.wiredIds.length, 'wire') : 'not wired'}{fleet.multiWs ? ` · ${o.workspaceName}` : ''}</span>
                         </span>
                       </div>
                     )
-                  const o = l.orch!
-                  return (
-                    <div
-                      key={o.id}
-                      className={`mm-node mm-orch ${on ? 'on' : ''}`}
-                      style={style}
-                      onClick={() => setSel({ kind: 'orch', id: o.id })}
-                      onDoubleClick={() => goToItem(o.id, o.workspaceId)}
-                    >
-                      <span className="mm-ring">◎</span>
-                      <span className="grow">
-                        <span className="mm-node-title">{o.title}</span>
-                        <span className="mm-node-sub">{o.wiredIds.length ? plural(o.wiredIds.length, 'wire') : 'not wired'}{fleet.multiWs ? ` · ${o.workspaceName}` : ''}</span>
-                      </span>
-                    </div>
-                  )
-                })}
-                {layout.sections.map((s) => {
-                  const tint = s.team ? ROLE_TINT[s.team.role] : 'var(--muted)'
-                  const ids = s.team ? s.team.memberIds : s.rows.map((r) => r.id)
-                  const w = ids.filter((id) => st(id) === 'working').length
-                  const nyou = ids.filter((id) => st(id) === 'needs-you').length
-                  const on = sel?.id === s.key
-                  return (
-                    <div key={s.key}>
-                      <div
-                        className={`mm-node mm-team ${on ? 'on' : ''} ${s.team ? '' : 'loose'}`}
-                        style={{ left: COL1.x, top: s.y + s.h / 2 - COL1.h / 2, width: COL1.w, height: COL1.h, ['--tint' as any]: tint }}
-                        onClick={() => s.team && setSel({ kind: 'team', id: s.team.id })}
-                        onDoubleClick={() => s.team && goToItem(s.team.id, s.team.workspaceId)}
-                      >
-                        <span className="dot" style={{ background: tint }} />
-                        <span className="grow">
-                          <span className="mm-team-name">{s.team ? s.team.name : 'Loose consoles'}</span>
-                          <span className="mm-node-sub">
-                            {plural(ids.length, 'console')}
-                            {nyou ? ` · ${nyou} need you` : w ? ` · ${w} working` : ''}
-                            {fleet.multiWs && s.team ? ` · ${s.team.workspaceName}` : ''}
-                          </span>
-                        </span>
-                      </div>
-                      {!s.rows.length && (
-                        <div className="mm-row placeholder" style={{ left: COL2.x, top: layout.rowY(s, 0) - ROW_H / 2, width: COL2.w, height: ROW_H }}>
-                          {s.team?.memberIds.length ? 'no matching consoles' : 'empty team'}
-                        </div>
-                      )}
-                      {s.rows.map((r, i) => {
-                        const status = st(r.id)
-                        return (
-                          <div
-                            key={r.id}
-                            className={`mm-row st-${status} ${sel?.id === r.id ? 'on' : ''}`}
-                            style={{ left: COL2.x, top: layout.rowY(s, i) - ROW_H / 2, width: COL2.w, height: ROW_H }}
-                            onClick={() => setSel({ kind: 'console', id: r.id })}
-                            onDoubleClick={() => goToItem(r.id, r.workspaceId)}
-                          >
-                            <span className="status-dot" />
-                            <span className="mm-row-name">{r.name}</span>
-                            <span className="mm-row-agent">
-                              <span className="agent-dot" style={{ background: agentColor(r.agentId), width: 7, height: 7 }} />
-                              {agentLabel(r.agentId)}
+                  })}
+                  {layout.sections.map((s) => {
+                    const tint = s.team ? ROLE_TINT[s.team.role] : 'var(--muted)'
+                    const ids = s.team ? s.team.memberIds : s.rows.map((r) => r.id)
+                    const w = ids.filter((id) => st(id) === 'working').length
+                    const nyou = ids.filter((id) => st(id) === 'needs-you').length
+                    const on = sel?.id === s.key
+                    return (
+                      <div key={s.key}>
+                        <div
+                          className={`mm-node mm-team ${on ? 'on' : ''} ${s.team ? '' : 'loose'}`}
+                          style={{ left: COL1.x, top: s.y + s.h / 2 - COL1.h / 2, width: COL1.w, height: COL1.h, ['--tint' as any]: tint }}
+                          onClick={() => s.team && setSel({ kind: 'team', id: s.team.id })}
+                          onDoubleClick={() => s.team && goToItem(s.team.id, s.team.workspaceId)}
+                        >
+                          <span className="dot" style={{ background: tint }} />
+                          <span className="grow">
+                            <span className="mm-team-name">{s.team ? s.team.name : 'Loose consoles'}</span>
+                            <span className="mm-node-sub">
+                              {plural(ids.length, 'console')}
+                              {nyou ? ` · ${nyou} need you` : w ? ` · ${w} working` : ''}
+                              {fleet.multiWs && s.team ? ` · ${s.team.workspaceName}` : ''}
                             </span>
-                            <span className="spacer" />
-                            <span className="mm-row-status">{STATUS_TEXT[status]}</span>
+                          </span>
+                        </div>
+                        {!s.rows.length && (
+                          <div className="mm-row placeholder" style={{ left: COL2.x, top: layout.rowY(s, 0) - ROW_H / 2, width: COL2.w, height: ROW_H }}>
+                            {s.team?.memberIds.length ? 'no matching consoles' : 'empty team'}
                           </div>
-                        )
-                      })}
-                    </div>
-                  )
-                })}
-                {!layout.visibleCount && filter !== 'all' && (
-                  <div className="mm-none">No consoles are {BUCKET_LABEL[filter as Bucket].toLowerCase()} right now.</div>
-                )}
+                        )}
+                        {s.rows.map((r, i) => {
+                          const status = st(r.id)
+                          return (
+                            <div
+                              key={r.id}
+                              className={`mm-row st-${status} ${sel?.id === r.id ? 'on' : ''}`}
+                              style={{ left: COL2.x, top: layout.rowY(s, i) - ROW_H / 2, width: COL2.w, height: ROW_H }}
+                              onClick={() => setSel({ kind: 'console', id: r.id })}
+                              onDoubleClick={() => goToItem(r.id, r.workspaceId)}
+                            >
+                              <span className="status-dot" />
+                              <span className="mm-row-name">{r.name}</span>
+                              <span className="mm-row-agent">
+                                <span className="agent-dot" style={{ background: agentColor(r.agentId), width: 7, height: 7 }} />
+                                {agentLabel(r.agentId)}
+                              </span>
+                              <span className="spacer" />
+                              <span className="mm-row-status">{STATUS_TEXT[status]}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )
+                  })}
+                  {!layout.visibleCount && filter !== 'all' && (
+                    <div className="mm-none">No consoles are {BUCKET_LABEL[filter as Bucket].toLowerCase()} right now.</div>
+                  )}
+                </div>
               </div>
             )}
           </div>
