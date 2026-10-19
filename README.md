@@ -52,6 +52,14 @@ Everything that needs you lands in the **Inbox** (top right): the Lead's questio
 
 Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_spawn_worker`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
 
+## The Inbox on your phone
+
+Agents wait while you're away from the desk. **Settings → Phone Inbox** serves the Inbox to your phone: approvals with the same buttons as on the board, the Lead's questions, the Ready card (Merge asks first), and a read-only view of each console. Scan the QR code to open it.
+
+- **Off until you turn it on.** While it is on, the top bar shows a **Phone** badge.
+- **Tailscale** (recommended): listens on this computer's Tailscale address only; the connection is encrypted and works from anywhere on your tailnet. **Wi-Fi**: your local network address, plain HTTP (anyone who can see that network's traffic could copy the link). **This PC**: 127.0.0.1, to try it.
+- The link carries a long secret in its `#fragment` (never sent in URLs, logs or referrers). **New link** revokes the old one at once. Answers are checked against the live screen first, so a stale phone never types into a console whose question was already answered.
+
 ## Helm and playbooks
 
 **Helm** (the ship-wheel toggle in the command bar, on by default) reads the whole board: every console's recent output, the team's plan, kanban cards, checklists, notes, git state. Ask it anything ("what is everyone doing?", "who needs me?") or say what you want done, and it answers or offers 1–3 one-click routes: a playbook with its inputs filled in, a goal for the Lead, a message to the agent already working on it, board actions, or a panel. Enter on an empty bar takes the first route. Instant board commands (zoom, pause, spawn…) and `@name` messages still go straight through.

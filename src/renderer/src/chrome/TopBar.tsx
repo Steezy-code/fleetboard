@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Square, X } from 'lucide-react'
-import { invoke } from '../lib/api'
+import { ArrowLeft, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smartphone, Square, X } from 'lucide-react'
+import { invoke, on } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { UsagePill } from './UsagePill'
 
@@ -115,6 +115,7 @@ export function TopBar() {
       </button>
 
       <div className="spacer drag" />
+      <PhoneInboxChip />
 
       {pendingResume > 0 && (
         <div className="resume-banner no-drag">
@@ -201,5 +202,20 @@ export function WindowControls() {
         <X size={14} />
       </button>
     </div>
+  )
+}
+
+/** Shown while the phone Inbox is serving, so it is never on unnoticed. */
+function PhoneInboxChip() {
+  const [running, setRunning] = useState(false)
+  useEffect(() => {
+    invoke<{ running: boolean }>('remote:status').then((s) => setRunning(s.running), () => {})
+    return on('remote:status', (s: { running: boolean }) => setRunning(s.running))
+  }, [])
+  if (!running) return null
+  return (
+    <button className="needs-badge no-drag" title="The Inbox is open to your phone. Settings → Phone Inbox" onClick={() => useApp.getState().openPanel('settings')}>
+      <Smartphone size={12} /> Phone
+    </button>
   )
 }

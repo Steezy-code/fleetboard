@@ -889,21 +889,7 @@ export async function initFleet(c: MainContext) {
     post(f.s, { from: 'user', to: toId, kind: 'goal', text })
     return true
   })
-  ipc.handle('fleet:answer', (_e, askId: string, answer: string) => {
-    for (const s of states.values()) {
-      const ask = s.asks.find((a) => a.id === askId)
-      if (!ask) continue
-      ask.answer = answer
-      const w = askWaiters.get(askId)
-      if (w) {
-        askWaiters.delete(askId)
-        w(answer)
-      } else post(s, { from: 'user', to: ask.from, kind: 'answer', text: `The user answered "${ask.question}": ${answer}` })
-      changed(s)
-      return true
-    }
-    return false
-  })
+  ipc.handle('fleet:answer', (_e, askId: string, answer: string) => answerAsk(askId, answer))
   ipc.handle('fleet:diff', async (_e, projectId: string) => {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
@@ -911,24 +897,7 @@ export async function initFleet(c: MainContext) {
     const base = baseCommit.get(lead.id) ?? 'HEAD~1'
     return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
   })
-  /** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
-  ipc.handle('fleet:mergeReady', async (_e, projectId: string) => {
-    const s = states.get(projectId)
-    if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
-    const lead = s.members[s.ready.leadId]
-    if (lead?.branch) {
-      const current = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out
-      const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
-      if (!r.ok) {
-        await git(s.projectPath, ['merge', '--abort'])
-        return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
-      }
-      await dismissTeam(s, lead, 'merged')
-      return { ok: true, into: current }
-    }
-    await dismissTeam(s, lead, 'keep')
-    return { ok: true, into: '' }
-  })
+  ipc.handle('fleet:mergeReady', (_e, projectId: string) => mergeReady(projectId))
   /** Push the team's branch and open a draft PR whose description is the lead's summary. */
   ipc.handle('fleet:openPr', async (_e, projectId: string) => {
     const s = states.get(projectId)
@@ -968,6 +937,46 @@ export async function initFleet(c: MainContext) {
     return true
   })
 }
+
+/** The user's answer to a lead's question (the Inbox on the board or a phone). */
+export function answerAsk(askId: string, answer: string): boolean {
+  for (const s of states.values()) {
+    const ask = s.asks.find((a) => a.id === askId)
+    if (!ask) continue
+    if (ask.answer) return false
+    ask.answer = answer
+    const w = askWaiters.get(askId)
+    if (w) {
+      askWaiters.delete(askId)
+      w(answer)
+    } else post(s, { from: 'user', to: ask.from, kind: 'answer', text: `The user answered "${ask.question}": ${answer}` })
+    changed(s)
+    return true
+  }
+  return false
+}
+
+/** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
+export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string }> {
+  const s = states.get(projectId)
+  if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
+  const lead = s.members[s.ready.leadId]
+  if (lead?.branch) {
+    const current = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out
+    const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
+    if (!r.ok) {
+      await git(s.projectPath, ['merge', '--abort'])
+      return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
+    }
+    await dismissTeam(s, lead, 'merged')
+    return { ok: true, into: current }
+  }
+  await dismissTeam(s, lead, 'keep')
+  return { ok: true, into: '' }
+}
+
+/** A project's team state, if it has one. */
+export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')

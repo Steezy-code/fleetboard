@@ -135,9 +135,14 @@ export function loadProject(id: string): Project | null {
   return p
 }
 
+let current: Project | null = null
+/** The board open in the window (the last one saved), for features outside it such as the phone Inbox. */
+export const currentProject = () => current
+
 export function saveProject(p: Project) {
   // never let a broken renderer state replace a good board on disk
   if (!validProject(p) || !/^[\w-]+$/.test(p.id)) throw new Error('refusing to save an invalid project')
+  current = p
   p.schema = SCHEMA_VERSION
   writeJsonAtomic(projectFile(p.id), p)
   const consoles = p.workspaces.reduce((n, w) => n + w.nodes.filter((x) => x.type === 'console').length, 0)

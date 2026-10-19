@@ -13,6 +13,7 @@ import * as usage from './usage'
 import * as profiles from './profiles'
 import * as sweep from './sweep'
 import { initFleet } from './fleet'
+import * as remote from './remote'
 import { dirs } from './paths'
 
 let win: BrowserWindow | null = null
@@ -184,6 +185,7 @@ app.whenReady().then(async () => {
   for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
   sweep.register(ctx)
   await initFleet(ctx)
+  await remote.register(ctx)
   createWindow()
 })
 
