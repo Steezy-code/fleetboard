@@ -19,6 +19,8 @@ src/main/                Electron main process
   remote.ts              the phone Inbox server (off unless enabled in Settings); remote-page.ts is its page
   fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready
   plan.ts                links workers to the Lead's plan tasks (by id, number, title, or a clear match)
+  gemini-home.ts         a Gemini CLI home per team console (GEMINI_CLI_HOME): the user's ~/.gemini linked in,
+                         settings with the fleet MCP server added (Gemini reads MCP servers only from settings)
   sessions.ts            each console's own conversation: ids for Claude Code / Gemini, found for Codex;
                          resumable / taken / free / lost, as each real CLI behaves
   cli.ts                 headless one-shot runs of the user's CLI (claude -p streaming) — IPC cli:run

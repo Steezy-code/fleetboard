@@ -6,7 +6,7 @@ import { loginEnv, shellPath, which } from './env'
 import { findCodexSession, newSessionId, sessionState, validSessionId } from './sessions'
 import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
-import { fleetLaunch } from './fleet'
+import { fleetLaunch, isTeamConsole } from './fleet'
 import { TermScreen, type ScreenView } from './screen'
 import { StatusTracker, answerKeys, detectPrompt, type Prompt } from './status'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
@@ -110,10 +110,10 @@ export class PtyManager {
       } else if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
       if (yolo) args.push(...agent.yoloArgs!)
-      else if (req.acceptEdits && agent.editsArgs && !fleetLaunch(req)) args.push(...agent.editsArgs)
+      else if (req.acceptEdits && agent.editsArgs && !isTeamConsole(req.id)) args.push(...agent.editsArgs)
       if (agent.id === 'claude') args.push(...claudeHookArgs(req.id))
       // team consoles: MCP connection to the fleet, role prompt and role permissions
-      const fleet = fleetLaunch(req)
+      const fleet = fleetLaunch(req, env)
       if (fleet) {
         args.push(...fleet.args)
         Object.assign(env, fleet.env)
