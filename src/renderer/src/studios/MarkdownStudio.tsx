@@ -195,6 +195,8 @@ export default function MarkdownStudio(props: { path?: string }) {
       setCreating(null)
       setExpanded((s) => new Set([...s, ...ancestors(root, path)]))
       setCurrent(path)
+      // now, not at the next render: the read below can finish first, and would then not show the note
+      currentRef.current = path
       if (nextMode) setMode(nextMode)
       const cached = notes.get(path)
       if (cached != null) setText(cached)
