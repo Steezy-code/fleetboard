@@ -22,13 +22,18 @@ bin/fleetboard     # build once, then launch
 scripts/install-desktop.sh   # add it to your app launcher
 ```
 
+```bash
+npm test           # unit tests, including replays of real recorded CLI sessions
+npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted claude
+```
+
 ## What's on the board
 
 | Area | What you get |
 |---|---|
 | **Board** | Infinite canvas with pan/zoom, workspaces as tabs, each console a real PTY (Ctrl‑C, vim, htop all work). Kanban, calendar, sticky notes, checklists, text, ink and shapes, images you can mark up, live web tiles with device presets and an inspector, and a git card with commit & push. |
 | **Voice** | Hold <kbd>Space</kbd> (or <kbd>Alt</kbd>+<kbd>Space</kbd> anywhere) to speak. Whisper runs on-device. A fast local parser handles common commands; anything else goes to a planner that runs through your own `claude -p`. Replies are spoken with Kokoro on-device. Destructive steps wait for "confirm". Dictation to `@name` only types: you press Enter. |
-| **Orchestration** | Status per console (working / ready / needs you) from Claude Code hooks plus output heuristics. Mission map, orchestrator with @mentions, teams with roles, a composer for up to 12 consoles, handoffs that summarize one session and brief the next agent, and loops that run on a schedule, on idle or on output, then retire once their goal is met. |
+| **Orchestration** | Status per console (working / ready / needs you) read from what each terminal actually shows, plus Claude Code's hooks; a question on screen becomes an Inbox card with its real options, and nothing the board types ever answers one for you. Mission map, orchestrator with @mentions, teams with roles, a composer for up to 12 consoles, handoffs that summarize one session and brief the next agent, and loops that run on a schedule, on idle or on output, then retire once their goal is met. |
 | **Studios** | Documents (streamed from your repo, exported as a paginated PDF), Diagrams (hand-drawn figures added to the board, exported as PNG or `.excalidraw`), a Code studio, and an Obsidian-style Markdown vault with a link graph. |
 | **Continuity** | Boards save on every change. Reopening relaunches every console in place and offers to resume through each CLI's own resume. You also get token analytics from local session logs, account profiles (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`), project and global memory, a Skills manager and settings. |
 
