@@ -34,8 +34,11 @@ export function Inbox() {
 
   const asks = (fleet?.asks ?? []).filter((a) => !a.answer)
   const ready = fleet?.ready ?? null
+  // a lead whose console exited mid-task: the team has nobody to merge or finish
+  const exited = useApp(useShallow((s) => Object.keys(s.statuses).filter((id) => s.statuses[id] === 'exited')))
+  const stoppedLeads = Object.values(fleet?.members ?? {}).filter((m) => m.role === 'lead' && (m.status === 'working' || m.status === 'starting') && exited.includes(m.id))
   const consoles = useMemo(() => Object.fromEntries(allConsoles().map((c) => [c.id, c])), [blocked.join(','), project])
-  const count = asks.length + blocked.length + (ready ? 1 : 0)
+  const count = asks.length + blocked.length + stoppedLeads.length + (ready ? 1 : 0)
   if (!project || !count) return null
 
   return (
@@ -50,6 +53,24 @@ export function Inbox() {
       {open && (
         <div className="inbox-body scrollable">
           {ready && <ReadyCard projectId={project.id} />}
+          {stoppedLeads.map((m) => (
+            <div key={m.id} className="inbox-card approval stopped">
+              <div className="ic-head">
+                <ShieldQuestion size={14} className="ic-icon warn" />
+                <b>{m.name}</b>
+                <span className="muted">stopped before finishing</span>
+              </div>
+              <div className="ic-title">Its console exited. Resume it on its tile to carry on (it is told where the team is), or discard the team’s work.</div>
+              <div className="ic-actions">
+                <button className="btn sm primary" onClick={() => openConsole(m.id)}>
+                  <SquareTerminal size={13} /> Open console
+                </button>
+                <button className="btn sm ghost" onClick={() => discardTeam(project.id, m.id)}>
+                  <Trash2 size={13} /> Discard team
+                </button>
+              </div>
+            </div>
+          ))}
           {asks.map((a) => (
             <AskCard key={a.id} id={a.id} from={fleet?.members[a.from]?.name ?? 'Lead'} question={a.question} options={a.options} />
           ))}
@@ -97,6 +118,12 @@ async function answer(consoleId: string, a: PromptAnswer) {
   if (res.ok) return useApp.getState().setStatus(consoleId, 'working')
   // the prompt was answered in the terminal, or turned into another question: nothing was typed
   useApp.getState().toast(res.reason === 'not-live' ? 'That console has stopped' : 'That question changed; nothing was sent. Check the console.', 'warn')
+}
+
+async function discardTeam(projectId: string, leadId: string) {
+  const app = useApp.getState()
+  if (!(await app.confirm({ title: 'Discard the team’s work?', body: 'Deletes the team’s branches and worktrees and closes its consoles.', confirm: 'Discard', danger: true }))) return
+  await invoke('fleet:discard', projectId, leadId)
 }
 
 function openConsole(id: string) {

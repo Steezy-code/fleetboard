@@ -253,6 +253,27 @@ export class App {
     return this.output()
   }
 
+  /**
+   * Quit the way a user does: close the window, confirm "Quit with N consoles running?" (the board is
+   * saved then), and wait for the app to exit.
+   */
+  async quitLikeUser() {
+    await this.invoke('win:close').catch(() => {})
+    try {
+      await this.waitFor(() => this.eval(() => !![...document.querySelectorAll('button')].find((b) => b.textContent === 'Quit')), { timeout: 5000, label: 'quit confirmation' })
+      await this.click('button', 'Quit')
+    } catch {
+      /* nothing running: the window closed without asking */
+    }
+    const exited = await new Promise<boolean>((resolve) => {
+      if (this.proc.exitCode !== null) return resolve(true)
+      const t = setTimeout(() => resolve(false), 10_000)
+      this.proc.once('exit', () => (clearTimeout(t), resolve(true)))
+    })
+    this.cdp.close()
+    return exited
+  }
+
   /** Quit like the user does (consoles are stopped), then make sure nothing is left running. */
   async close() {
     await this.invoke('app:quit').catch(() => {})

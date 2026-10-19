@@ -100,6 +100,8 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
         term.write(buffer)
         setPhase('running')
         useApp.getState().setLive(node.id, true)
+        // started elsewhere (a team console the fleet launched): a reopened board asks before resuming it too
+        if (node.data.launch !== 'ask') useApp.getState().updateNodeData(node.id, { launch: 'ask' })
         return
       }
       const canResume = !!agent?.resumeArgs
