@@ -18,7 +18,9 @@ before(async () => {
   fs.writeFileSync(path.join(bin, 'gemini'), `#!/bin/sh\necho "gemini got $# args"\n`, { mode: 0o755 })
   // no login shell: the app falls back to this process's environment
   process.env.SHELL = '/bin/false'
-  process.env.PATH = `${bin}:${process.env.PATH}`
+  // leave out any real codex on this machine, so "not installed" stays true
+  const rest = (process.env.PATH ?? '').split(':').filter((d) => d && !fs.existsSync(path.join(d, 'codex')))
+  process.env.PATH = [bin, ...rest].join(':')
   process.env.FAKE_CLAUDE_LOG = log
   process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify({ print: [{ match: 'summarize', reply: 'Here is the summary.' }] })
   process.env.FLEETBOARD_HOME = path.join(dir, 'fb')
