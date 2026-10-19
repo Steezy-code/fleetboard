@@ -36,7 +36,12 @@ async function steady(what: string, round: () => Promise<void>, rounds: number) 
   await round()
   const base = await counters()
   for (let i = 0; i < rounds; i++) await round()
-  const end = await counters()
+  // something still closing (a transition, a toast) is not a leak: give the window a few seconds to settle
+  let end = await counters()
+  for (let i = 0; i < 10 && (end.nodes - base.nodes > 30 || end.listeners - base.listeners > 10); i++) {
+    await settle(500)
+    end = await counters()
+  }
   const msg = `${what}: ${JSON.stringify({ base, end })}`
   assert.ok(end.heap - base.heap < 3 * MB, `window memory grew: ${msg}`)
   assert.ok(end.main - base.main < 4 * MB, `main-process memory grew: ${msg}`)
