@@ -913,6 +913,11 @@ export async function initFleet(c: MainContext) {
   const { ipc } = ctx
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
   ipc.handle('fleet:startLead', (_e, opts) => startLead(opts))
+  /** whether a team in this folder works in worktrees of its own (a repository with a commit) */
+  ipc.handle('fleet:isolation', async (_e, projectPath: string): Promise<'worktrees' | 'no-commits' | 'no-repo'> => {
+    if ((await git(projectPath, ['rev-parse', '--verify', 'HEAD'])).ok) return 'worktrees'
+    return (await git(projectPath, ['rev-parse', '--git-dir'])).ok ? 'no-commits' : 'no-repo'
+  })
   ipc.handle('fleet:ack', (_e, reqId: string, v: { name?: string }) => {
     acks.get(reqId)?.(v ?? {})
     acks.delete(reqId)

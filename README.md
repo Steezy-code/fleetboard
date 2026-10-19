@@ -57,7 +57,7 @@ Type (or say) what you want in the command bar, for example *"add a Split PDF co
 4. A read-only **reviewer** checks the combined result and runs the checks; findings go back to the owner.
 5. A **Ready** card appears in your Inbox: **Merge** brings the branch into your checkout and dismisses the team.
 
-Everything that needs you lands in the **Inbox** (top right): the Lead's questions as buttons, every agent's permission prompt as *Allow once / Always allow … / Deny*, and the Ready card. Your own uncommitted work is never touched: the team works from your last commit in separate worktrees.
+Everything that needs you lands in the **Inbox** (top right): the Lead's questions as buttons, every agent's permission prompt as *Allow once / Always allow … / Deny*, and the Ready card. Your own uncommitted work is never touched: the team works from your last commit in separate worktrees. (That needs a git repository with a commit; in a folder without one, Fleetboard asks before the team works in your files directly.)
 
 Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_spawn_worker`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
 
