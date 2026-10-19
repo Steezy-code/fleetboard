@@ -224,8 +224,12 @@ export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record
   if (m.agentId === 'codex') {
     // the token comes from the environment: command lines are visible to every process on the machine
     const args = ['-c', `mcp_servers.fleet.url="${url}"`, '-c', 'mcp_servers.fleet.bearer_token_env_var="FB_MCP_TOKEN"']
+    // the fleet tools never ask the user (Claude Code: --allowedTools mcp__fleet); without this Codex asks
+    // "Allow the fleet MCP server to run tool …?" before every report, message and wait
+    args.push('-c', 'mcp_servers.fleet.default_tools_approval_mode="approve"')
     env.FB_MCP_TOKEN = secret
-    if (m.role === 'worker') args.push('--full-auto')
+    // edits in its worktree without asking, commands sandboxed (what --full-auto was before Codex dropped it)
+    if (m.role === 'worker') args.push(...(agentById('codex')?.editsArgs ?? []))
     return { args, env }
   }
   return { args: [], env }

@@ -2,6 +2,9 @@
 // how the conversation began, so a test can tell which conversation a resumed console picked up.
 // "run the command `X`" makes it ask Codex to run X outside the sandbox, which Codex asks the user
 // to approve; once the command's output is back it replies "Done, the command ran." (or was refused).
+// A Fleetboard worker brief ("Task from …: … You own: a.txt.") makes it act as a worker: write the file
+// it owns (inside the sandbox), then report through the fleet's MCP tool.
+import fs from 'node:fs'
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 
@@ -14,7 +17,8 @@ const said = (input: any[]) =>
 
 export async function startMockResponses() {
   let n = 0
-  const requests: { first?: string; last?: string }[] = []
+  /** per request: what the user said first and last, the tools offered, and tools found by tool search */
+  const requests: { first?: string; last?: string; tools: string[]; found: string[] }[] = []
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (d) => (body += d))
@@ -29,25 +33,55 @@ export async function startMockResponses() {
       } catch {
         /* empty */
       }
+      if (process.env.MOCK_DUMP) fs.appendFileSync(process.env.MOCK_DUMP, body + '\n')
       const user = said(j.input)
-      requests.push({ first: user[0], last: user.at(-1) })
+      const tools: string[] = (j.tools ?? []).map((t: any) => t?.name ?? t?.type).filter(Boolean)
       const input: any[] = j.input ?? []
+      // tools found by a tool search (Codex lists MCP tools that way), as namespace/name
+      const allFound: string[] = input
+        .filter((i) => i?.type === 'tool_search_output')
+        .flatMap((i) => (i.tools ?? []).flatMap((t: any) => (t?.type === 'namespace' ? (t.tools ?? []).map((x: any) => `${t.name}/${x.name}`) : [t?.name])))
+      requests.push({ first: user[0], last: user.at(-1), tools, found: allFound })
       const lastUser = input.map((i, at) => ({ i, at })).filter(({ i }) => i?.type === 'message' && i.role === 'user' && !/^\s*</.test(textOf(i.content))).at(-1)
-      const result = input.slice((lastUser?.at ?? 0) + 1).find((i) => i?.type === 'function_call_output')
-      const command = /run the command `([^`]+)`/i.exec(lastUser ? textOf(lastUser.i.content) : '')?.[1]
+      const lastText = lastUser ? textOf(lastUser.i.content) : ''
+      const results = input.slice((lastUser?.at ?? 0) + 1).filter((i) => i?.type === 'function_call_output')
+      const result = results[0]
+      let command = /run the command `([^`]+)`/i.exec(lastText)?.[1]
+      let call: { name: string; args: object } | undefined
+      let search: string | undefined
+      const owns = /Task from .+? You own: (.+?)\.(?:\s|$)/.exec(lastText)?.[1]?.split(',')[0]?.trim()
+      if (owns) {
+        // a worker: write the file it owns, then report
+        // like a model in Codex: MCP tools are not listed up front, a tool search brings them in
+        const found = input
+          .slice((lastUser?.at ?? 0) + 1)
+          .filter((i) => i?.type === 'tool_search_output')
+          .flatMap((i) => (i.tools ?? []).flatMap((t: any) => (t?.type === 'namespace' ? (t.tools ?? []).map((x: any) => `${t.name}/${x.name}`) : [t?.name])))
+        const report = [...tools, ...found].find((t) => /fleet_report$/.test(t ?? ''))
+        const searched = input.slice((lastUser?.at ?? 0) + 1).some((i) => i?.type === 'tool_search_output')
+        if (results.length === 0) call = { name: 'exec_command', args: { cmd: `printf 'Codex was here\\n' > ${owns}` } }
+        else if (results.length === 1 && report) call = { name: report, args: { status: 'done', summary: `Wrote ${owns}.` } }
+        else if (results.length === 1 && !searched && tools.includes('tool_search')) search = 'fleet_report'
+        command = undefined
+      } else if (command && !result) call = { name: 'exec_command', args: { cmd: command, sandbox_permissions: 'require_escalated', justification: 'Do you want me to run this?' } }
       const id = `resp_${++n}`
       const sse = (type: string, data: object) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`)
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
       sse('response.created', { response: { id, object: 'response', status: 'in_progress', output: [] } })
       let item: any
-      if (command && !result) {
-        const args = JSON.stringify({ cmd: command, sandbox_permissions: 'require_escalated', justification: 'Do you want me to run this?' })
-        item = { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name: 'exec_command', arguments: args, status: 'completed' }
+      if (search) {
+        item = { type: 'tool_search_call', id: `ts_${n}`, call_id: `call_${n}`, execution: 'client', arguments: { query: search }, status: 'completed' }
+        sse('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress' } })
+      } else if (call) {
+        const args = JSON.stringify(call.args)
+        // a tool found by tool search lives in a namespace (mcp__<server>), given apart from its name
+        const [namespace, name] = call.name.includes('/') ? call.name.split('/') : [undefined, call.name]
+        item = { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name, ...(namespace ? { namespace } : {}), arguments: args, status: 'completed' }
         sse('response.output_item.added', { output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } })
         sse('response.function_call_arguments.delta', { output_index: 0, item_id: item.id, delta: args })
         sse('response.function_call_arguments.done', { output_index: 0, item_id: item.id, arguments: args })
       } else {
-        const text = result ? 'Done, the command ran (or was refused).' : `Conversation started with: ${user[0] ?? '(nothing)'}`
+        const text = owns ? 'Reported to the lead.' : result ? 'Done, the command ran (or was refused).' : `Conversation started with: ${user[0] ?? '(nothing)'}`
         item = { type: 'message', id: `msg_${n}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }
         sse('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress', content: [] } })
         sse('response.output_text.delta', { output_index: 0, item_id: item.id, content_index: 0, delta: text })

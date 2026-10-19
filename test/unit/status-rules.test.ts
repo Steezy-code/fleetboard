@@ -29,6 +29,37 @@ describe('detectPrompt: TUI dialogs', () => {
     assert.equal(detectPrompt(view(' ❯ Dark mode\n\n some text')), null)
   })
 
+  test("a long message Codex echoes back ('› …' wrapped to the screen's width) is not a menu", () => {
+    // what a Codex team worker showed after its brief (100 columns), from a real run
+    const screen = [
+      '',
+      '  >_ OpenAI Codex (v0.163.0)',
+      '     /tmp/fb-e2e-re2O43/fleetboard/worktrees/0a7dda2e2417/txt-bb25-ada',
+      '',
+      '› You are Ada, a worker on a Fleetboard team led by Lead. Do only the task you are given and edit',
+      '  only the files you own. If you need something outside them, ask the lead with fleet_send. Work in',
+      '  your current directory (your own git worktree). Do not commit or push; Fleetboard commits your',
+      '  work when you report. When your done_when check passes, call fleet_report with status "done" and',
+      '  a 3-6 line summary (what changed, files, how you verified). If you are stuck, call fleet_report',
+      '  with status "blocked" and what you need. Task from Lead: Write a.txt You own: a.txt. Done when:',
+      '  a.txt exists. When done, call fleet_report.',
+      '',
+      "• Ran printf 'Codex was here\\n' > a.txt",
+      '  └ (no output)',
+      '• Reported to the lead.',
+      '  Worked for <1s • 9:37 AM',
+      '',
+      '› Ask Codex to do anything',
+      '',
+      '  Mock default · /tmp/fb-e2e-re2O43/fleetboard/worktrees/0a7dda2e2417/txt-bb25-ada',
+      '  ? for shortcuts                                                         ⚠ 2 warnings · f2 to view'
+    ].join('\n')
+    assert.equal(detectPrompt(view(screen, { cols: 100 })), null)
+    // a menu whose options are short still is one, also with a long first option
+    const menu = '  Pick a model?\n› gpt-x (current) — the default model for most tasks, balanced for speed and depth of reasoning\n  gpt-x-mini — faster and cheaper\n  gpt-x-max — slowest, most thorough'
+    assert.equal(detectPrompt(view(menu, { cols: 100 }))?.reason, 'cursor-menu')
+  })
+
   test('a two-option menu counts under a question with nothing below it (Claude Code: make auto mode the default?)', () => {
     const dialog = ' Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode'
     const p = detectPrompt(view(dialog))
