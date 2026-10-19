@@ -13,7 +13,8 @@ export type { Prompt, PromptOption }
 /** A prompt's region: how many rows from the bottom of the screen a dialog can occupy. */
 const REGION_ROWS = 26
 
-const RULE = /^[\s─━═╌┄┈╍┉╭╮╰╯┌┐└┘├┤┬┴┼-]*[─━═╌┄┈╍┉]{6,}[\s─━═╌┄┈╍┉╭╮╰╯┌┐└┘├┤┬┴┼-]*$/
+// horizontal rules and frames; Gemini draws its input box with half blocks (▄▄▄ above, ▀▀▀ below)
+const RULE = /^[\s─━═╌┄┈╍┉▄▀╭╮╰╯┌┐└┘├┤┬┴┼-]*[─━═╌┄┈╍┉▄▀]{6,}[\s─━═╌┄┈╍┉▄▀╭╮╰╯┌┐└┘├┤┬┴┼-]*$/
 
 /** Remove box borders (│ … │) and non-breaking spaces so dialogs drawn in a frame read as plain lines. */
 export function normalizeLine(line: string): string {
@@ -24,12 +25,13 @@ export function normalizeLine(line: string): string {
     .replace(/\s+$/, '')
 }
 
-// Text that only appears while a CLI waits for a decision. Matched in the prompt region.
+// Text that only appears while a CLI waits for a decision. Matched in the prompt region. ("Esc to cancel"
+// alone is not one: Gemini shows "Thinking... (esc to cancel)" while it works; dialogs that say it also
+// show a menu or "Enter to …".)
 const HINTS: [string, RegExp][] = [
   ['enter-to', /\b(enter|return) to (confirm|select|continue|save|submit|proceed|choose)\b/i],
   ['press-key', /\bpress (enter|return|any key)\b/i],
   ['navigate', /(↑\/↓|↑↓|arrow keys|up\/down)( keys)? to (navigate|select|move|choose)/i],
-  ['esc-cancel', /\besc(ape)? to cancel\b/i],
   ['do-you-want', /\bdo you want to (proceed|make this edit|make these edits|create|run|allow|overwrite|delete|continue|apply|use|fetch|write|edit)\b/i],
   ['would-you-like', /\bwould you like to (proceed|run|allow|continue|apply|make|create|overwrite)\b/i],
   ['trust-folder', /\btrust (this folder|the files in this folder|this (project|workspace|directory))\b/i],

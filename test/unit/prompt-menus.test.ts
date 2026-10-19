@@ -7,7 +7,7 @@ import type { Prompt } from '../../src/shared/prompt'
 const prompts = new Map<string, Prompt | null>()
 async function promptAt(file: string, mark: string) {
   if (!prompts.size) {
-    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast', 'claude-automode.cast']) {
+    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast', 'claude-automode.cast', 'gemini-session.cast']) {
       for (const m of (await replay(loadCast(f))).marks) prompts.set(`${f}|${m.mark}`, m.prompt)
     }
   }
@@ -61,6 +61,15 @@ test('Gemini: menus in a frame, below a numbered tips list', async () => {
   const auth = await promptAt('gemini-first.cast', 'needs-you: auth method, second option')
   assert.equal(auth?.question, 'How would you like to authenticate for this project?')
   assert.deepEqual(menu(auth), ['Sign in with Google', '* Use Gemini API Key', 'Vertex AI'])
+})
+
+test('Gemini: shell approval, with the command in a nested frame', async () => {
+  const p = await promptAt('gemini-session.cast', 'needs-you: shell approval')
+  assert.equal(p?.question, 'Allow execution of [Shell]?')
+  assert.deepEqual(menu(p), ['* Allow once', 'Allow for this session', 'No, suggest changes (esc)'])
+  const card = approvalFor(p)
+  assert.match(card?.detail ?? '', /touch made-by-gemini\.txt/)
+  assert.deepEqual(card?.options.map((o) => o.tone), ['allow', 'always', 'deny'])
 })
 
 test('Codex: options separated by blank lines, with descriptions', async () => {
