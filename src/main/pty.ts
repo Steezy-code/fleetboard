@@ -479,7 +479,14 @@ export class PtyManager {
     const running = () => live.filter((s) => this.sessions.get(s.id) === s)
     const until = Date.now() + graceMs
     while (running().length && Date.now() < until) await new Promise((r) => setTimeout(r, 50))
-    for (const s of running()) this.signal(s, 'SIGKILL')
+    // every group, not only the CLIs still running: a child a CLI started may ignore the hangup the CLI
+    // took (a group's id is not given to another process while the group exists)
+    for (const s of live)
+      try {
+        process.kill(-s.proc.pid, 'SIGKILL')
+      } catch {
+        /* the group is gone */
+      }
   }
 
   get size() {
