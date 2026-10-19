@@ -13,6 +13,8 @@ interface Entry {
   pid: number
   /** when that process started: a later process given the same pid is not it */
   start: string
+  /** an agent CLI, whose whole group goes (a shell's group only while the shell runs: see pty.ts) */
+  group?: boolean
 }
 
 const recordFile = () => path.join(dirs.root, 'consoles-running.json')
@@ -46,10 +48,10 @@ const signalGroup = (pid: number, sig: NodeJS.Signals) => {
 export class RunRecord {
   private entries: Record<string, Entry> = {}
   constructor(private file = recordFile()) {}
-  add(id: string, pid: number) {
+  add(id: string, pid: number, group = true) {
     const start = processStart(pid)
     if (!start) return
-    this.entries[id] = { pid, start }
+    this.entries[id] = { pid, start, group }
     this.save()
   }
   remove(id: string, pid: number) {
@@ -82,7 +84,7 @@ const groupExists = (pgid: number) => {
  */
 function stillRunning(e: Entry): boolean {
   const start = processStart(e.pid)
-  return start !== null ? start === e.start : groupExists(e.pid)
+  return start !== null ? start === e.start : e.group !== false && groupExists(e.pid)
 }
 
 /**

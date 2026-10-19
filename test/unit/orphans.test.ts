@@ -83,6 +83,17 @@ test("a console whose CLI ended but whose child still runs: the child is ended",
   assert.equal(alive(child), false)
 })
 
+test("a shell console's nohup job, its shell gone, is the user's: left alone", { skip: !linux && 'reads /proc' }, async () => {
+  const pid = hupless(`trap '' HUP; sleep 300 & echo $! > ${dir}/child-$$; sleep 0.3`)
+  const child = await childOf(pid)
+  const start = processStart(pid)
+  await new Promise((r) => setTimeout(r, 600))
+  write({ con_sh: { pid, start, group: false } })
+  assert.equal(await endOrphans(200, file), 0)
+  assert.ok(alive(child))
+  process.kill(child, 'SIGKILL')
+})
+
 test('a process with a recorded pid but another start time is someone else: left alone', { skip: !linux && 'reads /proc' }, async () => {
   const pid = hupless()
   write({ con_a: { pid, start: 'an earlier process' }, con_b: { pid: process.pid, start: 'not this test' } })
