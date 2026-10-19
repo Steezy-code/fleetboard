@@ -497,7 +497,7 @@ const TOOLS: ToolDef[] = [
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true })
 
-async function callTool(callerId: string, name: string, a: any): Promise<any> {
+async function callTool(callerId: string, name: string, a: any, signal?: AbortSignal): Promise<any> {
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
@@ -579,14 +579,26 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       }
       const ms = Math.min(WAIT_CAP_MS, Math.max(5, Number(a.timeout_seconds) || 170) * 1000)
       const events = await new Promise<FleetMessage[]>((resolve) => {
-        waiters.set(m.id, resolve)
-        setTimeout(() => {
-          if (waiters.get(m.id) === resolve) {
-            waiters.delete(m.id)
-            resolve([])
-          }
-        }, ms)
+        const finish = (ev: FleetMessage[]) => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          if (waiters.get(m.id) === waiter) waiters.delete(m.id)
+          resolve(ev)
+        }
+        const waiter = (ev: FleetMessage[]) => finish(ev)
+        // the caller hung up (interrupted, restarted): stop waiting so news is not handed to nobody
+        const onAbort = () => finish([])
+        const timer = setTimeout(() => finish([]), ms)
+        waiters.set(m.id, waiter)
+        if (signal?.aborted) onAbort()
+        else signal?.addEventListener('abort', onAbort)
       })
+      if (signal?.aborted) {
+        // arrived as the connection closed: keep it for the next fleet_wait, or to be typed in
+        for (const x of events) x.delivered = false
+        if (events.length) changed(s)
+        return text('')
+      }
       if (!events.length) {
         const working = team().filter((x) => x.status === 'working')
         return text(working.length ? `Nothing new yet. Still working: ${working.map((x) => x.name).join(', ')}. Call fleet_wait again.` : 'Nothing new, and nobody is working.')
@@ -644,13 +656,19 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       changed(s)
       ctx.emit('fleet:asked', ask)
       const answer = await new Promise<string | null>((resolve) => {
-        askWaiters.set(ask.id, resolve)
-        setTimeout(() => {
-          if (askWaiters.get(ask.id) === resolve) {
-            askWaiters.delete(ask.id)
-            resolve(null)
-          }
-        }, WAIT_CAP_MS)
+        const finish = (v: string | null) => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          if (askWaiters.get(ask.id) === waiter) askWaiters.delete(ask.id)
+          resolve(v)
+        }
+        const waiter = (v: string) => finish(v)
+        // without a listener, the answer is posted to the lead as a message (fleet:answer)
+        const onAbort = () => finish(null)
+        const timer = setTimeout(() => finish(null), WAIT_CAP_MS)
+        askWaiters.set(ask.id, waiter)
+        if (signal?.aborted) onAbort()
+        else signal?.addEventListener('abort', onAbort)
       })
       return text(answer ? `The user chose: ${answer}` : 'No answer yet. Carry on with anything that does not depend on it; the answer will be delivered to you when they choose.')
     }
@@ -680,8 +698,9 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
 }
 
 async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force' | 'keep') {
-  ctx.ptys.kill(m.id)
+  // closed first: the console's exit that follows is expected, not news for the lead
   m.status = 'closed'
+  ctx.ptys.kill(m.id)
   ctx.emit('fleet:removeConsoles', [m.id])
   await removeWorktree(s.projectPath, m, branch)
   changed(s)
@@ -689,7 +708,7 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
 
 // ---------------------------------------------------------------- MCP over HTTP (JSON-RPC, streamable HTTP without streams)
 
-async function handleRpc(callerId: string, msg: any): Promise<any | null> {
+async function handleRpc(callerId: string, msg: any, signal?: AbortSignal): Promise<any | null> {
   const reply = (result: any) => ({ jsonrpc: '2.0', id: msg.id, result })
   if (msg.id === undefined || msg.id === null) return null // notification
   switch (msg.method) {
@@ -708,7 +727,7 @@ async function handleRpc(callerId: string, msg: any): Promise<any | null> {
     }
     case 'tools/call': {
       try {
-        return reply(await callTool(callerId, msg.params?.name, msg.params?.arguments ?? {}))
+        return reply(await callTool(callerId, msg.params?.name, msg.params?.arguments ?? {}, signal))
       } catch (e) {
         return reply(fail(`Fleet error: ${String(e)}`))
       }
@@ -727,6 +746,11 @@ function startServer(): Promise<number> {
       if (req.method === 'DELETE') return res.writeHead(200).end()
       if (req.method !== 'POST') return res.writeHead(405).end()
       let body = ''
+      // a long call (fleet_wait, fleet_ask_user) must notice when its caller goes away
+      const hangup = new AbortController()
+      res.on('close', () => {
+        if (!res.writableFinished) hangup.abort()
+      })
       req.on('data', (d) => (body += d))
       req.on('end', async () => {
         let parsed: any
@@ -735,8 +759,15 @@ function startServer(): Promise<number> {
         } catch {
           return res.writeHead(400).end()
         }
+        let caller = m[1]
+        try {
+          caller = decodeURIComponent(m[1])
+        } catch {
+          /* use as is */
+        }
         const batch = Array.isArray(parsed)
-        const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(decodeURIComponent(m[1]), x)))).filter(Boolean)
+        const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
+        if (hangup.signal.aborted) return
         if (!out.length) return res.writeHead(202).end()
         res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[1] })
         res.end(JSON.stringify(batch ? out : out[0]))
@@ -751,9 +782,31 @@ function startServer(): Promise<number> {
 
 // ---------------------------------------------------------------- renderer IPC
 
+/**
+ * A member's console ended before it reported (crashed, killed, closed from the board). Tell its lead
+ * so the team doesn't wait forever; the work so far stays in the member's worktree.
+ */
+function memberExited(id: string, code: number | undefined, appClosing: boolean) {
+  if (appClosing) return
+  const found = memberOf(id)
+  if (!found) return
+  const { s, m } = found
+  if (m.status !== 'working' && m.status !== 'starting') return
+  const lead = m.leadId ? s.members[m.leadId] : undefined
+  if (!lead || lead.status === 'closed') return
+  const how = code ? ` (exit code ${code})` : ''
+  m.status = 'reported'
+  m.report = `Console exited${how} before reporting.`
+  const t = s.tasks.find((x) => x.owner === m.id)
+  if (t) t.status = 'blocked'
+  const work = m.role === 'worker' && m.branch ? ` Anything it changed is uncommitted in its worktree (branch ${m.branch}).` : ''
+  post(s, { from: m.id, to: lead.id, kind: 'report', text: `(blocked) ${m.name}'s console exited${how} before it reported.${work} Start a new ${m.role} if the task still needs doing.` })
+}
+
 export async function initFleet(c: MainContext) {
   ctx = c
   loadAll()
+  ctx.ptys.onExit(memberExited)
   port = await startServer()
   setInterval(deliverTick, 700)
   setInterval(trustTick, 900)
