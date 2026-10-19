@@ -26,6 +26,23 @@ export function activeLead(): FleetMember | undefined {
     .sort((a, b) => b.createdAt - a.createdAt)[0]
 }
 
+/**
+ * Before a team starts in a folder it cannot keep apart from the user's files (not a repository, or
+ * one without a commit: no worktrees), say so and ask.
+ */
+export async function confirmTeamFolder(projectPath: string): Promise<boolean> {
+  const kind = await invoke<'worktrees' | 'no-commits' | 'no-repo'>('fleet:isolation', projectPath).catch(() => 'worktrees' as const)
+  if (kind === 'worktrees') return true
+  return useApp.getState().confirm({
+    title: 'Let the team work in your files directly?',
+    body:
+      (kind === 'no-repo' ? 'This folder is not a git repository' : 'This repository has no commits yet') +
+      ', so the team cannot work in copies of its own: the Lead and its workers edit the files here, side by side, and nothing waits for you to review or merge. To keep your files apart from the team, make a first commit (Git drawer), then start it.',
+    confirm: 'Start anyway',
+    danger: true
+  })
+}
+
 /** Give work to the team: message the current lead, or start one. */
 export async function sendGoal(goal: string) {
   const app = useApp.getState()
@@ -37,6 +54,7 @@ export async function sendGoal(goal: string) {
     app.toast(`Sent to ${lead.name}`, 'ok')
     return lead
   }
+  if (!(await confirmTeamFolder(p.path))) return
   app.toast('Starting a Lead for this goal…')
   const m = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal })
   return m
