@@ -74,9 +74,26 @@ export function register(ctx: MainContext) {
     }
   })
   ipc.handle('fs:assetsDir', () => dirs.assets)
-  ipc.handle('shell:openPath', (_e, p: string) => shell.openPath(p))
+  ipc.handle('shell:openPath', (_e, p: string) => (opensSafely(p) ? shell.openPath(p) : (shell.showItemInFolder(p), '')))
   ipc.handle('shell:openExternal', (_e, url: string) => {
-    if (/^https?:\/\//.test(url)) return shell.openExternal(url)
+    if (/^(https?:\/\/|mailto:)/i.test(url)) return shell.openExternal(url)
   })
   ipc.handle('shell:showItem', (_e, p: string) => shell.showItemInFolder(p))
+}
+
+/**
+ * Files the desktop would run rather than show (scripts, binaries, launchers): a link in a README
+ * must not start a program. Those are revealed in the file manager instead.
+ */
+const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|ps1|vbs|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|x86_64)$/i
+export function opensSafely(p: string): boolean {
+  try {
+    const st = fs.statSync(p)
+    if (st.isDirectory()) return true
+    if (!st.isFile()) return false
+    if (st.mode & 0o111) return false
+  } catch {
+    return false
+  }
+  return !RUNNABLE.test(p)
 }

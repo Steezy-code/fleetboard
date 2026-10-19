@@ -22,6 +22,8 @@ export interface LaunchOptions {
    * this process's API environment. For manual stress runs (test/e2e/real), never in CI.
    */
   realClaudeConfig?: string
+  /** extra Chromium/Electron switches */
+  extraArgs?: string[]
 }
 
 export interface Sandbox {
@@ -135,7 +137,7 @@ export class App {
       FAKE_CLAUDE_SCENARIO: sb.scenarioFile,
       XDG_CONFIG_HOME: path.join(sb.home, '.config')
     })
-    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     const wsUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`app did not start:\n${output.slice(-3000)}`)), 30_000)
