@@ -42,6 +42,8 @@ const baseCommit = new Map<string, string>()
 const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
 const MAX_WORKERS = 4
 const TASK_STATUSES: FleetTask['status'][] = ['todo', 'doing', 'review', 'done', 'blocked']
+/** CLIs that can be team members: they reach the fleet tools over MCP (see fleetLaunch) */
+const TEAM_AGENTS = ['claude', 'codex']
 const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
@@ -435,7 +437,7 @@ const TOOLS: ToolDef[] = [
         task: str('The task, specific and self-contained'),
         owns: strArr('Files or folders this worker may edit; no other worker may own them'),
         done_when: str('A check that proves the task is done, e.g. "npm test passes"'),
-        agent: str('Agent CLI id: claude (default), codex, gemini'),
+        agent: str('Agent CLI id: claude (default) or codex'),
         name: str('Optional worker name'),
         task_ref: str('The plan task this worker does: its id (from fleet_plan), number or title')
       },
@@ -533,7 +535,9 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       const reviewer = name === 'fleet_spawn_reviewer'
       if (!reviewer && team().filter((x) => x.role === 'worker' && x.status === 'working').length >= MAX_WORKERS)
         return fail(`You already have ${MAX_WORKERS} workers running. Wait for reports (fleet_wait) before starting more.`)
-      const agentId = agentById(a.agent ?? 'claude') ? a.agent ?? 'claude' : 'claude'
+      const agentId = String(a.agent ?? '').trim().toLowerCase() || 'claude'
+      if (!TEAM_AGENTS.includes(agentId))
+        return fail(`${agentById(agentId)?.name ?? `"${a.agent}"`} cannot join a team: it has no way to reach the fleet tools. Use ${TEAM_AGENTS.join(' or ')}.`)
       const id = uid('con')
       const wname = pickName(s, a.name)
       let cwd = m.cwd

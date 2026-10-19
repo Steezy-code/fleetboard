@@ -106,4 +106,7 @@ src/renderer/src/
   points at an onboarded config dir (copied, never changed); these spend tokens. Codex and Gemini CLI:
   `FLEETBOARD_REAL_CODEX` / `FLEETBOARD_REAL_GEMINI` name the binary, which talks to a local mock of its
   model API (test/support/mock-responses.ts), so no account is needed.
+- test/unit/agent-flags.test.ts checks every flag passed to Claude Code, Codex and Gemini CLI against the
+  installed CLI's `--help` (skipped for a CLI that is not installed; `FLEETBOARD_CLI_PATH` adds places to
+  look). CLIs drop flags: run it after upgrading one.
 - CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.
