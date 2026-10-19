@@ -16,6 +16,29 @@ import { initFleet } from './fleet'
 import { dirs } from './paths'
 
 let win: BrowserWindow | null = null
+
+/** The session web tiles browse in (WebNode's <webview partition>). */
+const WEB_PARTITION = 'persist:fleetboard-web'
+const HARMLESS = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'])
+function webPermission(permission: string, url: string | undefined) {
+  if (HARMLESS.has(permission)) return true
+  try {
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(url ?? '').hostname)
+  } catch {
+    return false
+  }
+}
+
+// Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-attach-webview', (_ev, prefs) => {
+    delete prefs.preload
+    prefs.nodeIntegration = false
+    prefs.nodeIntegrationInSubFrames = false
+    prefs.contextIsolation = true
+    prefs.sandbox = true
+  })
+})
 let quitConfirmed = false
 
 // On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
@@ -60,7 +83,8 @@ function createWindow() {
     }
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    // only web and mail links leave the app; other schemes could start arbitrary handlers
+    if (/^(https?:\/\/|mailto:)/i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
   // Never let a stray link navigate the app window away; open it in the browser instead.
@@ -150,6 +174,11 @@ app.whenReady().then(async () => {
   protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))
   // Microphone for push-to-talk; everything else stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read'))
+  // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
+  // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
+  const web = session.fromPartition(WEB_PARTITION)
+  web.setPermissionRequestHandler((_wc, permission, cb, details) => cb(webPermission(permission, details.requestingUrl)))
+  web.setPermissionCheckHandler((_wc, permission, origin) => webPermission(permission, origin))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
   for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
