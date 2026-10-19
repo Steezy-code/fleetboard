@@ -15,6 +15,7 @@ export const AGENTS: AgentDef[] = [
   {
     id: 'codex', name: 'Codex', vendor: 'OpenAI', bin: 'codex', color: '#6b7cff',
     resumeArgs: ['resume', '--last'], yoloArgs: ['--dangerously-bypass-approvals-and-sandbox'], editsArgs: ['--full-auto'], configEnv: 'CODEX_HOME',
+    session: { resume: (id) => ['resume', id] },
     headless: (p) => ['exec', '--skip-git-repo-check', p], homepage: 'https://openai.com/codex/', install: 'npm i -g @openai/codex'
   },
   {

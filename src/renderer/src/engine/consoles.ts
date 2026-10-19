@@ -22,7 +22,8 @@ export function wireConsoleEvents() {
   })
   // the conversation a console runs under: what reopening the board resumes
   on('pty:session', (id: string, sessionId: string) => {
-    if (allConsoles().find((c) => c.id === id)?.data.sessionId !== sessionId) app().updateNodeData(id, { sessionId })
+    const next = sessionId || undefined
+    if (allConsoles().find((c) => c.id === id)?.data.sessionId !== next) app().updateNodeData(id, { sessionId: next })
   })
   on('pty:held', (id: string) => {
     const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'That console'

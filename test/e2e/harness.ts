@@ -305,7 +305,8 @@ export class App {
 
   /** Quit like the user does (consoles are stopped), then make sure nothing is left running. */
   async close() {
-    await this.invoke('app:quit').catch(() => {})
+    // the window is destroyed while answering: the reply may never come
+    await Promise.race([this.invoke('app:quit').catch(() => {}), new Promise((r) => setTimeout(r, 3000))])
     this.cdp.close()
     const exited = await new Promise<boolean>((resolve) => {
       if (this.proc.exitCode !== null) return resolve(true)
