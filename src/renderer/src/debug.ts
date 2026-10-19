@@ -8,6 +8,7 @@ import { renderMarkdown, sanitizeHtml } from './workbench/markdown'
 import { renderMarkdown as renderDocMarkdown } from './studios/docs/render'
 import { handoff } from './engine/handoff'
 import { sendGoal } from './engine/fleet'
+import { useCi, applyCiStatus, ciItems, fixCi } from './workbench/ciStore'
 import { figureItems, figureToExcalidraw, figureToPngBase64, figureToSvg } from './studios/diagrams/export'
 import { NODE_DEFS } from './nodes/registry'
 import { PANELS, DRAWERS } from './panels/registry'
@@ -28,5 +29,6 @@ import { PANELS, DRAWERS } from './panels/registry'
   NODE_DEFS,
   PANELS,
   DRAWERS,
+  ci: { useCi, applyCiStatus, ciItems, fixCi },
   exportHelpers: { markdownToHtmlDocument, figureItems, figureToSvg, figureToPngBase64, figureToExcalidraw }
 }

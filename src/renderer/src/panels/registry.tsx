@@ -14,6 +14,7 @@ import SettingsPanel from './SettingsPanel'
 import GitPanel from './GitPanel'
 import ChatPanel from './ChatPanel'
 import SweepPanel from './SweepPanel'
+import CiPanel from './CiPanel'
 import CodeStudio from '../studios/CodeStudio'
 import MarkdownStudio from '../studios/MarkdownStudio'
 import DocumentsStudio from '../studios/DocumentsStudio'
@@ -47,5 +48,6 @@ export const DRAWERS: Record<string, ComponentType<any>> = {
   usage: UsagePanel,
   accounts: AccountsPanel,
   git: GitPanel,
+  ci: CiPanel,
   chat: ChatPanel
 }

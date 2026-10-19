@@ -1214,3 +1214,126 @@
   color: #e8ded4;
 }
 .ce::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- CI watcher (badge + drawer) ---------- */
+.ci-ic.passing {
+  color: var(--ok);
+}
+.ci-ic.failing {
+  color: var(--danger);
+}
+.ci-ic.running {
+  color: var(--warn);
+  animation: ci-spin 1.2s linear infinite;
+}
+.ci-ic.none {
+  color: var(--dim);
+}
+.ci-spin {
+  animation: ci-spin 1s linear infinite;
+}
+@keyframes ci-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.branch-badge.ci-badge svg.ci-ic.passing {
+  color: var(--ok);
+}
+.branch-badge.ci-badge svg.ci-ic.failing {
+  color: var(--danger);
+}
+.branch-badge.ci-badge svg.ci-ic.running {
+  color: var(--warn);
+}
+.ci-badge.failing {
+  border-color: rgba(244, 63, 94, 0.5);
+  color: var(--text);
+}
+.ci-badge-prs {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(244, 63, 94, 0.16);
+  color: #fda4af;
+}
+.ci {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ci-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ci-none {
+  padding: 4px 2px;
+}
+.ci-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: var(--panel-2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ci-row.failing {
+  border-color: rgba(244, 63, 94, 0.45);
+}
+.ci-row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.ci-row-top > .ci-ic {
+  margin-top: 2px;
+  flex: none;
+}
+.ci-row-title {
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ci-row-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ci-row-actions {
+  display: flex;
+  gap: 6px;
+  padding-left: 22px;
+}
+.ci-log {
+  margin: 0;
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+  background: var(--board, #0c0a09);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.ci-auto {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  font-size: 12.5px;
+}
+.ci-foot {
+  font-size: 11px;
+}
