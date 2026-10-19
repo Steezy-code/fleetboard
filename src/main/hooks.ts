@@ -17,7 +17,8 @@ const EVENT_STATUS: Record<string, ConsoleStatus> = {
   Notification: 'needs-you',
   Stop: 'idle',
   SubagentStop: 'working',
-  SessionEnd: 'done'
+  SessionEnd: 'done',
+  SessionStart: 'idle'
 }
 
 export function startHookServer(onStatus: typeof listener): Promise<number> {
@@ -25,12 +26,27 @@ export function startHookServer(onStatus: typeof listener): Promise<number> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const m = /^\/hook\/([^/]+)\/([A-Za-z]+)/.exec(req.url ?? '')
-      req.resume()
-      if (m && req.method === 'POST') {
-        const status = EVENT_STATUS[m[2]]
+      let body = ''
+      req.on('data', (d) => (body.length < 65536 ? (body += d) : null))
+      req.on('end', () => {
+        res.writeHead(204).end()
+        if (!m || req.method !== 'POST') return
+        let status = EVENT_STATUS[m[2]]
+        if (m[2] === 'Notification') {
+          // Claude sends a Notification both when it needs permission and when it has simply been
+          // idle for a while ("waiting for your input"); only the first means the user is needed.
+          let msg = ''
+          try {
+            const j = JSON.parse(body)
+            msg = `${j.message ?? ''} ${j.notification_type ?? ''}`.toLowerCase()
+          } catch {
+            /* no payload */
+          }
+          if (/waiting for your input|idle/.test(msg)) status = 'idle'
+          else if (msg && !/permission|approv|needs your|confirm/.test(msg)) return
+        }
         if (status) listener(decodeURIComponent(m[1]), status, m[2])
-      }
-      res.writeHead(204).end()
+      })
     })
     server.listen(0, '127.0.0.1', () => {
       port = (server.address() as { port: number }).port
@@ -45,7 +61,7 @@ const settingsFile = () => path.join(dirs.hooks, 'claude-hooks.json')
 function writeSettingsFile() {
   const cmd = (event: string) => ({
     type: 'command',
-    command: `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_CONSOLE_ID}/${event}" -o /dev/null >/dev/null 2>&1 || true`
+    command: `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
   })
   const hooks: Record<string, unknown[]> = {}
   for (const event of Object.keys(EVENT_STATUS)) {

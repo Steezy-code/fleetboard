@@ -11,6 +11,7 @@ import * as agents from './agents'
 import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
+import { initFleet } from './fleet'
 import { dirs } from './paths'
 
 let win: BrowserWindow | null = null
@@ -80,6 +81,7 @@ function createWindow() {
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
+  ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.paste(id, text, submit))
   ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
   ipcMain.handle('pty:kill', (_e, id: string) => ptys.kill(id))
   ipcMain.handle('pty:pause', (_e, id: string) => ptys.pause(id))
@@ -121,6 +123,10 @@ function registerCore() {
   })
 }
 
+// A separate state folder (FLEETBOARD_HOME) is a separate Fleetboard: give it its own Electron profile
+// so it neither shares the single-instance lock nor the browser storage of the main app.
+if (process.env.FLEETBOARD_HOME) app.setPath('userData', path.join(process.env.FLEETBOARD_HOME, 'electron'))
+
 // One Fleetboard at a time: both would write the same ~/.fleetboard state. A second launch focuses this one.
 if (!app.requestSingleInstanceLock()) {
   app.quit()
@@ -138,9 +144,10 @@ app.whenReady().then(async () => {
   protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))
   // Microphone for push-to-talk; everything else stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read'))
-  await startHookServer((id, status) => ptys.hook(id, status))
+  await startHookServer((id, status, event) => ptys.hook(id, status, event))
   registerCore()
   for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
+  await initFleet(ctx)
   createWindow()
 })
 

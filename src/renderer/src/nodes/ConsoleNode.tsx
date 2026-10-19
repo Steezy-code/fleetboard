@@ -9,6 +9,7 @@ import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, onConsoleData, sendToConsole, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
+import { useFleet } from '../engine/fleet'
 
 const THEME = {
   background: '#0c0b0a',
@@ -236,6 +237,7 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
         </span>
       )}
       <span className="node-sub">{agentLabel(node.data.agentId)}</span>
+      <FleetBadge id={node.id} />
       {yolo && agentById(node.data.agentId)?.yoloArgs && <span className="pill yolo">yolo</span>}
       {!yolo && node.data.acceptEdits && agentById(node.data.agentId)?.editsArgs && <span className="pill">edits</span>}
       <span className="spacer" />
@@ -278,5 +280,16 @@ export async function beforeRemoveConsoles(nodes: BoardNode[]) {
   return killConsoles(
     nodes.map((n) => n.id),
     { remove: false }
+  )
+}
+
+/** LEAD / WORKER / REVIEWER badge with the member's task as a tooltip. */
+function FleetBadge({ id }: { id: string }) {
+  const m = useFleet((s) => s.state?.members[id])
+  if (!m || m.status === 'closed') return null
+  return (
+    <span className={`pill fleet-${m.role}`} title={m.task}>
+      {m.role}
+    </span>
   )
 }

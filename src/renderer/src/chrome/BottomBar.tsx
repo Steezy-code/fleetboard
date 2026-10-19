@@ -28,7 +28,7 @@ export function BottomBar() {
     <div className="bottombar">
       {!hint && (
         <div className="try-hint">
-          Try <b>"pass this task to codex"</b>
+          Try <b>"add tests for the parser"</b> · your team plans it
           <button className="ws-x" onClick={() => app.setProjectExtra('hintDismissed', true)}>
             ×
           </button>

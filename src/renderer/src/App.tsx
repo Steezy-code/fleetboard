@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useApp } from './state/store'
 import { on, invoke } from './lib/api'
 import { wireConsoleEvents } from './engine/consoles'
+import { wireFleet } from './engine/fleet'
 import { startEngines } from './engine/engines'
 import { Board } from './board/Board'
 import { TopBar } from './chrome/TopBar'
@@ -23,6 +24,7 @@ export function App() {
   useEffect(() => {
     useApp.getState().init()
     wireConsoleEvents()
+    wireFleet()
     startEngines()
     return on('app:confirmQuit', async (n: number) => {
       const ok = await useApp.getState().confirm({

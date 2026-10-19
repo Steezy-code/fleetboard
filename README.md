@@ -38,6 +38,20 @@ scripts/install-desktop.sh   # add it to your app launcher
 - Account profiles: `~/.fleetboard/profiles/<id>/`
 - Nothing is uploaded. The only network traffic comes from the agent CLIs you run, one-time model downloads from Hugging Face (speech and voice), and whatever you open in a web tile.
 
+## Teams: give it a goal, not a task list
+
+Type (or say) what you want in the command bar, for example *"add a Split PDF command with tests"*. Anything that isn't a board command goes to a **Lead**, created automatically:
+
+1. The Lead reads the repo and puts a **plan** on the board.
+2. It starts **workers**, one per task, each in its own git worktree with files only it owns, and briefs them.
+3. Workers report back; their work is committed automatically and the Lead merges it.
+4. A read-only **reviewer** checks the combined result and runs the checks; findings go back to the owner.
+5. A **Ready** card appears in your Inbox: **Merge** brings the branch into your checkout and dismisses the team.
+
+Everything that needs you lands in the **Inbox** (top right): the Lead's questions as buttons, every agent's permission prompt as *Allow once / Always allow … / Deny*, and the Ready card. Your own uncommitted work is never touched: the team works from your last commit in separate worktrees.
+
+Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_spawn_worker`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
+
 ## Navigation (AutoCAD-style by default)
 
 | Input | Action |

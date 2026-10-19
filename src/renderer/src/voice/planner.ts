@@ -4,6 +4,7 @@
 //   3. a fast local rule parser for common board commands (offline, instant)
 //   4. otherwise the CLI planner (settings.plannerAgent via runCli) with a board snapshot → JSON actions
 // Destructive or unrequested steps wait for a spoken / clicked confirmation.
+import { activeLead, looksLikeBoardCommand, sendGoal } from '../engine/fleet'
 import { AGENTS } from '@shared/agents'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { agentLabel, isLive } from '../engine/consoles'
@@ -627,7 +628,22 @@ export async function runCommand(raw: string, source: Source) {
   const local = parseLocal(text)
   if (local) return plan(local.actions, local.say, text, false)
 
-  // 4. CLI planner
+  // 4. work for the team: anything that isn't about the board itself goes to the Lead
+  if (!looksLikeBoardCommand(text)) {
+    try {
+      const lead = await sendGoal(text)
+      const line = lead && activeLead()?.id === lead.id ? `Sent to ${lead.name}.` : 'Started a Lead for this. It will plan, delegate and report back in your Inbox.'
+      thread().add('system', line)
+      showReply(line)
+    } catch (e: any) {
+      const msg = `Could not start the team: ${e?.message ?? e}`
+      thread().add('error', msg)
+      app.toast(msg, 'error')
+    }
+    return
+  }
+
+  // 5. CLI planner for board commands the local rules didn't catch
   try {
     const res = await askPlanner(text)
     if (!res) return

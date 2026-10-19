@@ -16,6 +16,7 @@ export type NodeType =
   | 'file'
   | 'doc'
   | 'orchestrator'
+  | 'plan'
 
 export interface BoardNode<D = any> {
   id: string

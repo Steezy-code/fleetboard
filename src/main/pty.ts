@@ -5,6 +5,7 @@ import { agentById } from '@shared/agents'
 import { loginEnv, shellPath, which } from './env'
 import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
+import { fleetLaunch } from './fleet'
 
 const MAX_BUFFER = 400_000
 const WORKING_WINDOW_MS = 2500
@@ -38,8 +39,13 @@ interface Session {
   hookStatus?: { status: ConsoleStatus; at: number }
   startedAt: number
   paused: boolean
+  /** the CLI reported it finished starting (Claude Code SessionStart hook) */
+  ready: boolean
+  /** the CLI turned on bracketed paste (ESC[?2004h) */
+  bracketed: boolean
 }
 
+const TERMINAL_REPLY = /^(?:\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d*n|\x1b\[[IO]|\x1bP[\s\S]*?\x1b\\|\x1b\][\s\S]*?(?:\x07|\x1b\\))+$/
 const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>78DEHMc]/g
 // TUIs often draw spaces as cursor-forward moves and lines as absolute positioning.
 export const stripAnsi = (s: string) =>
@@ -92,8 +98,14 @@ export class PtyManager {
       if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
       if (yolo) args.push(...agent.yoloArgs!)
-      else if (req.acceptEdits && agent.editsArgs) args.push(...agent.editsArgs)
+      else if (req.acceptEdits && agent.editsArgs && !fleetLaunch(req)) args.push(...agent.editsArgs)
       if (agent.id === 'claude') args.push(...claudeHookArgs(req.id))
+      // team consoles: MCP connection to the fleet, role prompt and role permissions
+      const fleet = fleetLaunch(req)
+      if (fleet) {
+        args.push(...fleet.args)
+        Object.assign(env, fleet.env)
+      }
       if (req.extraArgs?.length) args.push(...req.extraArgs)
     }
 
@@ -116,13 +128,16 @@ export class PtyManager {
       inputMark: 0,
       status: 'starting',
       startedAt: Date.now(),
-      paused: false
+      paused: false,
+      ready: false,
+      bracketed: false
     }
     this.sessions.set(req.id, s)
 
     proc.onData((data) => {
       s.buffer += data
       s.total += data.length
+      if (data.includes('\x1b[?2004')) s.bracketed = data.lastIndexOf('\x1b[?2004h') > data.lastIndexOf('\x1b[?2004l')
       if (s.buffer.length > MAX_BUFFER) s.buffer = s.buffer.slice(-MAX_BUFFER)
       s.lastOutput = Date.now()
       this.emit('pty:data', req.id, data)
@@ -142,8 +157,12 @@ export class PtyManager {
   write(id: string, data: string) {
     const s = this.sessions.get(id)
     if (!s) return
-    s.lastInput = Date.now()
-    s.inputMark = s.total
+    // xterm answers terminal queries (device attributes, cursor position, colors, focus) through the
+    // same channel; those replies are not the user typing and must not clear "needs you".
+    if (!TERMINAL_REPLY.test(data)) {
+      s.lastInput = Date.now()
+      s.inputMark = s.total
+    }
     s.proc.write(data)
   }
 
@@ -207,6 +226,35 @@ export class PtyManager {
     this.setStatus(s, 'working')
   }
 
+  /**
+   * Type text as one paste (bracketed when the CLI asked for it) and optionally submit it.
+   * Without the paste markers a TUI guesses where a fast burst of text ends, and the Enter that
+   * follows can end up inside the paste as a newline instead of submitting it.
+   */
+  paste(id: string, text: string, submit = true) {
+    const s = this.sessions.get(id)
+    if (!s) return
+    const clean = text.replace(/\r?\n/g, ' ').replace(/\x1b/g, '')
+    this.write(id, s.bracketed ? `\x1b[200~${clean}\x1b[201~` : clean)
+    if (submit) setTimeout(() => this.write(id, '\r'), s.bracketed ? 150 : 350)
+  }
+
+  /**
+   * Safe to type a message into this console: idle, and the CLI is past its startup screens.
+   * Claude Code says so through its SessionStart hook; other CLIs get a quiet period after launch.
+   */
+  readyForInput(id: string): boolean {
+    const s = this.sessions.get(id)
+    if (!s || s.paused || s.status !== 'idle') return false
+    // wait for the screen to settle: input typed mid-redraw right after startup can get stuck
+    if (s.agentId === 'claude') return s.ready && Date.now() - s.lastOutput > 1200
+    return Date.now() - s.startedAt > 6000 && Date.now() - s.lastOutput > 2000
+  }
+
+  status(id: string): ConsoleStatus | null {
+    return this.sessions.get(id)?.status ?? null
+  }
+
   buffer(id: string) {
     return this.sessions.get(id)?.buffer ?? null
   }
@@ -222,9 +270,10 @@ export class PtyManager {
   }
 
   /** Status pushed by Claude Code hooks (see hooks.ts). */
-  hook(id: string, status: ConsoleStatus) {
+  hook(id: string, status: ConsoleStatus, event?: string) {
     const s = this.sessions.get(id)
     if (!s) return
+    if (event === 'SessionStart' || event === 'UserPromptSubmit' || event === 'Stop') s.ready = true
     s.hookStatus = { status, at: Date.now() }
     this.setStatus(s, status)
   }

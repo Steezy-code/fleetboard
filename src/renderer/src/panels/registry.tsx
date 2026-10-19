@@ -17,6 +17,7 @@ import CodeStudio from '../studios/CodeStudio'
 import MarkdownStudio from '../studios/MarkdownStudio'
 import DocumentsStudio from '../studios/DocumentsStudio'
 import DiagramsStudio from '../studios/DiagramsStudio'
+import { FleetDiffPanel } from '../fleet/Inbox'
 
 /**
  * Modals open with useApp.openPanel(name, props); drawers (floating right-side cards) with
@@ -35,7 +36,8 @@ export const PANELS: Record<string, ComponentType<any>> = {
   code: CodeStudio,
   markdown: MarkdownStudio,
   documents: DocumentsStudio,
-  diagrams: DiagramsStudio
+  diagrams: DiagramsStudio,
+  fleetDiff: FleetDiffPanel
 }
 
 export const DRAWERS: Record<string, ComponentType<any>> = {

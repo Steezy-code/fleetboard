@@ -5,8 +5,8 @@ import { activeWs, allConsoles, useApp } from '../state/store'
 
 // Console lifecycle shared by the board, the composer, the orchestrator, voice and loops.
 
-export const CONSOLE_W = 560
-export const CONSOLE_H = 360
+export const CONSOLE_W = 780 // ~100 columns at the default font: CLIs like Claude Code need that to lay out cleanly
+export const CONSOLE_H = 440
 const GAP = 24
 
 let wired = false
@@ -138,13 +138,11 @@ export async function startConsole(node: BoardNode<ConsoleData>, cols: number, r
 }
 
 /**
- * Type text into a console. With submit, Enter follows after a short pause so TUIs treat the text
- * as typed input rather than a paste containing a newline.
+ * Type text into a console as one bracketed paste; with submit, Enter follows once the paste has
+ * landed, so the CLI submits it instead of treating the Enter as part of the paste.
  */
 export function sendToConsole(id: string, text: string, submit = true) {
-  const clean = text.replace(/\r?\n/g, ' ').trim()
-  window.fb.send('pty:write', id, clean)
-  if (submit) window.setTimeout(() => window.fb.send('pty:write', id, '\r'), 120)
+  window.fb.send('pty:paste', id, text.trim(), submit)
 }
 
 export const isLive = (id: string) => !!useApp.getState().live[id]
