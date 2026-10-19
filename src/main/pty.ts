@@ -86,7 +86,10 @@ export class PtyManager {
       file = shellPath()
       args = ['-l']
     } else {
-      file = (await which(agent.bin)) ?? agent.bin
+      const found = await which(agent.bin)
+      // say what is wrong and how to fix it, rather than "execvp(3) failed: No such file or directory"
+      if (!found) throw new Error(`${agent.name} is not installed: "${agent.bin}" was not found on your PATH.${agent.install ? ` Install it with: ${agent.install}` : agent.homepage ? ` See ${agent.homepage}` : ''}`)
+      file = found
       args = [...(agent.args ?? [])]
       if (agent.session) {
         // this console's own conversation: resume it if the CLI saved it, else start it under its id
