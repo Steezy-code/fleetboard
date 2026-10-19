@@ -41,3 +41,14 @@ test('dispose ends consoles that ignore SIGHUP, and their children, before it re
   assert.ok(Date.now() - t0 < 2000, `quick: ${Date.now() - t0} ms`)
   assert.ok(await until(() => !alive(info.pid) && !alive(child) && !alive(polite.pid), 1000), 'nothing outlives the app')
 })
+
+test("dispose ends a child that ignores SIGHUP when its CLI itself took the SIGHUP and ended", { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async () => {
+  const ptys = new PtyManager(() => null, () => DEFAULT_SETTINGS)
+  const pidFile = path.join(dir, 'child2.pid')
+  const info = await ptys.spawn({ id: 'parent', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: `(trap '' HUP; exec sleep 600) & echo $! > ${pidFile}; wait` })
+  assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 5000), 'child started')
+  const child = Number(fs.readFileSync(pidFile, 'utf8'))
+  await ptys.dispose()
+  assert.ok(await until(() => !alive(info.pid), 1000), 'the CLI ended')
+  assert.ok(await until(() => !alive(child), 1000), 'and so did its child')
+})
