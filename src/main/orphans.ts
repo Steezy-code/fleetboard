@@ -24,8 +24,10 @@ export function processStart(pid: number): string | null {
   if (!Number.isInteger(pid) || pid <= 1) return null
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
-    // after the command name, which may hold spaces and parentheses: field 22, starttime
-    return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] || null
+    // after the command name, which may hold spaces and parentheses: field 3, the state, and 22, starttime
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+    // a zombie has ended (it waits only to be reaped)
+    return fields[0] === 'Z' ? null : fields[19] || null
   } catch {
     if (process.platform === 'linux') return null
   }
