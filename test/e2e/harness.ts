@@ -183,7 +183,9 @@ export class App {
       XDG_CONFIG_HOME: path.join(sb.home, '.config')
     })
     const inspect = opts.mainInspector ? ['--inspect=0'] : []
-    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    // FB_E2E_HEADLESS=1: no window on screen (Chromium's headless platform), for running without a virtual display
+    const headless = process.env.FB_E2E_HEADLESS ? ['--ozone-platform=headless'] : []
+    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...headless, ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     const wsUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`app did not start:\n${output.slice(-3000)}`)), 30_000)

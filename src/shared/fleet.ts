@@ -45,6 +45,10 @@ export interface FleetAsk {
   from: string
   question: string
   options: string[]
+  /** one short trade-off per option (same order), when the lead gave them */
+  notes?: string[]
+  /** the option the lead would pick */
+  recommended?: number
   at: number
   answer?: string
 }
@@ -55,6 +59,10 @@ export interface FleetReady {
   summary: string
   commits: number
   files: string[]
+  /** lines added / removed per file */
+  stat?: { path: string; add: number; del: number }[]
+  /** what the lead checked before finishing ("typecheck and 48 tests pass"), in its words */
+  verified?: string
   at: number
   /** the repo has an origin remote, so the branch can become a pull request */
   hasRemote?: boolean

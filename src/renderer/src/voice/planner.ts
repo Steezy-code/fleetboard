@@ -31,6 +31,7 @@ import {
 } from './actions'
 import { setVoice, showReply, useThread, useVoice } from './thread'
 import { askHelm, dismissHelm, pickHelmOption, runHelmOption, showHelm, useHelm } from './helm/helm'
+import { cycleFront, frontItem, runAction as runInboxAction } from '../fleet/inboxModel'
 import { speak, stopSpeaking } from './tts'
 
 export type Source = 'voice' | 'typed'
@@ -586,6 +587,31 @@ export async function plan(actions: Action[], sayText: string, userText: string,
   await execute(actions, sayText)
 }
 
+const SPOKEN_INDEX: Record<string, number> = { one: 0, first: 0, '1': 0, two: 1, second: 1, '2': 1, three: 2, third: 2, '3': 2, four: 3, fourth: 3, '4': 3 }
+
+/** Which of the Inbox front card's buttons a short spoken answer means, if any. */
+export function inboxPick(light: string): number | 'next' | null {
+  const f = frontItem()
+  if (!f) return null
+  const t = light.replace(/\b(please|the|it|that)\b/g, ' ').replace(/\s+/g, ' ').trim()
+  if (/^(next|skip|next one)$/.test(t)) return 'next'
+  const m = /^(?:option|number|choice|answer)? ?(one|two|three|four|first|second|third|fourth|[1-4])(?: one)?$/.exec(t)
+  if (m && SPOKEN_INDEX[m[1]] < f.actions.length) return SPOKEN_INDEX[m[1]]
+  const byLabel = f.actions.findIndex((a) => a.label.toLowerCase().replace(/[^a-z ]/g, '').trim() === t)
+  if (byLabel >= 0) return byLabel
+  if (f.kind === 'approval' || f.kind === 'ready') {
+    if (/^(yes|yeah|yep|allow|approve|go ahead|do it|ok|okay|sure)$/.test(t)) {
+      const p = f.actions.findIndex((a) => a.primary)
+      return p >= 0 ? p : null
+    }
+    if (/^(no|nope|deny|reject|don't|do not)$/.test(t)) {
+      const d = f.actions.findIndex((a) => a.tone === 'deny')
+      return d >= 0 ? d : null
+    }
+  }
+  return null
+}
+
 /** Entry point for the command bar, the chat drawer and push-to-talk. */
 export async function runCommand(raw: string, source: Source) {
   const text = raw.trim()
@@ -603,6 +629,16 @@ export async function runCommand(raw: string, source: Source) {
     if (CANCEL_RE.test(light)) return cancelPending()
     setVoice({ pending: null })
     thread().add('system', 'Previous plan dropped.')
+  }
+  // spoken answers to the Inbox's front card: "allow", "deny", "merge", "option two", "next"
+  if (source === 'voice' && !useHelm.getState().card) {
+    const i = inboxPick(light)
+    if (i === 'next') return cycleFront(1)
+    const f = frontItem()
+    if (f && i != null) {
+      showReply(`${f.actions[i].label}.`, 1500)
+      return runInboxAction(f, i)
+    }
   }
   // a Helm card is up: "yes" / "the second one" picks, "no" dismisses, anything else replaces it
   if (useHelm.getState().card) {

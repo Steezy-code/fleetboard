@@ -19,6 +19,8 @@ import './features'
 import './debug'
 import { Boundary } from './ui/Boundary'
 import { useThemeSync } from './ui/theme'
+import { InboxTray } from './fleet/InboxTray'
+import { useInboxWatcher } from './fleet/inboxModel'
 
 export function App() {
   const project = useApp((s) => s.project)
@@ -26,6 +28,7 @@ export function App() {
   const drawer = useApp((s) => s.drawer)
   const focused = useApp((s) => !!s.focusedNode)
   useThemeSync()
+  useInboxWatcher()
 
   useEffect(() => {
     useApp.getState().init()
@@ -96,6 +99,7 @@ export function App() {
             <Minimap />
           </div>
           <FocusBar />
+          {focused && <InboxTray floating />}
           <BoardOverlays />
           {DrawerC && (
             <Boundary what={`The ${drawer!.name} drawer`} resetKey={drawer} actions={[{ label: 'Close', run: () => useApp.getState().closeDrawer() }]}>

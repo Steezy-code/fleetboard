@@ -299,7 +299,7 @@ async function leadFlow(goal) {
     process.exit(2)
   }
   if (sc.ask) {
-    const r = await tool('fleet_ask_user', { question: sc.ask.question, options: sc.ask.options })
+    const r = await tool('fleet_ask_user', { question: sc.ask.question, options: sc.ask.options, notes: sc.ask.notes, recommended: sc.ask.recommended })
     log('answer', { text: r.text })
   }
   // collect reports, merging finished work as it comes in
@@ -331,7 +331,7 @@ async function leadFlow(goal) {
       if (/reported: \((approve|changes)\)/.test(r.text)) break
     }
   }
-  if (sc.finish !== false) await tool('fleet_finish', { summary: fill(sc.summary ?? `Done: ${goal}`) })
+  if (sc.finish !== false) await tool('fleet_finish', { summary: fill(sc.summary ?? `Done: ${goal}`), verified: sc.verified })
 }
 
 /** After a restart: wait for the workers the briefing says are still working, merge, finish. */

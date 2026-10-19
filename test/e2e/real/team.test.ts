@@ -52,11 +52,21 @@ test('real: a team builds a small feature end to end', { skip: !CONFIG, timeout:
         const p = await app.invoke('pty:prompt', m.id)
         say(`${m.name} needs you: ${JSON.stringify(p?.question ?? p?.lines?.slice(-3))} options=${JSON.stringify(p?.options?.map((o: any) => o.label))}`)
         // answer like an attentive user: the Inbox card's primary button (allow once / trust / continue)
-        const clicked = await app.eval((name) => {
-          const card = [...document.querySelectorAll<HTMLElement>('.inbox-card.approval')].find((c) => c.querySelector('b')?.textContent === name)
-          const btn = card?.querySelector<HTMLButtonElement>('.ic-actions .btn.primary')
-          btn?.click()
-          return btn?.textContent ?? null
+        // the tray shows one item at a time: step through it to this member's card
+        const clicked = await app.eval(async (name) => {
+          for (let k = 0; k < 12; k++) {
+            const card = document.querySelector<HTMLElement>('.it-card[data-kind="approval"]')
+            if (card?.querySelector('.it-title b')?.textContent === name) {
+              const btn = card!.querySelector<HTMLButtonElement>('.it-actions .btn.primary')
+              btn?.click()
+              return btn?.textContent ?? null
+            }
+            const next = document.querySelector<HTMLButtonElement>('.inbox-tray button[title^="Next"]')
+            if (!next) return null
+            next.click()
+            await new Promise((r) => setTimeout(r, 50))
+          }
+          return null
         }, m.name)
         say(`  → Inbox: ${clicked ?? 'no card with an allow button'}`)
       }

@@ -36,6 +36,9 @@ const SECTIONS = [
 const SHORTCUTS: [string, string][] = [
   ['Hold Space', 'Push to talk (or Alt+Space, see Voice)'],
   ['@name', 'Direct a command at a console in the command bar'],
+  ['1 – 9 (empty bar)', 'Answer the Inbox card in front'],
+  ['Tab / Shift+Tab', 'Next / previous Inbox item (in the command bar)'],
+  ['Ctrl+I', 'Show all Inbox items'],
   ['V', 'Select tool'],
   ['P', 'Pen'],
   ['R', 'Shapes'],

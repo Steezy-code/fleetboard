@@ -178,8 +178,8 @@ function leadPrompt(m: FleetMember) {
     '4. After starting workers, call fleet_wait to receive their reports (it returns when something happens). Do not poll or sleep.',
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
     '6. Once everything is merged, start one reviewer with fleet_spawn_reviewer to check the combined work against the goal and run the checks. Send any findings to the worker that owns the code (fleet_send), wait, merge again.',
-    '7. Ask the user only for real decisions, with fleet_ask_user and 2-4 short options. Make reasonable choices yourself otherwise.',
-    '8. When the goal is met and verified, call fleet_finish with a short summary. The user then merges your branch with one click.',
+    '7. Ask the user only for real decisions, with fleet_ask_user and 2-4 short options, each with a one-line trade-off in notes and the one you recommend. Make reasonable choices yourself otherwise.',
+    '8. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
     'Keep your own messages short: one-line progress updates.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
   ].join('\n')
@@ -430,6 +430,15 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
 // ---------------------------------------------------------------- tools
 
 type ToolDef = { name: string; description: string; inputSchema: any; roles: FleetRole[] }
+/** `git diff --numstat` → lines added / removed per file (binary files count as 0). */
+export function numstat(out: string): { path: string; add: number; del: number }[] {
+  return out
+    .split('\n')
+    .map((l) => l.split('\t'))
+    .filter((p) => p.length >= 3)
+    .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
+}
+
 const str = (description: string) => ({ type: 'string', description })
 const strArr = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
 
@@ -497,8 +506,18 @@ const TOOLS: ToolDef[] = [
   {
     name: 'fleet_ask_user',
     roles: ['lead'],
-    description: 'Ask the user a decision with 2-4 short options. Shown as buttons on their board. Waits a while for the answer; if it comes later it is delivered to you.',
-    inputSchema: { type: 'object', properties: { question: str('One short question'), options: strArr('2-4 short options') }, required: ['question', 'options'] }
+    description:
+      'Ask the user a decision with 2-4 short options. Shown as a card on their command bar. Give each option a one-line trade-off in notes and say which you would pick, so they can decide at a glance. Waits a while for the answer; if it comes later it is delivered to you.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: str('One short question'),
+        options: strArr('2-4 short options'),
+        notes: strArr('Optional: one short trade-off per option, same order (e.g. "Works today, files vanish on redeploy")'),
+        recommended: str('Optional: the option you would pick (its exact text)')
+      },
+      required: ['question', 'options']
+    }
   },
   {
     name: 'fleet_status',
@@ -510,7 +529,14 @@ const TOOLS: ToolDef[] = [
     name: 'fleet_finish',
     roles: ['lead'],
     description: 'Hand the finished, verified work to the user: shows a Ready card where they merge your branch with one click.',
-    inputSchema: { type: 'object', properties: { summary: str('2-5 lines: what was done and how it was verified') }, required: ['summary'] }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: str('2-5 lines, one change per line starting with "- ": what was done'),
+        verified: str('What you checked and its result, e.g. "typecheck and 48 tests pass". Only what you actually ran.')
+      },
+      required: ['summary']
+    }
   },
   {
     name: 'fleet_report',
@@ -687,7 +713,10 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       return text(`${w.name} dismissed.`)
     }
     case 'fleet_ask_user': {
-      const ask: FleetAsk = { id: uid('ask'), from: m.id, question: String(a.question), options: (a.options ?? []).map(String).slice(0, 4), at: Date.now() }
+      const options = (a.options ?? []).map(String).slice(0, 4)
+      const notes = Array.isArray(a.notes) ? a.notes.slice(0, options.length).map((n: unknown) => String(n ?? '').slice(0, 160)) : undefined
+      const rec = a.recommended == null ? -1 : options.findIndex((o: string) => o.toLowerCase() === String(a.recommended).trim().toLowerCase())
+      const ask: FleetAsk = { id: uid('ask'), from: m.id, question: String(a.question), options, at: Date.now(), ...(notes?.some(Boolean) ? { notes } : {}), ...(rec >= 0 ? { recommended: rec } : {}) }
       s.asks.push(ask)
       changed(s)
       ctx.emit('fleet:asked', ask)
@@ -715,14 +744,16 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       return text(`Team:\n${lines.join('\n')}\n\nPlan:\n${plan.join('\n') || '(none)'}`)
     }
     case 'fleet_finish': {
+      const verified = a.verified ? String(a.verified).slice(0, 200) : undefined
       if (!m.branch) {
-        s.ready = { leadId: m.id, branch: '', summary: String(a.summary), commits: 0, files: [], at: Date.now() }
+        s.ready = { leadId: m.id, branch: '', summary: String(a.summary), commits: 0, files: [], at: Date.now(), ...(verified ? { verified } : {}) }
       } else {
         const base = baseCommit.get(m.id) ?? 'HEAD~1'
         const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..HEAD`])).out) || 0
         const files = (await git(m.cwd, ['diff', '--name-only', `${base}..HEAD`])).out.split('\n').filter(Boolean)
+        const stat = numstat((await git(m.cwd, ['diff', '--numstat', `${base}..HEAD`])).out)
         const hasRemote = (await git(m.cwd, ['remote', 'get-url', 'origin'])).ok
-        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, at: Date.now(), hasRemote } as FleetReady
+        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, stat, at: Date.now(), hasRemote, ...(verified ? { verified } : {}) } as FleetReady
       }
       m.status = 'reported'
       changed(s)

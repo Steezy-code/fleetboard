@@ -40,16 +40,16 @@ test('a permission dialog: needs-you, an Inbox card with the right buttons, answ
   await send(id, 'please deploy')
   await app.waitStatus(id, 'needs-you')
 
-  const card = await app.waitFor(async () => (await app.texts('.inbox-card.approval')).find((t) => t.includes('Do you want to proceed?')), { label: 'Inbox card' })
+  const card = await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).find((t) => t.includes('Do you want to proceed?')), { label: 'Inbox card' })
   assert.match(card, /rm -rf build/)
-  const buttons = await app.texts('.inbox-card.approval .ic-actions button')
+  const buttons = await app.texts('.it-card[data-kind="approval"] .it-actions button')
   assert.deepEqual(buttons, ['Allow once', 'Always allow this command', 'Deny'])
 
-  await app.click('.inbox-card.approval .ic-actions button', 'Deny')
+  await app.click('.it-card[data-kind="approval"] .it-actions button', 'Deny')
   await app.waitFor(() => app.fakeLog((e) => e.event === 'dialog-answer').length > 0, { label: 'dialog answered' })
   assert.equal(app.fakeLog((e) => e.event === 'dialog-answer').at(-1).choice, 2, 'the Deny option was chosen with the arrow keys')
   await app.waitStatus(id, 'idle')
-  assert.equal((await app.texts('.inbox-card.approval')).length, 0, 'the card is gone')
+  assert.equal((await app.texts('.it-card[data-kind="approval"]')).length, 0, 'the card is gone')
 })
 
 test('a stale answer is refused and types nothing', async () => {
@@ -96,9 +96,9 @@ test('a first prompt waits behind a startup question instead of answering it', a
     await new Promise((r) => setTimeout(r, 3000))
     assert.equal(app2.fakeLog((e) => e.event === 'startup-answer').length, 0, 'nothing answered the question for the user')
     assert.equal(app2.fakeLog((e) => e.event === 'prompt').length, 0, 'the prompt is still waiting')
-    const card = await app2.waitFor(async () => (await app2.texts('.inbox-card.approval')).find((t) => /auto mode your default/.test(t)), { label: 'Inbox card' })
+    const card = await app2.waitFor(async () => (await app2.texts('.it-card[data-kind="approval"]')).find((t) => /auto mode your default/.test(t)), { label: 'Inbox card' })
     assert.match(card, /No, keep manual mode/)
-    await app2.click('.inbox-card.approval .ic-actions button', 'No, keep manual mode')
+    await app2.click('.it-card[data-kind="approval"] .it-actions button', 'No, keep manual mode')
     await app2.waitFor(() => app2.fakeLog((e) => e.event === 'prompt' && e.prompt === 'hello').length, { label: 'prompt delivered after the answer' })
     assert.equal(app2.fakeLog((e) => e.event === 'startup-answer')[0].choice, 'No, keep manual mode')
   } finally {
