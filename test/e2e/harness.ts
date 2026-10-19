@@ -24,6 +24,8 @@ export interface LaunchOptions {
   realClaudeConfig?: string
   /** extra Chromium/Electron switches */
   extraArgs?: string[]
+  /** open the main process's inspector, for evalMain() */
+  mainInspector?: boolean
 }
 
 export interface Sandbox {
@@ -180,7 +182,8 @@ export class App {
       FAKE_CLAUDE_SCENARIO: sb.scenarioFile,
       XDG_CONFIG_HOME: path.join(sb.home, '.config')
     })
-    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const inspect = opts.mainInspector ? ['--inspect=0'] : []
+    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let output = ''
     const wsUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`app did not start:\n${output.slice(-3000)}`)), 30_000)
@@ -216,6 +219,21 @@ export class App {
     await cdp.send('Runtime.enable')
     await app.waitFor(() => app.eval(() => !!(window as any).__fleetboard), { label: 'app ready' })
     return app
+  }
+
+  private main?: Cdp
+
+  /** Evaluate an expression in the main process (launch with mainInspector). */
+  async evalMain<T = unknown>(expression: string): Promise<T> {
+    if (!this.main) {
+      const url = /Debugger listening on (ws:\/\/\S+)/.exec(this.output())?.[1]
+      if (!url) throw new Error('no main-process inspector: launch with mainInspector')
+      this.main = await Cdp.connect(url)
+      await this.main.send('Runtime.enable')
+    }
+    const r = await this.main.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+    if (r.exceptionDetails) throw new Error(`in main: ${r.exceptionDetails.exception?.description ?? r.exceptionDetails.text}`)
+    return r.result.value as T
   }
 
   /** Crash the window's page, as running out of memory would (the protocol never answers this). */
@@ -327,6 +345,7 @@ export class App {
       this.proc.once('exit', () => (clearTimeout(t), resolve(true)))
     })
     this.cdp.close()
+    this.main?.close()
     return exited
   }
 
@@ -335,6 +354,7 @@ export class App {
     // the window is destroyed while answering: the reply may never come
     await Promise.race([this.invoke('app:quit').catch(() => {}), new Promise((r) => setTimeout(r, 3000))])
     this.cdp.close()
+    this.main?.close()
     const exited = await new Promise<boolean>((resolve) => {
       if (this.proc.exitCode !== null) return resolve(true)
       const t = setTimeout(() => resolve(false), 8000)
