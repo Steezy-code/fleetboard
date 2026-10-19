@@ -146,7 +146,7 @@ function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
  * a menu on their own; a two-option one ("❯ Yes, … / No, …") needs more evidence, because two lined-up
  * lines can be plain text: a menu hint on screen, or a question just above it with nothing below.
  */
-function cursorMenu(lines: string[], i: number, hinted: boolean): Menu | null {
+function cursorMenu(lines: string[], i: number, hinted: boolean, cols: number): Menu | null {
   const m = CURSOR_ITEM.exec(lines[i])!
   const col = lines[i].length - m[2].length
   // tree connectors (Claude Code's "⎿ result" under a "● Tool(...)" line) are output, not options
@@ -157,6 +157,9 @@ function cursorMenu(lines: string[], i: number, hinted: boolean): Menu | null {
   while (bottom < lines.length - 1 && sibling(lines[bottom + 1])) bottom++
   const siblings = bottom - top
   if (siblings < 1) return null
+  // wrapped prose, not options: Codex echoes a sent message as "› text…" with the rest of it wrapped
+  // under it; every line of a paragraph but its last runs to the edge of the screen
+  if (lines.slice(top, bottom).every((l) => l.trimEnd().length >= cols - 14)) return null
   if (siblings === 1 && !hinted) {
     const last = lines.slice(bottom + 1).every((l) => !l.trim())
     const asked = lines.slice(Math.max(0, top - 6), top).some((l) => /\?\s*$/.test(l.trim()))
@@ -182,7 +185,7 @@ function findMenu(lines: string[], cols: number, hinted: boolean): Menu | null {
   }
   return (
     candidates((i) => (NUMBERED_ITEM.exec(lines[i])?.[2] ? numberedMenu(lines, i, cols) : null)) ??
-    candidates((i) => (CURSOR_ITEM.test(lines[i]) && !NUMBERED_ITEM.test(lines[i]) ? cursorMenu(lines, i, hinted) : null))
+    candidates((i) => (CURSOR_ITEM.test(lines[i]) && !NUMBERED_ITEM.test(lines[i]) ? cursorMenu(lines, i, hinted, cols) : null))
   )
 }
 
