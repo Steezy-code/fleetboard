@@ -1,0 +1,132 @@
+// The loop engine against the real store, with the preload bridge faked and time mocked.
+import { ipc } from '../support/renderer-env'
+import { test, mock, beforeEach } from 'node:test'
+import assert from 'node:assert/strict'
+
+mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: 1_000_000 })
+const { useApp } = await import('@/state/store')
+const loops = await import('@/engine/loops')
+const { wireConsoleEvents } = await import('@/engine/consoles')
+wireConsoleEvents()
+loops.startLoops()
+
+const CONSOLES = ['idle1', 'working1', 'asking', 'starting1', 'paused1', 'gone']
+
+function seed() {
+  const node = (id: string) => ({ id, type: 'console', x: 0, y: 0, w: 100, h: 100, z: 1, data: { name: id, agentId: 'claude' } })
+  useApp.setState({
+    project: {
+      schema: 1,
+      id: 'p',
+      name: 'p',
+      path: '/tmp/p',
+      activeWorkspaceId: 'w',
+      lastOpened: 0,
+      extras: {},
+      workspaces: [{ id: 'w', name: 'W', nodes: CONSOLES.map(node), groups: [], wires: [], ink: [], camera: { x: 0, y: 0, zoom: 1 }, extras: {} }]
+    } as any,
+    live: Object.fromEntries(CONSOLES.filter((c) => c !== 'gone').map((c) => [c, true])),
+    statuses: { idle1: 'idle', working1: 'working', asking: 'needs-you', starting1: 'starting', paused1: 'paused', gone: 'exited' }
+  })
+}
+
+const pastes = () => ipc.sent.filter((s) => s.channel === 'pty:paste').map((s) => s.args as [string, string, boolean])
+const loop = (id: string) => loops.getLoops().find((l) => l.id === id)!
+
+beforeEach(() => {
+  ipc.sent.length = 0
+  ipc.handlers.clear()
+  seed()
+})
+
+test('a loop types only into consoles that can take it: never into one asking a question', () => {
+  const l = loops.newLoop({ instruction: 'keep going', target: { kind: 'all' } })
+  loops.upsertLoop(l)
+  loops.runLoopNow(l.id)
+  assert.deepEqual(
+    pastes().map((p) => p[0]).sort(),
+    ['idle1', 'working1'],
+    'not into a permission prompt, a starting CLI, a paused or a stopped console'
+  )
+  assert.deepEqual(pastes()[0].slice(1), ['keep going', true])
+  assert.equal(loop(l.id).runs, 1)
+})
+
+test('a loop with a run limit retires itself', () => {
+  const l = loops.newLoop({ instruction: 'go', target: { kind: 'pick', ids: ['idle1'] }, stop: { ...loops.DEFAULT_STOP, afterRuns: true, runs: 2 } })
+  loops.upsertLoop(l)
+  loops.runLoopNow(l.id)
+  loops.runLoopNow(l.id)
+  loops.runLoopNow(l.id)
+  assert.equal(pastes().length, 2)
+  assert.equal(loop(l.id).enabled, false)
+  assert.equal(loop(l.id).ended?.reason, 'runs')
+})
+
+test('a scheduled loop fires once per period, and not in a burst after a quiet time', () => {
+  const l = loops.newLoop({ instruction: 'status?', trigger: { kind: 'schedule', everyMin: 15 }, target: { kind: 'pick', ids: ['idle1'] }, startedAt: Date.now() })
+  loops.upsertLoop(l)
+  mock.timers.tick(14 * 60_000)
+  assert.equal(pastes().length, 0)
+  mock.timers.tick(60_000 + 5000)
+  assert.equal(pastes().length, 1)
+  mock.timers.tick(15 * 60_000 + 5000)
+  assert.equal(pastes().length, 2)
+  // the console is busy asking for two periods: nothing is sent, and nothing piles up for later
+  useApp.getState().setStatus('idle1', 'needs-you')
+  mock.timers.tick(30 * 60_000)
+  assert.equal(pastes().length, 2)
+  useApp.getState().setStatus('idle1', 'idle')
+  mock.timers.tick(15 * 60_000 + 5000)
+  assert.equal(pastes().length, 3)
+  loops.setLoopEnabled(l.id, false)
+})
+
+test('a time limit retires a loop', () => {
+  const l = loops.newLoop({ instruction: 'x', trigger: { kind: 'schedule', everyMin: 5 }, target: { kind: 'pick', ids: ['idle1'] }, startedAt: Date.now(), stop: { ...loops.DEFAULT_STOP, afterTime: true, minutes: 12 } })
+  loops.upsertLoop(l)
+  mock.timers.tick(13 * 60_000)
+  assert.equal(loop(l.id).ended?.reason, 'time')
+  const sent = pastes().length
+  mock.timers.tick(30 * 60_000)
+  assert.equal(pastes().length, sent, 'nothing after it retired')
+})
+
+test('an idle loop fires when an agent finishes, once', () => {
+  const l = loops.newLoop({ instruction: 'next step', trigger: { kind: 'idle' }, target: { kind: 'pick', ids: ['working1'] } })
+  loops.upsertLoop(l)
+  useApp.getState().setStatus('working1', 'idle')
+  assert.deepEqual(pastes().map((p) => p[0]), ['working1'])
+  // a quick flicker back and forth within the debounce does not fire again
+  mock.timers.tick(2000)
+  useApp.getState().setStatus('working1', 'working')
+  useApp.getState().setStatus('working1', 'idle')
+  assert.equal(pastes().length, 1)
+  loops.setLoopEnabled(l.id, false)
+})
+
+test("an output loop matches words a TUI placed with cursor moves (Claude Code's output)", () => {
+  const l = loops.newLoop({ instruction: 'fix it', trigger: { kind: 'output', pattern: 'tests failed', regex: false }, target: { kind: 'pick', ids: ['working1'] } })
+  loops.upsertLoop(l)
+  mock.timers.tick(5000) // the engine subscribes on its next tick
+  ipc.emit('pty:data', 'working1', '\x1b[2G\x1b[1m3\x1b[4Gtests\x1b[10Gfailed\x1b[22m')
+  assert.deepEqual(pastes().map((p) => p[0]), ['working1'])
+  // the old stripping glued it into "3testsfailed": prove the pattern needed the fix
+  assert.equal(/tests failed/.test('\x1b[2G3\x1b[4Gtests\x1b[10Gfailed'.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')), false)
+  loops.setLoopEnabled(l.id, false)
+})
+
+test('a goal judged met stops the loop before it sends again', async () => {
+  ipc.handle('cli:run', () => ({ code: 0, text: 'MET\nAll tests pass now.' }))
+  ipc.handle('pty:tail', () => '42 passing')
+  const l = loops.newLoop({ instruction: 'keep fixing', target: { kind: 'pick', ids: ['idle1'] }, stop: { ...loops.DEFAULT_STOP, goal: true, goalKind: 'judge', goalText: 'tests pass' } })
+  loops.upsertLoop(l)
+  loops.runLoopNow(l.id) // the first run never asks: nothing was done yet
+  assert.equal(pastes().length, 1)
+  loops.runLoopNow(l.id)
+  await mock.timers.tick(0)
+  await new Promise((r) => setImmediate(r))
+  assert.equal(pastes().length, 1, 'no second send')
+  assert.equal(loop(l.id).ended?.reason, 'goal')
+  assert.equal(loop(l.id).ended?.note, 'All tests pass now.')
+})

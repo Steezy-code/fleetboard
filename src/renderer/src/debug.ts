@@ -6,6 +6,7 @@ import { transcribe, warmUpStt, sttReady } from './voice/stt'
 import { markdownToHtmlDocument } from './workbench/pdf'
 import { renderMarkdown, sanitizeHtml } from './workbench/markdown'
 import { renderMarkdown as renderDocMarkdown } from './studios/docs/render'
+import { handoff } from './engine/handoff'
 import { figureItems, figureToExcalidraw, figureToPngBase64, figureToSvg } from './studios/diagrams/export'
 
 ;(window as any).__fleetboard = {
@@ -18,5 +19,6 @@ import { figureItems, figureToExcalidraw, figureToPngBase64, figureToSvg } from 
   resolveTargets,
   voice: { synthesize, ttsReady, warmUpTts, transcribe, warmUpStt, sttReady },
   markdown: { renderMarkdown, sanitizeHtml, renderDocMarkdown },
+  handoff,
   exportHelpers: { markdownToHtmlDocument, figureItems, figureToSvg, figureToPngBase64, figureToExcalidraw }
 }

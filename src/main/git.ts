@@ -258,7 +258,7 @@ async function diff(cwd: string, file: string, opts: { untracked?: boolean; stag
   }
   const hasHead = (await git(root, ['rev-parse', '--verify', '-q', 'HEAD'])).code === 0
   const args = opts.staged ? ['diff', '--cached'] : hasHead ? ['diff', 'HEAD'] : ['diff', '--cached']
-  const r = await git(root, [...args, '--no-color', '--no-ext-diff', '-M', '--', file])
+  const r = await git(root, ['--literal-pathspecs', ...args, '--no-color', '--no-ext-diff', '-M', '--', file])
   if (r.code !== 0) return fail(cleanErr(r))
   let out = r.stdout
   const binary = /^Binary files .* differ$/m.test(out)
@@ -288,10 +288,11 @@ async function commit(cwd: string, message: string, files?: { path: string; from
   let count = 0
   if (files && files.length) {
     const addPaths = files.map((f) => f.path)
-    const add = await git(root, ['add', '-A', '--', ...addPaths])
+    // literal: a path like app/[id]/page.tsx is a file name, not a glob that could stage app/i/page.tsx
+    const add = await git(root, ['--literal-pathspecs', 'add', '-A', '--', ...addPaths])
     if (add.code !== 0) return fail(cleanErr(add, 'git add failed'))
     const spec = [...new Set(files.flatMap((f) => (f.from ? [f.path, f.from] : [f.path])))]
-    const r = await git(root, ['commit', '-F', '-', '--', ...spec], { input: msg, timeout: 60000 })
+    const r = await git(root, ['--literal-pathspecs', 'commit', '-F', '-', '--', ...spec], { input: msg, timeout: 60000 })
     if (r.code !== 0) return fail(cleanErr(r, 'git commit failed'))
     count = files.length
   } else {
