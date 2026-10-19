@@ -12,6 +12,7 @@ import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
 import * as sweep from './sweep'
+import * as ci from './ci'
 import * as goal from './goal'
 import { initFleet } from './fleet'
 import * as remote from './remote'
@@ -210,7 +211,7 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))
   // Microphone for push-to-talk; everything else stays denied.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read'))
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read' || permission === 'notifications'))
   // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
   // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
   const web = session.fromPartition(WEB_PARTITION)
@@ -221,7 +222,7 @@ app.whenReady().then(async () => {
   if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal]) m.register(ctx)
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal, ci]) m.register(ctx)
   sweep.register(ctx)
   await initFleet(ctx)
   await remote.register(ctx)

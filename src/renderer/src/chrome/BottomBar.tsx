@@ -4,6 +4,7 @@ import { useApp, activeWs } from '../state/store'
 import { consoleNodes, pauseAll, resumeAll, spawnConsoles } from '../engine/consoles'
 import { CommandBar } from '../voice/CommandBar'
 import { BranchBadge } from './BranchBadge'
+import { CiBadge } from './CiBadge'
 
 /** Group the selected consoles into a new team (or open the composer when nothing is selected). */
 export function groupSelection() {
@@ -105,6 +106,7 @@ export function BottomLeft() {
   return (
     <div className="bottom-left">
       <BranchBadge />
+      <CiBadge />
     </div>
   )
 }
