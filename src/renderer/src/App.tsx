@@ -37,11 +37,25 @@ export function App() {
         confirm: 'Quit',
         danger: true
       })
-      if (ok) {
-        const p = useApp.getState().project
-        if (p) await invoke('store:saveProject', p)
-        invoke('app:quit')
+      if (!ok) return
+      const p = useApp.getState().project
+      if (p) {
+        // a save that fails must not keep the app from quitting, nor lose the board without a word
+        const failed = await invoke('store:saveProject', p).then(
+          () => null,
+          (e) => String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+        )
+        if (failed) {
+          const anyway = await useApp.getState().confirm({
+            title: 'The board could not be saved',
+            body: `${failed}. Quit anyway? Changes since the last save are lost.`,
+            confirm: 'Quit anyway',
+            danger: true
+          })
+          if (!anyway) return
+        }
       }
+      invoke('app:quit')
     })
   }, [])
 
