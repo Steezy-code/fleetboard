@@ -10,6 +10,7 @@ import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { loginEnv } from './env'
+import { newSecret, refuse, sameSecret } from './localserver'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -23,6 +24,8 @@ fs.mkdirSync(treesDir, { recursive: true })
 
 let ctx: MainContext
 let port = 0
+/** this run's secret, part of every team console's MCP URL */
+const secret = newSecret()
 const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
@@ -204,10 +207,10 @@ export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record
   const found = memberOf(req.id)
   if (!found || !port) return null
   const { m, s } = found
-  const url = `http://127.0.0.1:${port}/mcp/${m.id}`
+  const url = `http://127.0.0.1:${port}/mcp/${secret}/${m.id}`
   const env = { MCP_TOOL_TIMEOUT: '600000' }
   if (m.agentId === 'claude') {
-    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url } } })
+    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url } } }, 0o600)
     const lead = m.leadId ? s.members[m.leadId] : undefined
     const args = ['--mcp-config', mcpFile(m.id), '--append-system-prompt', m.role === 'lead' ? leadPrompt(m) : workerPrompt(m, lead)]
     if (m.role === 'worker') args.push('--permission-mode', 'acceptEdits')
@@ -753,8 +756,12 @@ async function handleRpc(callerId: string, msg: any, signal?: AbortSignal): Prom
 function startServer(): Promise<number> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      const m = /^\/mcp\/([^/?]+)/.exec(req.url ?? '')
+      const m = /^\/mcp\/([^/?]+)\/([^/?]+)/.exec(req.url ?? '')
       if (!m) return res.writeHead(404).end()
+      if (!sameSecret(m[1], secret) || refuse(req, port, { json: true })) {
+        req.resume()
+        return res.writeHead(403).end()
+      }
       if (req.method === 'GET') return res.writeHead(405, { Allow: 'POST' }).end()
       if (req.method === 'DELETE') return res.writeHead(200).end()
       if (req.method !== 'POST') return res.writeHead(405).end()
@@ -772,9 +779,9 @@ function startServer(): Promise<number> {
         } catch {
           return res.writeHead(400).end()
         }
-        let caller = m[1]
+        let caller = m[2]
         try {
-          caller = decodeURIComponent(m[1])
+          caller = decodeURIComponent(m[2])
         } catch {
           /* use as is */
         }
@@ -782,7 +789,7 @@ function startServer(): Promise<number> {
         const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
         if (hangup.signal.aborted) return
         if (!out.length) return res.writeHead(202).end()
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[1] })
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[2] })
         res.end(JSON.stringify(batch ? out : out[0]))
       })
     })
