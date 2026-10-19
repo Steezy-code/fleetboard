@@ -163,3 +163,11 @@ test('a goal judged met stops the loop before it sends again', async () => {
   assert.equal(loop(l.id).ended?.reason, 'goal')
   assert.equal(loop(l.id).ended?.note, 'All tests pass now.')
 })
+
+test('the summary says when nothing ends a loop', () => {
+  const base = { trigger: { kind: 'schedule', everyMin: 10 }, target: { kind: 'all' } } as any
+  const stop = { afterRuns: false, runs: 3, afterTime: false, minutes: 60, goal: false, goalKind: 'command', command: 'npm test', judgeAgent: 'claude', goalText: '' }
+  assert.match(loops.describeLoop({ ...base, stop }), /with no end: it runs until you turn it off\.$/)
+  assert.doesNotMatch(loops.describeLoop({ ...base, stop: { ...stop, afterRuns: true } }), /no end/)
+  assert.doesNotMatch(loops.describeLoop({ ...base, stop: { ...stop, goal: true } }), /no end/)
+})

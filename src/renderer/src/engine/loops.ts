@@ -144,6 +144,8 @@ export function describeLoop(l: Pick<Loop, 'trigger' | 'target' | 'stop'>): stri
         ? `, until \`${s.command || '…'}\` passes`
         : `, until ${agentLabel(s.judgeAgent).replace(/ Code$| CLI$/, '')} judges the goal met`
   }
+  // nothing ends it: say so, it costs tokens for as long as it runs
+  if (!limits.length && !s.goal) sentence += ', with no end: it runs until you turn it off'
   return sentence + '.'
 }
 
