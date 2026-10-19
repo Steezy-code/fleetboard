@@ -56,6 +56,8 @@ export default function CodeStudio(props: { path?: string }) {
     loadTree()
   }, [loadTree])
 
+  /** the file asked for last: an earlier open whose read comes back later is dropped */
+  const opening = useRef('')
   const open = useCallback(
     async (path: string, force = false) => {
       const cur = docRef.current
@@ -66,7 +68,9 @@ export default function CodeStudio(props: { path?: string }) {
       }
       setLoadingFile(true)
       setExpanded((s) => new Set([...s, ...ancestors(root, path)]))
+      opening.current = path
       const st = await invoke<FileStat | null>('fs:stat', path).catch(() => null)
+      if (opening.current !== path) return
       if (!st || st.dir) {
         setDoc({ path, text: null, saved: '', error: st?.dir ? 'This is a folder' : 'File not found', mtime: 0 })
       } else if (isImagePath(path)) {
@@ -76,9 +80,11 @@ export default function CodeStudio(props: { path?: string }) {
       } else {
         try {
           const text = await invoke<string>('fs:read', path)
+          if (opening.current !== path) return
           if (text.slice(0, 8000).includes('\u0000')) setDoc({ path, text: null, saved: '', binary: true, mtime: st.mtime })
           else setDoc({ path, text, saved: text, mtime: st.mtime })
         } catch (e: any) {
+          if (opening.current !== path) return
           setDoc({ path, text: null, saved: '', error: String(e?.message ?? e), mtime: st.mtime })
         }
       }
