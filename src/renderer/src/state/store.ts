@@ -107,7 +107,16 @@ interface AppState {
   focusItem: (id: string) => void
   setTool: (t: Tool) => void
   setSelection: (ids: string[]) => void
+  /** null exits focus mode; an id enters it (kept for existing callers) */
   setFocusedNode: (id: string | null) => void
+  /** Focus mode: glide into a node so it fills the board at 100%, remembering the current view */
+  enterFocus: (id: string) => void
+  /** Leave focus mode and glide back to the view saved on entry */
+  exitFocus: () => void
+  /** Hop to the previous/next console on this workspace without leaving focus */
+  cycleFocus: (dir: 1 | -1) => void
+  /** internal: removes nodes without focus bookkeeping */
+  _removeNodes: (ids: string[]) => void
   openPanel: (name: string, props?: Record<string, any>) => void
   closePanel: () => void
   openDrawer: (name: string, props?: Record<string, any>) => void
@@ -170,8 +179,54 @@ export function animateCamera(target: Camera, ms = 260) {
     if (t < 1) animFrame = requestAnimationFrame(step)
   }
   animFrame = requestAnimationFrame(step)
+  // rAF stops while the window is hidden or occluded: make sure the move still lands
+  const token = ++animToken
+  window.clearTimeout(animFallback)
+  animFallback = window.setTimeout(() => {
+    if (token !== animToken) return
+    cancelAnimationFrame(animFrame)
+    const c = activeWs()?.camera
+    if (c && (c.x !== target.x || c.y !== target.y || c.zoom !== target.zoom)) useApp.getState().setCamera(target)
+  }, ms + 120)
 }
-export const stopCameraAnimation = () => cancelAnimationFrame(animFrame)
+let animToken = 0
+let animFallback = 0
+export const stopCameraAnimation = () => {
+  animToken++
+  window.clearTimeout(animFallback)
+  cancelAnimationFrame(animFrame)
+}
+
+/** Focus mode geometry: the node fills the board below the top bar with a small margin. */
+export const FOCUS_MS = 420
+export function focusRect(vp: { w: number; h: number }) {
+  const top = 58
+  return { x: 16, y: top, w: Math.max(320, vp.w - 32), h: Math.max(200, vp.h - top - 16) }
+}
+
+/** Put the camera back to the pre-focus view right away (no animation), e.g. before leaving a workspace. */
+function restoreFocusInstantly() {
+  const app = useApp.getState()
+  const ws = activeWs()
+  const saved = ws?.extras.focusReturn as Camera | undefined
+  if (app.focusedNode || saved) {
+    stopCameraAnimation()
+    if (saved) {
+      app.setCamera(saved)
+      app.setWsExtra('focusReturn', undefined)
+    }
+    useApp.setState({ focusedNode: null })
+  }
+}
+
+function clearFocusReturn(w: Workspace): Workspace {
+  const saved = w.extras?.focusReturn as Camera | undefined
+  if (!saved) return w
+  const { focusReturn: _f, ...extras } = w.extras
+  return { ...w, camera: saved, extras }
+}
+
+const removeNodesNow = (ids: string[]) => (useApp.getState() as any)._removeNodes(ids)
 
 let saveTimer: number | undefined
 function scheduleSave(p: Project | null) {
@@ -251,10 +306,13 @@ export const useApp = create<AppState>((set, get) => {
         }
       }
       project = { ...project, path, lastOpened: Date.now() }
+      // quit while focused: come back at the view from before focusing
+      project = { ...project, workspaces: project.workspaces.map(clearFocusReturn) }
       set({ project, selection: [], panel: null, focusedNode: null })
       scheduleSave(project)
     },
     closeProject: () => {
+      restoreFocusInstantly()
       const p = get().project
       if (p) invoke('store:saveProject', p)
       set({ project: null, selection: [], panel: null, drawer: null, focusedNode: null })
@@ -269,6 +327,7 @@ export const useApp = create<AppState>((set, get) => {
       return ws.id
     },
     switchWorkspace: (id) => {
+      restoreFocusInstantly()
       mutateProject((p) => ({ ...p, activeWorkspaceId: id }))
       set({ selection: [], focusedNode: null })
     },
@@ -315,7 +374,11 @@ export const useApp = create<AppState>((set, get) => {
           )
         }
       }),
-    removeNodes: (ids) =>
+    removeNodes: (ids) => {
+      if (get().focusedNode && ids.includes(get().focusedNode!)) get().exitFocus()
+      removeNodesNow(ids)
+    },
+    _removeNodes: (ids: string[]) =>
       mutateWs((ws) => {
         const s = new Set(ids)
         return {
@@ -436,7 +499,36 @@ export const useApp = create<AppState>((set, get) => {
     },
     setTool: (tool) => set({ tool }),
     setSelection: (selection) => set({ selection }),
-    setFocusedNode: (focusedNode) => set({ focusedNode }),
+    setFocusedNode: (id) => (id ? get().enterFocus(id) : get().exitFocus()),
+    enterFocus: (id) => {
+      const ws = activeWs()
+      const node = ws?.nodes.find((n) => n.id === id)
+      if (!ws || !node) return
+      stopCameraAnimation()
+      // remember where the user was only when first entering, not when hopping between nodes
+      if (!get().focusedNode || !ws.extras.focusReturn) get().setWsExtra('focusReturn', { ...ws.camera })
+      set({ focusedNode: id, selection: [id] })
+      const r = focusRect(get().viewport)
+      animateCamera({ zoom: 1, x: r.x - node.x, y: r.y - node.y }, FOCUS_MS)
+    },
+    exitFocus: () => {
+      const ws = activeWs()
+      const saved = ws?.extras.focusReturn as Camera | undefined
+      set({ focusedNode: null })
+      if (saved) {
+        get().setWsExtra('focusReturn', undefined)
+        animateCamera(saved, FOCUS_MS)
+      }
+    },
+    cycleFocus: (dir) => {
+      const ws = activeWs()
+      const current = get().focusedNode
+      if (!ws || !current) return
+      const order = ws.nodes.filter((n) => n.type === 'console' || n.id === current).sort((a, b) => a.y - b.y || a.x - b.x)
+      const i = order.findIndex((n) => n.id === current)
+      const next = order[(i + dir + order.length) % order.length]
+      if (next && next.id !== current) get().enterFocus(next.id)
+    },
     openPanel: (name, props) => set({ panel: { name, props } }),
     closePanel: () => set({ panel: null }),
     openDrawer: (name, props) => set((s) => ({ drawer: s.drawer?.name === name && !props ? null : { name, props } })),

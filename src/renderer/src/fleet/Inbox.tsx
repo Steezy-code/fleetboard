@@ -108,7 +108,8 @@ function openConsole(id: string) {
   const c = allConsoles().find((x) => x.id === id)
   if (!c) return
   if (c.workspaceId !== app.project?.activeWorkspaceId) app.switchWorkspace(c.workspaceId)
-  window.setTimeout(() => useApp.getState().focusItem(id), 80)
+  // dive into it full screen; Back returns to wherever you were
+  window.setTimeout(() => useApp.getState().enterFocus(id), 80)
 }
 
 function AskCard({ id, from, question, options }: { id: string; from: string; question: string; options: string[] }) {

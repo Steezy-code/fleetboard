@@ -1,13 +1,16 @@
 import { memo, useRef } from 'react'
-import { createPortal } from 'react-dom'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { BoardNode } from '@shared/types'
 import { NODE_DEFS } from '../nodes/registry'
-import { activeWs, connectClick, useApp } from '../state/store'
+import { activeWs, connectClick, focusRect, useApp } from '../state/store'
 import { groupAt, snap } from './geometry'
 
-/** Begin a drag that moves the node (and the rest of the selection) with the pointer. */
-export function startNodeDrag(e: React.PointerEvent, node: BoardNode) {
+/**
+ * Begin a drag that moves the node (and the rest of the selection) with the pointer.
+ * With onClick, nothing moves until the pointer travels a few pixels, and a press that never does
+ * counts as a click instead (used by click-to-zoom on a tile's body).
+ */
+export function startNodeDrag(e: React.PointerEvent, node: BoardNode, onClick?: () => void) {
   if (e.button !== 0) return
   e.stopPropagation()
   const app = useApp.getState()
@@ -18,9 +21,18 @@ export function startNodeDrag(e: React.PointerEvent, node: BoardNode) {
   let lastX = e.clientX
   let lastY = e.clientY
   let moved = 0
+  const sx = e.clientX
+  const sy = e.clientY
+  let dragging = !onClick
   const el = e.currentTarget as HTMLElement
   el.setPointerCapture(e.pointerId)
   const move = (ev: PointerEvent) => {
+    if (!dragging) {
+      if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 6) return
+      dragging = true
+      lastX = sx
+      lastY = sy
+    }
     const dx = (ev.clientX - lastX) / zoom
     const dy = (ev.clientY - lastY) / zoom
     lastX = ev.clientX
@@ -31,6 +43,7 @@ export function startNodeDrag(e: React.PointerEvent, node: BoardNode) {
   const up = () => {
     el.removeEventListener('pointermove', move)
     el.removeEventListener('pointerup', up)
+    if (!dragging) return onClick?.()
     if (moved < 2) return
     // snap and update group membership by where each node was dropped
     const ws = activeWs()!
@@ -94,42 +107,52 @@ interface FrameProps {
   maximized?: boolean
 }
 
+// Tiles that zoom in on a click to their body. Sticky notes and text labels edit in place instead.
+const NO_CLICK_ZOOM = new Set(['note', 'text'])
+
 export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximized = false }: FrameProps) {
   const def = NODE_DEFS[node.type]
   const ref = useRef<HTMLDivElement>(null)
+  const viewport = useApp((s) => s.viewport)
+  const tool = useApp((s) => s.tool)
   if (!def) return null
   const Body = def.component
   const Header = def.header
   const Actions = def.actions
   const Icon = def.icon
+  const focused = maximized
   const props = { node, selected, zoom, maximized }
-  const setFocused = useApp.getState().setFocusedNode
+  const app = () => useApp.getState()
+  const toggleFocus = () => (focused ? app().exitFocus() : app().enterFocus(node.id))
+  const fr = focused ? focusRect(viewport) : null
+  // zoomed out, a click on the body dives in; close up (>= 90%) clicks go straight to the content
+  const catcher = !focused && tool === 'select' && zoom < 0.9 && !NO_CLICK_ZOOM.has(node.type)
 
-  const frame = (
+  return (
     <div
       ref={ref}
-      className={`node node-${node.type} ${selected ? 'selected' : ''} ${def.chromeless ? 'chromeless' : ''} ${maximized ? 'maximized' : ''}`}
-      style={maximized ? undefined : { left: node.x, top: node.y, width: node.w, height: node.h, zIndex: node.z }}
+      className={`node node-${node.type} ${selected && !focused ? 'selected' : ''} ${def.chromeless ? 'chromeless' : ''} ${focused ? 'focused' : ''}`}
+      style={{ left: node.x, top: node.y, width: fr ? fr.w : node.w, height: fr ? fr.h : node.h, zIndex: focused ? 100000 : node.z }}
       data-node-id={node.id}
       onPointerDown={(e) => {
-        if (maximized) return
-        const app = useApp.getState()
-        if (app.tool === 'connector') {
+        if (focused) return e.stopPropagation()
+        const a = app()
+        if (a.tool === 'connector') {
           e.stopPropagation()
           return connectClick(node.id)
         }
-        if (!app.selection.includes(node.id)) app.setSelection(e.shiftKey ? [...app.selection, node.id] : [node.id])
-        app.bringToFront(node.id)
+        if (!a.selection.includes(node.id)) a.setSelection(e.shiftKey ? [...a.selection, node.id] : [node.id])
+        a.bringToFront(node.id)
         e.stopPropagation()
       }}
     >
       {!def.chromeless && (
         <div
           className="node-head"
-          onPointerDown={(e) => !maximized && useApp.getState().tool !== 'connector' && startNodeDrag(e, node)}
+          onPointerDown={(e) => !focused && app().tool !== 'connector' && startNodeDrag(e, node)}
           onDoubleClick={(e) => {
             if ((e.target as HTMLElement).closest('button,input')) return
-            setFocused(maximized ? null : node.id)
+            toggleFocus()
           }}
         >
           {Header ? (
@@ -143,17 +166,10 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
           )}
           <div className="node-actions" onPointerDown={(e) => e.stopPropagation()}>
             {Actions && <Actions {...props} />}
-            <button className="icon-btn sm" title={maximized ? 'Restore' : 'Maximize'} onClick={() => setFocused(maximized ? null : node.id)}>
-              {maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <button className="icon-btn sm" title={focused ? 'Back to board (Ctrl+Shift+F)' : 'Focus (click the tile, F or Ctrl+Shift+F)'} onClick={toggleFocus}>
+              {focused ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </button>
-            <button
-              className="icon-btn sm"
-              title="Close"
-              onClick={() => {
-                if (maximized) setFocused(null)
-                removeWithHooks([node.id])
-              }}
-            >
+            <button className="icon-btn sm" title="Close" onClick={() => removeWithHooks([node.id])}>
               <X size={14} />
             </button>
           </div>
@@ -161,8 +177,25 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       )}
       <div className="node-body">
         <Body {...props} />
+        {catcher && (
+          <div
+            className="zoom-catcher"
+            title="Click to focus"
+            onPointerDown={(e) => {
+              if (e.button !== 0) return
+              e.stopPropagation()
+              const a = app()
+              if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                // select without zooming (toggle)
+                a.setSelection(a.selection.includes(node.id) ? a.selection.filter((x) => x !== node.id) : [...a.selection, node.id])
+                return
+              }
+              startNodeDrag(e, node, () => app().enterFocus(node.id))
+            }}
+          />
+        )}
       </div>
-      {!maximized && (
+      {!focused && (
         <>
           <div className="rz rz-r" onPointerDown={(e) => startResize(e, node, 'r')} />
           <div className="rz rz-b" onPointerDown={(e) => startResize(e, node, 'b')} />
@@ -171,13 +204,4 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       )}
     </div>
   )
-  if (maximized) {
-    return createPortal(
-      <div className="maximized-scrim" onPointerDown={(e) => e.target === e.currentTarget && setFocused(null)}>
-        {frame}
-      </div>,
-      document.body
-    )
-  }
-  return frame
 })

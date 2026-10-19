@@ -10,6 +10,7 @@ import { LeftRail, RightRail } from './chrome/Rails'
 import { BottomBar, BottomLeft, ZoomControl } from './chrome/BottomBar'
 import { Home } from './chrome/Home'
 import { Minimap } from './chrome/Minimap'
+import { FocusBar } from './chrome/FocusBar'
 import { Overlays } from './ui/Overlays'
 import { DRAWERS, PANELS } from './panels/registry'
 import { BoardOverlays } from './board/BoardOverlays'
@@ -20,6 +21,7 @@ export function App() {
   const project = useApp((s) => s.project)
   const panel = useApp((s) => s.panel)
   const drawer = useApp((s) => s.drawer)
+  const focused = useApp((s) => !!s.focusedNode)
 
   useEffect(() => {
     useApp.getState().init()
@@ -50,12 +52,16 @@ export function App() {
         <>
           <Board key={project.activeWorkspaceId} />
           <TopBar />
-          <LeftRail />
-          <RightRail />
-          <BottomBar />
-          <BottomLeft />
-          <ZoomControl />
-          <Minimap />
+          {/* rails and bars step aside in focus mode; the Inbox stays */}
+          <div className={`board-chrome ${focused ? 'hidden' : ''}`}>
+            <LeftRail />
+            <RightRail />
+            <BottomBar />
+            <BottomLeft />
+            <ZoomControl />
+            <Minimap />
+          </div>
+          <FocusBar />
           <BoardOverlays />
           {DrawerC && <DrawerC {...(drawer!.props ?? {})} />}
         </>

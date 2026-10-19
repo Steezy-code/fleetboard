@@ -61,12 +61,16 @@ Under the hood each team console is connected to a local MCP server (`fleet_plan
 | Double-middle-click, <kbd>Home</kbd>, <kbd>Z</kbd> <kbd>E</kbd> | Zoom extents: fit everything |
 | <kbd>Z</kbd> <kbd>P</kbd> | Zoom previous |
 | <kbd>Z</kbd> <kbd>W</kbd> | Zoom window: drag the area to zoom into |
-| <kbd>Z</kbd> <kbd>O</kbd> or <kbd>F</kbd> | Zoom to the selection |
+| <kbd>Z</kbd> <kbd>O</kbd> | Zoom to the selection |
 | Left-drag, left → right | Window select: only fully enclosed items (blue) |
 | Left-drag, right → left | Crossing select: anything touched (green, dashed) |
 | <kbd>Shift</kbd>+drag | Add to the selection |
 | <kbd>Shift</kbd>+scroll / <kbd>Alt</kbd>+scroll | Pan sideways / up and down |
 | Minimap (bottom right) | Click or drag to move the view |
+
+### Focus mode
+
+Click anywhere on a tile (or press <kbd>F</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>) and the camera glides into it: it fills the board at true 100% scale, so terminals gain columns and web tiles get a real viewport, while the rest of the board dims. Hop between consoles with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd>/<kbd>→</kbd>. **Back to board**, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F</kbd>, <kbd>Esc</kbd> (outside a terminal), a click on the dimmed board or <kbd>Ctrl</kbd>+scroll out glides back to exactly the zoom and position you had. The first click on a zoomed-out tile only zooms (it never ticks, types or follows a link); drag a tile's body or header to move it, <kbd>Shift</kbd>+click to select without zooming, and at 90% zoom or closer clicks go straight to the content.
 
 Prefer trackpad-style (scroll pans, drag pans)? Switch it in **Settings → Navigation**.
 
@@ -79,6 +83,6 @@ Prefer trackpad-style (scroll pans, drag pans)? Switch it in **Settings → Navi
 | <kbd>Ctrl</kbd>+<kbd>=</kbd>/<kbd>-</kbd>, <kbd>Ctrl</kbd>+<kbd>0</kbd>, <kbd>Ctrl</kbd>+<kbd>1</kbd> | Zoom in/out, fit, 100% |
 | <kbd>V</kbd> <kbd>P</kbd> <kbd>R</kbd> <kbd>T</kbd> <kbd>E</kbd> | Select, pen, shapes, text, eraser |
 | <kbd>Delete</kbd> | Remove selection (live consoles ask first) |
-| Double-click a node header | Maximize / restore |
+| Double-click a node header | Focus / back to board |
 
 Middle-click paste is disabled on the board (middle button pans); paste into a console with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>.

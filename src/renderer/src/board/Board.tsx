@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM } from '../state/store'
+import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM, focusRect } from '../state/store'
 import { NodeFrame, removeWithHooks } from './NodeFrame'
 import { GroupFrame } from './GroupFrame'
 import { Wires } from './Wires'
@@ -64,6 +64,14 @@ export function Board() {
     const onWheel = (e: WheelEvent) => {
       const target = e.target as HTMLElement
       const ctrl = e.ctrlKey || e.metaKey
+      if (useApp.getState().focusedNode) {
+        // focused: the content keeps its wheel; Ctrl+scroll out is the "zoom back out" gesture
+        if (ctrl) {
+          e.preventDefault()
+          if (e.deltaY > 0) useApp.getState().exitFocus()
+        } else if (!target.closest('.node.focused, .modal, .drawer, .menu, .inbox')) e.preventDefault()
+        return
+      }
       if (!ctrl && target.closest('.no-board-wheel, .scrollable, .modal, .drawer, .menu')) return
       e.preventDefault()
       stopCameraAnimation()
@@ -95,7 +103,7 @@ export function Board() {
     const el = ref.current!
     let lastMiddle = 0
     const onDown = (e: PointerEvent) => {
-      if (e.button !== 1) return
+      if (e.button !== 1 || useApp.getState().focusedNode) return
       e.preventDefault()
       e.stopPropagation()
       stopCameraAnimation()
@@ -142,10 +150,7 @@ export function Board() {
     }
     const onKey = (e: KeyboardEvent) => {
       const app = useApp.getState()
-      if (isTyping(e.target)) {
-        if (e.key === 'Escape' && app.focusedNode) app.setFocusedNode(null)
-        return
-      }
+      if (isTyping(e.target)) return // Esc inside a terminal belongs to the CLI
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
 
@@ -202,7 +207,8 @@ export function Board() {
         window.clearTimeout(chordTimer)
         chordTimer = window.setTimeout(endChord, 2500)
       } else if (!mod && !e.altKey && key === 'f' && app.selection.length) {
-        zoomToSelection()
+        const node = activeWs()?.nodes.find((n) => n.id === app.selection[0])
+        if (node) app.enterFocus(node.id)
       } else if (!mod && !e.altKey) {
         const map: Record<string, any> = { v: 'select', p: 'pen', e: 'eraser', r: 'shape', t: 'text' }
         if (map[key]) app.setTool(map[key])
@@ -212,6 +218,37 @@ export function Board() {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Focus shortcuts work everywhere, even inside a terminal (captured before xterm sees them).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey && e.shiftKey) || e.altKey || e.metaKey) return
+      const app = useApp.getState()
+      const k = e.key.toLowerCase()
+      if (k === 'f') {
+        const target = app.focusedNode ? null : (document.activeElement?.closest('[data-node-id]') as HTMLElement | null)?.dataset.nodeId ?? app.selection[0]
+        if (app.focusedNode) app.exitFocus()
+        else if (target) app.enterFocus(target)
+      } else if (app.focusedNode && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+        app.cycleFocus(e.key === 'ArrowRight' ? 1 : -1)
+      } else return
+      e.preventDefault()
+      e.stopPropagation()
+    }
+    window.addEventListener('keydown', onKey, { capture: true })
+    return () => window.removeEventListener('keydown', onKey, { capture: true })
+  }, [])
+
+  // Keep the focused node filling the board when the window resizes.
+  const viewport = useApp((s) => s.viewport)
+  useEffect(() => {
+    const app = useApp.getState()
+    const node = focusedNode ? activeWs()?.nodes.find((n) => n.id === focusedNode) : null
+    if (!node) return
+    const r = focusRect(viewport)
+    const cam = activeWs()!.camera
+    if (cam.zoom === 1 && (Math.abs(cam.x - (r.x - node.x)) > 1 || Math.abs(cam.y - (r.y - node.y)) > 1)) app.setCamera({ zoom: 1, x: r.x - node.x, y: r.y - node.y })
+  }, [viewport.w, viewport.h])
+
   if (!ws) return null
   const cam = ws.camera
   const cad = settingsNav !== 'trackpad'
@@ -220,6 +257,7 @@ export function Board() {
     if (e.button === 1) return
     if (e.target !== e.currentTarget && !(e.target as HTMLElement).classList.contains('world')) return
     const app = useApp.getState()
+    if (app.focusedNode) return app.exitFocus()
     stopCameraAnimation()
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     if (tool === 'text' && e.button === 0) {
@@ -321,7 +359,7 @@ export function Board() {
   return (
     <div
       ref={ref}
-      className={`board tool-${tool} ${panning ? 'panning' : ''} ${cmd === 'window' ? 'zoom-window' : ''}`}
+      className={`board tool-${tool} ${panning ? 'panning' : ''} ${cmd === 'window' ? 'zoom-window' : ''} ${focusedNode ? 'focus-mode' : ''}`}
       style={{
         backgroundSize: `${22 * cam.zoom}px ${22 * cam.zoom}px`,
         backgroundPosition: `${cam.x}px ${cam.y}px`

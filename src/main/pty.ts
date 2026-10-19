@@ -46,7 +46,8 @@ interface Session {
 }
 
 const TERMINAL_REPLY = /^(?:\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d*n|\x1b\[[IO]|\x1bP[\s\S]*?\x1b\\|\x1b\][\s\S]*?(?:\x07|\x1b\\))+$/
-const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[()][0-9A-B]|\x1b[=>78DEHMc]/g
+// OSC/DCS strings end at the first BEL or ESC\ (non-greedy: shells emit many, e.g. OSC 3008 per command)
+const ANSI = /\x1b\[[0-9;?<>=]*[ -/]*[@-~]|\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1bP[\s\S]*?\x1b\\|\x1b[()][0-9A-B]|\x1b[=>78DEHMc]/g
 // TUIs often draw spaces as cursor-forward moves and lines as absolute positioning.
 export const stripAnsi = (s: string) =>
   s

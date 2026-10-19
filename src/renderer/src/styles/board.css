@@ -275,22 +275,6 @@
   border-radius: 2px;
   background: var(--accent);
 }
-.maximized-scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 800;
-  background: rgba(5, 4, 3, 0.7);
-  backdrop-filter: blur(4px);
-  display: grid;
-  place-items: center;
-  animation: fade 0.14s;
-}
-.node.maximized {
-  position: relative;
-  width: calc(100vw - 120px);
-  height: calc(100vh - 120px);
-  box-shadow: var(--shadow);
-}
 
 /* console */
 .console-body {
@@ -1065,4 +1049,77 @@
   .minimap {
     display: none;
   }
+}
+
+/* ---------- focus mode ---------- */
+.board-chrome > * {
+  transition: opacity 0.22s ease;
+}
+.board-chrome.hidden > * {
+  opacity: 0;
+  pointer-events: none;
+}
+.node {
+  transition:
+    width 0.42s cubic-bezier(0.2, 0.7, 0.2, 1),
+    height 0.42s cubic-bezier(0.2, 0.7, 0.2, 1),
+    opacity 0.22s ease,
+    box-shadow 0.15s;
+}
+.board.focus-mode .node:not(.focused),
+.board.focus-mode .group,
+.board.focus-mode .wires,
+.board.focus-mode .ink {
+  opacity: 0.12;
+  pointer-events: none;
+  transition: opacity 0.22s ease;
+}
+.board.focus-mode .node:not(.focused) * {
+  pointer-events: none;
+}
+.node.focused {
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--accent-line);
+}
+.node.focused .node-head {
+  cursor: default;
+}
+.board.focus-mode {
+  cursor: zoom-out;
+}
+.board.focus-mode .node.focused {
+  cursor: auto;
+}
+/* click-to-zoom: a transparent layer over a zoomed-out tile's body */
+.zoom-catcher {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  cursor: zoom-in;
+  border-radius: 0 0 10px 10px;
+}
+.node:has(.zoom-catcher:hover)::after {
+  border-color: var(--accent-line);
+}
+.focus-bar {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 510;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 5px 0 8px;
+  border-radius: 999px;
+  background: rgba(24, 21, 19, 0.97);
+  border: 1px solid var(--accent-line);
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+  font-size: 12.5px;
+  animation: rise 0.2s ease-out;
+  -webkit-app-region: no-drag;
+}
+.focus-bar .btn.sm {
+  border-radius: 999px;
 }
