@@ -11,7 +11,11 @@ src/shared/agents.ts     AGENTS catalog (bin, resumeArgs, yoloArgs, configEnv, h
 src/main/                Electron main process
   index.ts               window, core IPC (pty:*, pdf:fromHtml, png:capture, win:*), registers modules
   context.ts             MainContext passed to each module's register(ctx)
-  pty.ts                 PtyManager: real PTYs (node-pty), raw buffer, answer(), onSpawn/onExit listeners
+  pty.ts                 PtyManager: real PTYs (node-pty), raw buffer, answer(), onSpawn/onExit listeners;
+                         closing a console ends an agent CLI's whole process group (a shell's like a terminal)
+  orphans.ts             the consoles running, on disk: the next launch ends what a run that died left running
+  errors.ts              stray main-process errors: logged to ~/.fleetboard/logs/main.log, shown as a toast
+  goal.ts                runs a loop's goal command (goal:check) in the project folder, exit code = verdict
   screen.ts              TermScreen: a headless xterm per console, what the terminal actually shows
   status.ts              detectPrompt (menus, hints, y/n on the cursor row), StatusTracker, answerKeys: pure, clock-injected
   hooks.ts               receives Claude Code hook events (per-run secret in FB_HOOK_TOKEN)
@@ -25,9 +29,12 @@ src/main/                Electron main process
                          resumable / taken / free / lost, as each real CLI behaves
   cli.ts                 headless one-shot runs of the user's CLI (claude -p streaming) — IPC cli:run
   store.ts               persistence (~/.fleetboard) — IPC store:*
-  fsops.ts               dialogs, fs:tree/read/write/..., shell:*
+  fsops.ts               dialogs, fs:tree (level by level, within a budget; deeper folders read when opened),
+                         fs:write (atomic; with a base, refuses to overwrite a change made on disk meanwhile), shell:*
   agents.ts              agents:detect
-  git.ts / usage.ts / profiles.ts   feature modules (stubs to fill)
+  git.ts                 the git drawer: status, diffs, commits, push/pull, branches, PRs (gh)
+  usage.ts               token usage from the CLIs' own logs, read on from where the last read stopped
+  profiles.ts            several sign-ins per CLI (its config dir per profile)
 src/shared/prompt.ts     Prompt / PromptAnswer: a question a console is waiting on, and how to answer it
 src/shared/approvals.ts  Prompt → Inbox card (title, detail, buttons), for the board and the phone
 src/shared/qr.ts, ansi.ts  QR encoder (phone link), stripAnsi for matching words in output streams
@@ -111,4 +118,8 @@ src/renderer/src/
 - test/unit/agent-flags.test.ts checks every flag passed to Claude Code, Codex and Gemini CLI against the
   installed CLI's `--help` (skipped for a CLI that is not installed; `FLEETBOARD_CLI_PATH` adds places to
   look). CLIs drop flags: run it after upgrading one.
+- test/e2e/leaks.test.ts opens and closes panels, consoles and workspaces over and over and checks that
+  memory, DOM nodes, listeners and processes do not pile up.
+- Races show up under load: run the e2e suite several files at a time (`--test-concurrency=4` instead of 1)
+  now and then. That found a note opening as an empty editor, which one at a time never showed.
 - CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.

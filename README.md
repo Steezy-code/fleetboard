@@ -66,7 +66,7 @@ Under the hood each team console is connected to a local MCP server (`fleet_plan
 Agents wait while you're away from the desk. **Settings → Phone Inbox** serves the Inbox to your phone: approvals with the same buttons as on the board, the Lead's questions, the Ready card (Merge asks first), and a read-only view of each console. Scan the QR code to open it.
 
 - **Off until you turn it on.** While it is on, the top bar shows a **Phone** badge.
-- **Tailscale** (recommended): listens on this computer's Tailscale address only; the connection is encrypted and works from anywhere on your tailnet. **Wi-Fi**: your local network address, plain HTTP (anyone who can see that network's traffic could copy the link). **This PC**: 127.0.0.1, to try it.
+- **Tailscale** (recommended): listens on this computer's Tailscale address only; the connection is encrypted and works from anywhere on your tailnet. **Wi-Fi**: your local network address, plain HTTP (anyone who can see that network's traffic could copy the link). **This PC**: 127.0.0.1, to try it. It follows the address: when Tailscale connects after the app started, or Wi-Fi hands out a new one, it moves there (the QR code in Settings updates).
 - The link carries a long secret in its `#fragment` (never sent in URLs, logs or referrers). **New link** revokes the old one at once. Answers are checked against the live screen first, so a stale phone never types into a console whose question was already answered.
 
 ## Helm and playbooks
