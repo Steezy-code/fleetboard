@@ -98,6 +98,14 @@ test('workers show on the plan when the lead names the task by number, by other 
   assert.match(spawns[2], /not linked to a plan task: call fleet_update_task/, 'the lead is told how to fix it')
 })
 
+test('a worker on a CLI that cannot reach the fleet tools is refused, not started to hang the team', async () => {
+  const { projectId } = await team({ lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Gem', agent: 'gemini' }], waitMs: 1000 } })
+  const r = await app!.waitFor(() => toolCalls('fleet_spawn_worker')[0], { label: 'spawn answered' })
+  assert.equal(r.isError, true)
+  assert.match(r.result, /Gemini CLI cannot join a team: .* Use claude or codex\./)
+  assert.deepEqual(Object.values((await fleet(projectId)).members).map((m: any) => m.name), ['Lead'], 'no worker was started')
+})
+
 test("merging the team's work keeps the user's uncommitted changes", async () => {
   const { sb, repo, projectId } = await team(TWO_WORKERS, 'add the files', { 'README.md': '# demo\n', 'notes.md': 'mine\n' })
   fs.writeFileSync(path.join(repo, 'notes.md'), 'mine, edited while the team worked\n')
