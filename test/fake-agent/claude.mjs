@@ -68,7 +68,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 if (opts.print !== undefined) {
   let prompt = opts.print
-  if (!prompt && !process.stdin.isTTY) prompt = fs.readFileSync(0, 'utf8')
+  if (!prompt && !process.stdin.isTTY) {
+    // like the real CLI: no prompt argument means it comes on stdin (read as a stream: large
+    // prompts do not fit in the pipe buffer at once)
+    prompt = ''
+    process.stdin.setEncoding('utf8')
+    for await (const chunk of process.stdin) prompt += chunk
+  }
   log('print', { prompt: prompt.slice(0, 4000), promptLength: prompt.length, args: argv.filter((a) => a !== opts.print) })
   const rules = scenario.print ?? []
   const rule = rules.find((r) => new RegExp(r.match ?? '', 'is').test(prompt))
