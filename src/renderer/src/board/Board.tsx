@@ -48,6 +48,17 @@ export function Board() {
     setCmdState(next)
   }
 
+  // The board never scrolls: focusing an input or terminal inside the zoomed world makes Chromium
+  // scroll this overflow-hidden container to "reveal" it, which shifts everything. Undo that at once.
+  useEffect(() => {
+    const el = ref.current!
+    const pin = () => {
+      if (el.scrollTop || el.scrollLeft) el.scrollTo(0, 0)
+    }
+    el.addEventListener('scroll', pin)
+    return () => el.removeEventListener('scroll', pin)
+  }, [])
+
   // viewport size
   useEffect(() => {
     const el = ref.current!

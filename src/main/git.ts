@@ -323,8 +323,16 @@ async function push(cwd: string): Promise<GitResult<{ output: string; setUpstrea
 async function pull(cwd: string): Promise<GitResult<{ output: string }>> {
   if (!validCwd(cwd)) return fail('Folder not found')
   if (!(await hasUpstream(cwd))) return fail('This branch has no upstream to pull from')
-  const r = await git(cwd, ['pull', '--ff-only', '--no-edit'], { timeout: 120000 })
-  if (r.code !== 0) return fail(cleanErr(r, 'git pull failed'))
+  // fetch + fast-forward rather than `git pull`: a user's pull.rebase=true would turn the pull into a
+  // rebase, which refuses to run with any uncommitted change. A fast-forward keeps unrelated local
+  // edits and still refuses (safely) when the branches have diverged.
+  const f = await git(cwd, ['fetch', '--prune'], { timeout: 120000 })
+  if (f.code !== 0) return fail(cleanErr(f, 'git fetch failed'))
+  const r = await git(cwd, ['merge', '--ff-only', '@{u}'], { timeout: 60000 })
+  if (r.code !== 0) {
+    const msg = cleanErr(r, 'git pull failed')
+    return fail(/not possible to fast-forward|diverg/i.test(msg) ? 'Your branch and its upstream have diverged; merge or rebase in a console.' : msg)
+  }
   return { ok: true, output: r.stdout.trim() }
 }
 

@@ -53,7 +53,8 @@ export function GitView({ cwd, variant }: { cwd: string; variant: 'node' | 'draw
   const entry = useGitStatus(cwd)
   const st = entry.status
   const [remote, setRemote] = useState<GitRemote | null>(null)
-  const [commits, setCommits] = useState<GitCommit[]>([])
+  // null until the first log arrives, so an unloaded list never reads as "No commits yet"
+  const [commits, setCommits] = useState<GitCommit[] | null>(null)
   const [history, setHistory] = useState(false)
   const [excluded, setExcluded] = useState<Set<string>>(() => new Set())
   const [message, setMessage] = useState('')
@@ -341,7 +342,9 @@ export function GitView({ cwd, variant }: { cwd: string; variant: 'node' | 'draw
             <History size={11} /> {history ? 'Less' : 'History'}
           </button>
         </div>
-        {commits.length === 0 ? (
+        {commits === null ? (
+          <div className="dim small gv-none">Loading…</div>
+        ) : commits.length === 0 ? (
           <div className="dim small gv-none">No commits yet</div>
         ) : (
           <div className={`gv-commits ${history && variant === 'drawer' ? 'scrollable' : ''}`}>

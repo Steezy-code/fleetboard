@@ -322,12 +322,22 @@ export function figureToExcalidraw(items: InkItem[]) {
       elements.push(t)
     }
   }
+  // The shape an arrow end touches: the smallest one around the point, never a dashed group frame
+  // (frames contain whole clusters, so matching them would bind both ends of an inner arrow to the frame).
   const hit = (p: Pt) => {
+    const m = 12
+    let best: any = null
+    let bestArea = Infinity
     for (const { el, item } of shapeEls.values()) {
-      const m = 12
-      if (p[0] >= item.x - m && p[0] <= item.x + item.w + m && p[1] >= item.y - m && p[1] <= item.y + item.h + m) return el
+      if (item.dashed) continue
+      if (p[0] < item.x - m || p[0] > item.x + item.w + m || p[1] < item.y - m || p[1] > item.y + item.h + m) continue
+      const area = item.w * item.h
+      if (area < bestArea) {
+        best = el
+        bestArea = area
+      }
     }
-    return null
+    return best
   }
 
   // merge "path body + arrow tip" pairs back into one multi-point arrow
