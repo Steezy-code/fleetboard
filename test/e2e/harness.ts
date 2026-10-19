@@ -236,6 +236,15 @@ export class App {
     return r.result.value as T
   }
 
+  /** Whether the app's process ends within `ms`. */
+  waitExit(ms: number): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      if (this.proc.exitCode !== null || this.proc.signalCode !== null) return resolve(true)
+      const t = setTimeout(() => resolve(false), ms)
+      this.proc.once('exit', () => (clearTimeout(t), resolve(true)))
+    })
+  }
+
   /** Crash the window's page, as running out of memory would (the protocol never answers this). */
   async crashWindow() {
     void this.cdp.send('Page.crash', {}, 1000).catch(() => {})
@@ -339,11 +348,7 @@ export class App {
     } catch {
       /* nothing running: the window closed without asking */
     }
-    const exited = await new Promise<boolean>((resolve) => {
-      if (this.proc.exitCode !== null) return resolve(true)
-      const t = setTimeout(() => resolve(false), 10_000)
-      this.proc.once('exit', () => (clearTimeout(t), resolve(true)))
-    })
+    const exited = await this.waitExit(10_000)
     this.cdp.close()
     this.main?.close()
     return exited

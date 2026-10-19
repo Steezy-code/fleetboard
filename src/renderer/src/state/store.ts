@@ -252,10 +252,21 @@ function clearFocusReturn(w: Workspace): Workspace {
 const removeNodesNow = (ids: string[]) => (useApp.getState() as any)._removeNodes(ids)
 
 let saveTimer: number | undefined
+let saveWarnedAt = 0
 function scheduleSave(p: Project | null) {
   if (!p) return
   window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => invoke('store:saveProject', p), 350)
+  saveTimer = window.setTimeout(
+    () =>
+      invoke('store:saveProject', p).catch((e) => {
+        // a board that silently stops saving loses everything done since: say so (not on every change)
+        console.error('saving the board failed', e)
+        if (Date.now() - saveWarnedAt < 30_000) return
+        saveWarnedAt = Date.now()
+        useApp.getState().toast(`Could not save the board: ${String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, 'warn')
+      }),
+    350
+  )
 }
 
 export const useApp = create<AppState>((set, get) => {
