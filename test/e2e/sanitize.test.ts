@@ -46,7 +46,7 @@ test('no vector runs script, in markdown or raw HTML, even when its links are cl
     document.body.appendChild(host)
     const out: { vector: string; html: string; hrefs: string[]; handlers: string[]; tags: string[] }[] = []
     for (const v of vectors) {
-      for (const html of [fb.renderMarkdown(v), fb.sanitizeHtml(v)]) {
+      for (const html of [fb.renderMarkdown(v), fb.sanitizeHtml(v), fb.renderDocMarkdown(v)]) {
         host.innerHTML = html
         const hrefs = [...host.querySelectorAll('a')].map((a) => a.href)
         const handlers = [...host.querySelectorAll('*')].flatMap((el) => [...el.attributes].filter((a) => /^on/i.test(a.name) || a.name === 'style' || a.name === 'srcdoc').map((a) => `${el.tagName}.${a.name}`))
@@ -69,4 +69,9 @@ test('no vector runs script, in markdown or raw HTML, even when its links are cl
 test('ordinary markdown survives sanitizing', async () => {
   const html = await app.eval(() => (window as any).__fleetboard.markdown.renderMarkdown('# Title\n\nSee [docs](https://example.com) and [a file](src/a.ts), `code`, **bold**.\n\n- [x] done\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![img](https://example.com/x.png)'))
   for (const want of ['<h1 id="title">Title</h1>', 'href="https://example.com"', 'href="src/a.ts"', '<code>code</code>', '<strong>bold</strong>', 'type="checkbox"', '<table>', 'src="https://example.com/x.png"']) assert.ok(html.includes(want), `${want} in ${html}`)
+})
+
+test('the Documents studio keeps its callouts', async () => {
+  const html = await app.eval(() => (window as any).__fleetboard.markdown.renderDocMarkdown('> **Note** this matters\n\n# Doc'))
+  assert.match(html, /<blockquote class="callout callout-note">/)
 })
