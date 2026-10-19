@@ -360,8 +360,17 @@ export const useApp = create<AppState>((set, get) => {
     },
     updateNode: (id, patch) =>
       mutateWs((ws) => ({ ...ws, nodes: ws.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) })),
-    updateNodeData: (id, patch) =>
-      mutateWs((ws) => ({ ...ws, nodes: ws.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)) })),
+    // in whichever workspace holds the node: consoles in the background report too (a new session id)
+    updateNodeData: (id, patch) => {
+      const p = get().project
+      if (!p?.workspaces.some((w) => w.nodes.some((n) => n.id === id))) return
+      mutateProject((p) => ({
+        ...p,
+        workspaces: p.workspaces.map((w) =>
+          w.nodes.some((n) => n.id === id) ? { ...w, nodes: w.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)) } : w
+        )
+      }))
+    },
     moveNodes: (ids, dx, dy) =>
       mutateWs((ws) => {
         const set = new Set(ids)

@@ -3,6 +3,7 @@ import type { WebContents } from 'electron'
 import type { ConsoleStatus, PtyInfo, PtySpawnRequest, Settings } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { loginEnv, shellPath, which } from './env'
+import { hasTranscript, newSessionId, validSessionId } from './sessions'
 import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
 import { fleetLaunch } from './fleet'
@@ -27,6 +28,8 @@ interface Session {
   startedAt: number
   /** the CLI turned on bracketed paste (ESC[?2004h) */
   bracketed: boolean
+  /** the conversation the CLI runs under, when known (AgentDef.session, or Claude's SessionStart hook) */
+  sessionId?: string
 }
 
 const TERMINAL_REPLY = /^(?:\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d*n|\x1b\[[IO]|\x1bP[\s\S]*?\x1b\\|\x1b\][\s\S]*?(?:\x07|\x1b\\))+$/
@@ -69,6 +72,7 @@ export class PtyManager {
 
     let file: string
     let args: string[] = []
+    let sessionId: string | undefined
     if (req.command) {
       // a console started for one command (dev server, watcher); drop into a shell when it ends
       file = shellPath()
@@ -79,7 +83,20 @@ export class PtyManager {
     } else {
       file = (await which(agent.bin)) ?? agent.bin
       args = [...(agent.args ?? [])]
-      if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
+      if (agent.session) {
+        // this console's own conversation: resume it if the CLI saved it, else start it under its id
+        const known = validSessionId(req.sessionId) ? req.sessionId : undefined
+        if (req.resume && known && hasTranscript(agent.id, known, env)) {
+          sessionId = known
+          args.push(...agent.session.resume(known))
+        } else if (req.resume && !known && agent.resumeArgs) {
+          // a console saved before conversations had ids: the CLI picks (Claude's hook reports which)
+          args.push(...agent.resumeArgs)
+        } else {
+          sessionId = req.resume && known ? known : newSessionId()
+          args.push(...agent.session.start(sessionId))
+        }
+      } else if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
       if (yolo) args.push(...agent.yoloArgs!)
       else if (req.acceptEdits && agent.editsArgs && !fleetLaunch(req)) args.push(...agent.editsArgs)
@@ -111,9 +128,11 @@ export class PtyManager {
       // Claude Code reports through hooks when the hook server is up (claudeHookArgs is non-empty)
       tracker: new StatusTracker(startedAt, agent?.id === 'claude' && !req.command && claudeHookArgs(req.id).length > 0),
       startedAt,
-      bracketed: false
+      bracketed: false,
+      sessionId
     }
     this.sessions.set(req.id, s)
+    if (sessionId) this.emit('pty:session', req.id, sessionId)
     for (const l of this.spawnListeners) {
       try {
         l(req)
@@ -148,7 +167,7 @@ export class PtyManager {
   }
 
   private info(s: Session): PtyInfo {
-    return { id: s.id, pid: s.proc.pid, agentId: s.agentId, status: s.tracker.status, startedAt: s.startedAt }
+    return { id: s.id, pid: s.proc.pid, agentId: s.agentId, status: s.tracker.status, startedAt: s.startedAt, sessionId: s.sessionId }
   }
 
   write(id: string, data: string) {
@@ -366,6 +385,12 @@ export class PtyManager {
   hook(id: string, event: string, payload: unknown) {
     const s = this.sessions.get(id)
     if (!s) return
+    // Claude Code says which conversation it is in: after /clear or a resume without an id it changes
+    const sid = event === 'SessionStart' ? (payload as { session_id?: unknown } | null)?.session_id : undefined
+    if (validSessionId(sid) && sid !== s.sessionId) {
+      s.sessionId = sid
+      this.emit('pty:session', id, sid)
+    }
     s.tracker.hookEvent(event, payload, Date.now())
     this.evaluate(s)
   }
