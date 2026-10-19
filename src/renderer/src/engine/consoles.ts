@@ -199,7 +199,7 @@ export function resolveTargets(word: string): string[] {
   const byName = consoles.filter((c) => c.data.name.toLowerCase() === w || c.data.name.toLowerCase().replace(/\s+/g, '') === w.replace(/\s+/g, ''))
   if (byName.length) return byName.map((c) => c.id)
   const group = ws?.groups.find((g) => g.name.toLowerCase() === w || g.role.toLowerCase() === w)
-  if (group) return ws!.nodes.filter((n) => n.groupId === group.id).map((n) => n.id)
+  if (group) return ws!.nodes.filter((n) => n.groupId === group.id && n.type === 'console').map((n) => n.id)
   const byAgent = consoles.filter((c) => c.data.agentId === w || agentLabel(c.data.agentId).toLowerCase() === w)
   return byAgent.map((c) => c.id)
 }
