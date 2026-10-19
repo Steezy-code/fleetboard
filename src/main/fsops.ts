@@ -14,26 +14,66 @@ export interface TreeEntry {
 
 const IGNORE = new Set(['node_modules', '.git', '.next', 'dist', 'out', 'build', '.turbo', '.cache', 'target', '.venv', 'venv', '__pycache__', '.DS_Store'])
 
-function tree(dir: string, depth: number, filter?: (name: string) => boolean): TreeEntry[] {
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return []
+/**
+ * Entries a tree read visits at most: past that, folders are left unread (the tree loads them when
+ * opened). A filtered tree (notes) returns few of them, so it may visit more.
+ */
+export const TREE_BUDGET = 30_000
+
+/**
+ * The folder's tree, `depth` levels of folders deep (deeper ones and those past the budget have no
+ * `children`: not read yet). Read level by level, without blocking: a monorepo is many folders, and
+ * the main process also carries every terminal's output.
+ */
+export async function tree(root: string, depth: number, filter?: (name: string) => boolean, budget = filter ? 5 * TREE_BUDGET : TREE_BUDGET): Promise<TreeEntry[]> {
+  interface Pending {
+    dir: string
+    depth: number
+    into: TreeEntry[]
+    node?: TreeEntry
   }
-  return entries
-    .filter((e) => !IGNORE.has(e.name))
-    .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
-    .flatMap((e): TreeEntry[] => {
-      const p = path.join(dir, e.name)
-      if (e.isDirectory()) {
-        const children = depth > 0 ? tree(p, depth - 1, filter) : undefined
-        if (filter && children && children.length === 0) return []
-        return [{ name: e.name, path: p, dir: true, children }]
-      }
-      if (filter && !filter(e.name)) return []
-      return [{ name: e.name, path: p, dir: false }]
+  const top: TreeEntry[] = []
+  let level: Pending[] = [{ dir: root, depth, into: top }]
+  let left = budget
+  while (level.length) {
+    const next: Pending[] = []
+    let i = 0
+    // a few folders at a time
+    for (; i < level.length && left > 0; i += 16) {
+      const batch = level.slice(i, i + 16)
+      const lists = await Promise.all(batch.map((p) => fs.promises.readdir(p.dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[])))
+      batch.forEach((p, j) => {
+        const entries = lists[j].filter((e) => !IGNORE.has(e.name)).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+        left -= entries.length
+        for (const e of entries) {
+          const full = path.join(p.dir, e.name)
+          if (e.isDirectory()) {
+            const node: TreeEntry = { name: e.name, path: full, dir: true }
+            if (p.depth > 0) {
+              node.children = []
+              next.push({ dir: full, depth: p.depth - 1, into: node.children, node })
+            }
+            p.into.push(node)
+          } else if (!filter || filter(e.name)) p.into.push({ name: e.name, path: full, dir: false })
+        }
+      })
+    }
+    // out of budget: what was not read stays unread
+    for (const p of level.slice(i)) if (p.node) delete p.node.children
+    if (left <= 0) {
+      for (const p of next) if (p.node) delete p.node.children
+      break
+    }
+    level = next
+  }
+  // with a filter, folders that hold nothing that passes it are left out (unread ones stay)
+  const prune = (list: TreeEntry[]): TreeEntry[] =>
+    list.filter((e) => {
+      if (!e.dir || !e.children) return true
+      e.children = prune(e.children)
+      return e.children.length > 0
     })
+  return filter ? prune(top) : top
 }
 
 /**
@@ -86,9 +126,7 @@ export function register(ctx: MainContext) {
     const r = await dialog.showSaveDialog(ctx.win()!, { defaultPath, filters })
     return r.canceled ? null : r.filePath
   })
-  ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) =>
-    tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined)
-  )
+  ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) => tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined))
   ipc.handle('fs:list', (_e, dir: string) => tree(dir, 0))
   ipc.handle('fs:read', (_e, file: string) => fs.readFileSync(file, 'utf8'))
   ipc.handle('fs:readBase64', (_e, file: string) => fs.readFileSync(file).toString('base64'))

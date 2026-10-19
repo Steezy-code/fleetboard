@@ -3,7 +3,7 @@ import { BookOpenText, Check, ChevronRight, FileDown, LayoutDashboard, Loader2, 
 import { Modal, Seg } from '../ui/Modal'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
-import { FileTree, ancestors, flattenFiles, type Creating, type TreeEntry } from '../workbench/FileTree'
+import { FileTree, ancestors, graft, flattenFiles, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
 import { extractLinks, firstHeading, handleMdClick, isMarkdownPath, renderMarkdown } from '../workbench/markdown'
 import { exportMarkdownPdf } from '../workbench/pdf'
@@ -95,6 +95,12 @@ export default function MarkdownStudio(props: { path?: string }) {
     setTree(t)
     return t
   }, [root])
+
+  /** a folder the first read left out, read once it is opened */
+  const loadDir = useCallback(async (dir: string) => {
+    const children = await invoke<TreeEntry[]>('fs:tree', dir, 1, MD_EXT).catch(() => null)
+    if (children) setTree((t) => t && graft(t, dir, children))
+  }, [])
 
   const loadAll = useCallback(async (t: TreeEntry[]) => {
     const list = flattenFiles(t).map((f) => f.path).filter(isMarkdownPath).slice(0, MAX_NOTES)
@@ -396,6 +402,7 @@ export default function MarkdownStudio(props: { path?: string }) {
                 active={current}
                 query={query}
                 expanded={expanded}
+                onLoad={loadDir}
                 onToggle={(d) =>
                   setExpanded((s) => {
                     const n = new Set(s)

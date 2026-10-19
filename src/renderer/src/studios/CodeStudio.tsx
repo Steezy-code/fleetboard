@@ -4,7 +4,7 @@ import { Modal } from '../ui/Modal'
 import { fileUrl, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { CodeEditor } from '../workbench/CodeEditor'
-import { FileTree, ancestors, type Creating, type TreeEntry } from '../workbench/FileTree'
+import { FileTree, ancestors, graft, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { FileIcon } from '../workbench/icons'
 import { isImagePath, langFromPath, langLabel } from '../workbench/markdown'
 import { baseName, dirname, joinPath, relativeTo } from '../workbench/paths'
@@ -45,6 +45,12 @@ export default function CodeStudio(props: { path?: string }) {
     const t = await invoke<TreeEntry[]>('fs:tree', root, 8).catch(() => [])
     setTree(t)
   }, [root])
+
+  /** a folder the first read left out, read once it is opened */
+  const loadDir = useCallback(async (dir: string) => {
+    const children = await invoke<TreeEntry[]>('fs:tree', dir, 1).catch(() => null)
+    if (children) setTree((t) => t && graft(t, dir, children))
+  }, [])
 
   useEffect(() => {
     loadTree()
@@ -259,6 +265,7 @@ export default function CodeStudio(props: { path?: string }) {
                 active={doc?.path}
                 query={query}
                 expanded={expanded}
+                onLoad={loadDir}
                 onToggle={(d) =>
                   setExpanded((s) => {
                     const n = new Set(s)
