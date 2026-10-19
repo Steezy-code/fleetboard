@@ -169,7 +169,8 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       // From now on a reopened board asks before resuming.
       useApp.getState().updateNodeData(node.id, { launch: 'ask' })
     } catch (e) {
-      term.write(`\r\n\x1b[31mCould not start ${agentLabel(node.data.agentId)}: ${String(e)}\x1b[0m\r\n`)
+      const why = String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      term.write(`\r\n\x1b[31mCould not start ${agentLabel(node.data.agentId)}: ${why}\x1b[0m\r\n`)
       setPhase('exited')
     }
   }

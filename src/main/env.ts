@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import fs from 'node:fs'
 import os from 'node:os'
+import path from 'node:path'
 
 const run = promisify(execFile)
 
@@ -41,13 +43,23 @@ export const shellPath = () => process.env.SHELL || '/bin/bash'
 export const home = () => os.homedir()
 
 /** `which` against the login PATH. */
+/** Where an executable is, searched on the login PATH like a shell does (no `which` program needed). */
 export async function which(bin: string): Promise<string | null> {
-  const env = await loginEnv()
   if (bin === '$SHELL') return shellPath()
-  try {
-    const { stdout } = await run('/usr/bin/env', ['which', bin], { env, timeout: 3000 })
-    return stdout.trim() || null
-  } catch {
-    return null
+  const runnable = (p: string) => {
+    try {
+      fs.accessSync(p, fs.constants.X_OK)
+      return fs.statSync(p).isFile()
+    } catch {
+      return false
+    }
   }
+  if (bin.includes('/')) return runnable(bin) ? path.resolve(bin) : null
+  const env = await loginEnv()
+  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
+    if (!dir) continue
+    const p = path.join(dir, bin)
+    if (runnable(p)) return p
+  }
+  return null
 }
