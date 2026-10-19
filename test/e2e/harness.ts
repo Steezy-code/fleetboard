@@ -116,8 +116,35 @@ export class App {
     readonly sb: Sandbox,
     private proc: ChildProcess,
     private cdp: Cdp,
-    private output: () => string
+    private output: () => string,
+    private port: string
   ) {}
+
+  /**
+   * Another page of the app, such as the content of a web tile (a <webview> target), by URL. Returns an
+   * evaluator like eval().
+   */
+  async target(match: (url: string) => boolean, timeout = 20_000) {
+    let ws = ''
+    await this.waitFor(
+      async () => {
+        const list = (await (await fetch(`http://127.0.0.1:${this.port}/json/list`)).json()) as { url: string; webSocketDebuggerUrl: string }[]
+        ws = list.find((t) => match(t.url))?.webSocketDebuggerUrl ?? ''
+        return ws
+      },
+      { timeout, label: 'target' }
+    )
+    const cdp = await Cdp.connect(ws)
+    await cdp.send('Runtime.enable')
+    return {
+      eval: async <T>(expression: string): Promise<T> => {
+        const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+        if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? r.exceptionDetails.text)
+        return r.result.value as T
+      },
+      close: () => cdp.close()
+    }
+  }
 
   static async launch(opts: LaunchOptions = {}): Promise<App> {
     if (!fs.existsSync(path.join(ROOT, 'out/main/index.js'))) throw new Error('build the app first: npx electron-vite build')
@@ -165,7 +192,7 @@ export class App {
     if (!pageWs) throw new Error('no app window')
     const cdp = await Cdp.connect(pageWs)
     await cdp.send('Runtime.enable')
-    const app = new App(sb, proc, cdp, () => output)
+    const app = new App(sb, proc, cdp, () => output, port)
     await app.waitFor(() => app.eval(() => !!(window as any).__fleetboard), { label: 'app ready' })
     return app
   }

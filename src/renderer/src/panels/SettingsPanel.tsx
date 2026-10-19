@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Tag, TerminalSquare, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Bot, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
 import { AGENTS } from '@shared/agents'
 import { invoke } from '../lib/api'
@@ -27,6 +27,7 @@ const SECTIONS = [
   { id: 'navigation', label: 'Navigation', icon: Move },
   { id: 'terminal', label: 'Terminal', icon: TerminalSquare },
   { id: 'names', label: 'Names', icon: Tag },
+  { id: 'phone', label: 'Phone Inbox', icon: Smartphone },
   { id: 'data', label: 'Data', icon: Database },
   { id: 'keys', label: 'Shortcuts', icon: Keyboard }
 ]
@@ -314,6 +315,12 @@ export default function SettingsPanel({ section }: { section?: string }) {
             <NamesEditor />
           </section>
 
+          {/* ---------- Phone Inbox ---------- */}
+          <section data-section="phone">
+            <h3 className="settings-h">Phone Inbox</h3>
+            <PhoneInbox />
+          </section>
+
           {/* ---------- Data ---------- */}
           <section data-section="data">
             <h3 className="settings-h">Data</h3>
@@ -447,6 +454,121 @@ function NamesEditor() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+type RemoteNetwork = 'tailscale' | 'lan' | 'local'
+interface RemoteStatus {
+  enabled: boolean
+  network: RemoteNetwork
+  running: boolean
+  url?: string
+  qr?: string
+  error?: string
+  addresses: { tailscale?: string; lan?: string }
+}
+
+/** Answer approvals, questions and Ready cards from a phone, over Tailscale or the local network. */
+function PhoneInbox() {
+  const [st, setSt] = useState<RemoteStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    invoke<RemoteStatus>('remote:status').then(setSt)
+  }, [])
+  if (!st) return null
+  const run = async (channel: string, ...args: unknown[]) => {
+    setBusy(true)
+    try {
+      setSt(await invoke<RemoteStatus>(channel, ...args))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const enable = async (on: boolean, network = st.network) => {
+    if (on && network === 'lan') {
+      const ok = await useApp.getState().confirm({
+        title: 'Serve the Inbox on your local network?',
+        body: 'It is plain HTTP: someone on the same network who can see its traffic could copy the link and answer for you. Tailscale encrypts the connection; prefer it when you can.',
+        confirm: 'Use the local network',
+        danger: true
+      })
+      if (!ok) return
+    }
+    await run(on ? 'remote:enable' : 'remote:disable', network)
+  }
+  const choose = (network: RemoteNetwork) => (st.enabled ? enable(true, network) : setSt({ ...st, network }))
+  const copy = () => {
+    if (!st.url) return
+    navigator.clipboard.writeText(st.url)
+    useApp.getState().toast('Link copied. Anyone with it can answer for you: send it only to yourself.', 'info')
+  }
+  const reset = async () => {
+    const ok = await useApp.getState().confirm({ title: 'Make a new link?', body: 'The current link stops working right away.', confirm: 'New link' })
+    if (ok) await run('remote:reset')
+  }
+  return (
+    <div className="settings-rows">
+      <div className="settings-row">
+        <div className="grow">
+          <div>Answer from your phone</div>
+          <div className="muted small">Approvals, the Lead's questions and Ready cards on your phone, so agents don't wait while you're away. Off until you turn it on.</div>
+        </div>
+        <Switch on={st.enabled} onChange={(v) => !busy && enable(v)} />
+      </div>
+      <div className="settings-row">
+        <div className="grow">
+          <div>Network</div>
+          <div className="muted small">
+            {st.network === 'tailscale'
+              ? st.addresses.tailscale
+                ? `Tailscale (${st.addresses.tailscale}): encrypted, reachable from your devices anywhere.`
+                : 'Tailscale is not running on this computer.'
+              : st.network === 'lan'
+                ? `Local network (${st.addresses.lan ?? 'no address'}): plain HTTP, same Wi-Fi only.`
+                : 'This computer only (127.0.0.1): to try it in a browser here.'}
+          </div>
+        </div>
+        <Seg
+          value={st.network}
+          onChange={(v) => choose(v as RemoteNetwork)}
+          options={[
+            { value: 'tailscale', label: 'Tailscale' },
+            { value: 'lan', label: 'Wi-Fi' },
+            { value: 'local', label: 'This PC' }
+          ]}
+        />
+      </div>
+      {st.error && (
+        <div className="settings-row">
+          <div className="small" style={{ color: 'var(--warn)' }}>
+            <AlertTriangle size={11} style={{ verticalAlign: -1 }} /> {st.error}
+          </div>
+        </div>
+      )}
+      {st.running && st.url && (
+        <div className="settings-row" style={{ alignItems: 'flex-start', gap: 16 }}>
+          {/* our own QR (numbers only), not content from elsewhere */}
+          <div className="phone-qr" dangerouslySetInnerHTML={{ __html: st.qr ?? '' }} />
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div>Scan with your phone's camera</div>
+            <div className="muted small" style={{ margin: '4px 0 10px' }}>
+              Anyone with this link can answer your agents' questions. It works until you make a new one.
+            </div>
+            <div className="mono small" style={{ wordBreak: 'break-all', userSelect: 'text' }}>
+              {st.url}
+            </div>
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button className="btn sm" onClick={copy}>
+                Copy link
+              </button>
+              <button className="btn sm ghost" disabled={busy} onClick={reset}>
+                <RefreshCw size={12} /> New link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
