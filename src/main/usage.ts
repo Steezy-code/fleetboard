@@ -9,7 +9,9 @@ import { listProfiles } from './profiles'
 //   Claude Code: <config>/projects/**/*.jsonl  — assistant lines carry message.usage
 //   Codex:       <home>/sessions/YYYY/MM/DD/*.jsonl — token_count events (cumulative totals)
 //   Gemini CLI:  ~/.gemini/tmp/**/chats/*.json (best effort) — messages[].tokens
-// Parsed results are cached per file by mtime + size (memory and ~/.fleetboard/usage-cache.json).
+// Parsed results are cached per file by mtime + size (memory and ~/.fleetboard/usage-cache.json). The
+// .jsonl logs only grow: a changed one is read from where the last read stopped, in bounded chunks, so a
+// long session's log is not read again in full every minute (or skipped, past what a string can hold).
 
 export type UsageAgent = 'claude' | 'codex' | 'gemini'
 export const USAGE_AGENTS: UsageAgent[] = ['claude', 'codex', 'gemini']
@@ -68,17 +70,26 @@ export interface UsageLimits {
 /** compact event: [time ms, model index, input, output, cacheCreate, cacheRead, sessionIndex, dedupe id] */
 type Ev = [number, number, number, number, number, number, number, string]
 
-interface FileEntry {
-  agent: UsageAgent
-  mtime: number
-  size: number
+/** What a parser has read of a file so far; given back to it to read on from there. */
+export interface Parsed {
   models: string[]
   sessions: string[]
   events: Ev[]
+  /** a parser's own running state (Codex: the model, session and last cumulative total) */
+  state?: Record<string, any>
+}
+
+interface FileEntry extends Parsed {
+  agent: UsageAgent
+  mtime: number
+  size: number
+  /** bytes of the file read so far (whole lines), and a fingerprint of the bytes just before it */
+  offset?: number
+  fp?: string
 }
 
 const CACHE_FILE = path.join(dirs.root, 'usage-cache.json')
-const CACHE_VERSION = 2
+const CACHE_VERSION = 4
 const HOUR = 3600_000
 const DAY = 24 * HOUR
 
@@ -167,6 +178,15 @@ class Builder {
   events: Ev[] = []
   private mIdx = new Map<string, number>()
   private sIdx = new Map<string, number>()
+  /** go on from what was parsed before */
+  constructor(prev?: Parsed) {
+    if (!prev) return
+    this.models = prev.models
+    this.sessions = prev.sessions
+    this.events = prev.events
+    this.models.forEach((m, i) => this.mIdx.set(m, i))
+    this.sessions.forEach((x, i) => this.sIdx.set(x, i))
+  }
   model(m: string) {
     let i = this.mIdx.get(m)
     if (i === undefined) this.mIdx.set(m, (i = this.models.push(m) - 1))
@@ -179,9 +199,10 @@ class Builder {
   }
 }
 
-export function parseClaude(text: string, file: string): Omit<FileEntry, 'mtime' | 'size' | 'agent'> {
-  const b = new Builder()
+export function parseClaude(text: string, file: string, prev?: Parsed): Parsed {
+  const b = new Builder(prev)
   const byId = new Map<string, number>()
+  b.events.forEach((e, i) => e[7] !== ':' && byId.set(e[7], i))
   const fallbackSession = path.basename(file, '.jsonl')
   for (const line of text.split('\n')) {
     if (!line.includes('"usage"')) continue
@@ -223,12 +244,12 @@ export function parseClaude(text: string, file: string): Omit<FileEntry, 'mtime'
   return { models: b.models, sessions: b.sessions, events: b.events }
 }
 
-export function parseCodex(text: string, file: string): Omit<FileEntry, 'mtime' | 'size' | 'agent'> {
-  const b = new Builder()
-  let model = 'codex'
-  let session = path.basename(file, '.jsonl')
-  let prevTotal = -1
-  let n = 0
+export function parseCodex(text: string, file: string, prev?: Parsed): Parsed {
+  const b = new Builder(prev)
+  let model: string = prev?.state?.model ?? 'codex'
+  let session: string = prev?.state?.session ?? path.basename(file, '.jsonl')
+  let prevTotal: number = prev?.state?.prevTotal ?? -1
+  let n = b.events.length
   for (const line of text.split('\n')) {
     if (!line || !(line.includes('token_count') || line.includes('turn_context') || line.includes('session_meta') || line.includes('"model"')))
       continue
@@ -276,11 +297,11 @@ export function parseCodex(text: string, file: string): Omit<FileEntry, 'mtime' 
     const output = num(use.output_tokens)
     b.events.push([t, b.model(model), input, output, 0, cached, b.session(session), `cx${n++}`])
   }
-  return { models: b.models, sessions: b.sessions, events: b.events }
+  return { models: b.models, sessions: b.sessions, events: b.events, state: { model, session, prevTotal } }
 }
 
-export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime' | 'size' | 'agent'> {
-  const b = new Builder()
+export function parseGemini(text: string, file: string, prev?: Parsed): Parsed {
+  const b = new Builder(prev)
   const docs: any[] = []
   if (file.endsWith('.jsonl')) {
     for (const line of text.split('\n')) {
@@ -299,7 +320,12 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
       return { models: [], sessions: [], events: [] }
     }
   }
-  let n = 0
+  // events without an id of their own are numbered on from the ones read before
+  let n = b.events.filter((e) => /^gm\d/.test(e[7])).length
+  // Gemini CLI rewrites a message as it grows (its tool calls are added in a second line with the
+  // same id), so one id is one model reply: keep the last version
+  const byId = new Map<string, number>()
+  b.events.forEach((e, i) => e[7].startsWith('gm:') && byId.set(e[7], i))
   const session = path.basename(file).replace(/\.jsonl?$/, '')
   const visit = (o: any, sess: string, depth: number) => {
     if (!o || typeof o !== 'object' || depth > 6) return
@@ -313,7 +339,8 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
       const t = ts(o.timestamp)
       if (t) {
         const cached = num(tk.cached)
-        b.events.push([
+        const id = typeof o.id === 'string' && o.id ? `gm:${o.id}` : `gm${n++}`
+        const ev: Ev = [
           t,
           b.model(String(o.model || 'gemini')),
           Math.max(0, num(tk.input) - cached),
@@ -321,8 +348,14 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
           0,
           cached,
           b.session(sess),
-          `gm${n++}`
-        ])
+          id
+        ]
+        const prev = byId.get(id)
+        if (prev !== undefined) b.events[prev] = ev
+        else {
+          byId.set(id, b.events.length)
+          b.events.push(ev)
+        }
       }
       return
     }
@@ -332,7 +365,7 @@ export function parseGemini(text: string, file: string): Omit<FileEntry, 'mtime'
   return { models: b.models, sessions: b.sessions, events: b.events }
 }
 
-const PARSERS: Record<UsageAgent, (text: string, file: string) => Omit<FileEntry, 'mtime' | 'size' | 'agent'>> = {
+const PARSERS: Record<UsageAgent, (text: string, file: string, prev?: Parsed) => Parsed> = {
   claude: parseClaude,
   codex: parseCodex,
   gemini: parseGemini
@@ -372,9 +405,8 @@ async function scan(force = false) {
     let lastEmit = 0
     for (const f of todo) {
       try {
-        const text = await fs.promises.readFile(f.file, 'utf8')
-        const parsed = PARSERS[f.agent](text, f.file)
-        cache.set(f.file, { agent: f.agent, mtime: f.mtime, size: f.size, ...parsed })
+        const entry = await readLog(f, force ? undefined : cache.get(f.file))
+        cache.set(f.file, entry)
         cacheDirty = true
       } catch {
         /* unreadable file */
@@ -398,6 +430,73 @@ async function scan(force = false) {
     scanning = null
   })
   return scanning
+}
+
+const FP_BYTES = 256
+const CHUNK = 16 * 1024 * 1024
+const fingerprint = (b: Buffer) => b.toString('base64')
+const isRecord = (line: string) => {
+  try {
+    JSON.parse(line)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Parse a log: a .jsonl from where the cached read stopped (when the bytes before that point are still
+ * the same: the file only grew), else from the start, CHUNK bytes at a time, whole lines only (a line
+ * still being written is read next time; a last line without a newline counts once it is a whole record).
+ */
+export async function readLog(f: { agent: UsageAgent; file: string; mtime: number; size: number }, cached?: FileEntry): Promise<FileEntry> {
+  const parse = PARSERS[f.agent]
+  if (!f.file.endsWith('.jsonl')) return { agent: f.agent, mtime: f.mtime, size: f.size, ...parse(await fs.promises.readFile(f.file, 'utf8'), f.file) }
+  const fh = await fs.promises.open(f.file, 'r')
+  try {
+    const size = (await fh.stat()).size
+    let offset = 0
+    let parsed: Parsed | undefined
+    if (cached?.agent === f.agent && cached.offset !== undefined && cached.fp !== undefined && cached.offset <= size) {
+      const from = Math.max(0, cached.offset - FP_BYTES)
+      const before = Buffer.alloc(cached.offset - from)
+      await fh.read(before, 0, before.length, from)
+      if (fingerprint(before) === cached.fp) {
+        offset = cached.offset
+        // copies: a read that fails midway must leave the cached entry as it was
+        parsed = { models: [...cached.models], sessions: [...cached.sessions], events: [...cached.events], state: cached.state && { ...cached.state } }
+      }
+    }
+    parsed ??= parse('', f.file)
+    let want = CHUNK
+    while (offset < size) {
+      const buf = Buffer.alloc(Math.min(want, size - offset))
+      const { bytesRead } = await fh.read(buf, 0, buf.length, offset)
+      if (!bytesRead) break
+      const got = buf.subarray(0, bytesRead)
+      // (a short read: the file shrank meanwhile)
+      const atEnd = bytesRead < buf.length || offset + bytesRead >= size
+      let end = got.lastIndexOf(0x0a) + 1
+      if (atEnd && end < bytesRead && isRecord(got.subarray(end).toString('utf8'))) end = bytesRead
+      if (!end) {
+        // no whole line in this chunk: a longer line, or the end of the file is still being written
+        if (atEnd) break
+        want *= 2
+        continue
+      }
+      parsed = parse(got.subarray(0, end).toString('utf8'), f.file, parsed)
+      offset += end
+      want = CHUNK
+      if (!atEnd) await new Promise((r) => setImmediate(r))
+    }
+    const from = Math.max(0, offset - FP_BYTES)
+    const before = Buffer.alloc(offset - from)
+    await fh.read(before, 0, before.length, from)
+    // the size read: a change after it is seen by the next scan
+    return { agent: f.agent, mtime: f.mtime, size: f.size, ...parsed, offset, fp: fingerprint(before) }
+  } finally {
+    await fh.close()
+  }
 }
 
 // ---------- aggregation ----------
@@ -447,7 +546,7 @@ function eventsOf(agent: UsageAgent): FlatEv[] {
     if (f.agent !== agent) continue
     for (const e of f.events) {
       const id = e[7]
-      if (agent === 'claude' && id !== ':') {
+      if ((agent === 'claude' && id !== ':') || (agent === 'gemini' && id.startsWith('gm:'))) {
         if (seen.has(id)) continue
         seen.add(id)
       }

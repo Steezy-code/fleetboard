@@ -31,14 +31,24 @@ export function resolveMention(word: string): string[] {
     .map((c) => c.id)
 }
 
-const MENTION_RE = /(^|[\s,(])@([\w.\-]+)/g
+// "@word" after a space, comma or bracket; not "@types/node" (a path) and not "bob@example.com"
+const MENTION_RE = /(^|[\s,(])@([\w.\-]+)(?![\w/@])/g
 
-/** Split a command into its @mentions and the remaining text. */
-export function parseMentions(text: string): { mentions: string[]; body: string } {
+/**
+ * Split a command into the @mentions that name consoles (taken out of the text) and the rest. Any
+ * other @word stays in the text as typed: "@Maya add @types/node and use @Injectable" sends Maya "add
+ * @types/node and use @Injectable". `isTarget` tells a mention from an @word.
+ */
+export function parseMentions(text: string, isTarget: (word: string) => boolean = (w) => resolveMention(w).length > 0): { mentions: string[]; unknown: string[]; body: string } {
   const mentions: string[] = []
+  const unknown: string[] = []
   const body = text
-    .replace(MENTION_RE, (_m, pre: string, word: string) => {
+    .replace(MENTION_RE, (whole, pre: string, word: string) => {
       const clean = word.replace(/[.\-]+$/, '')
+      if (!clean || !isTarget(clean)) {
+        if (clean) unknown.push(clean)
+        return whole
+      }
       mentions.push(clean)
       return pre + word.slice(clean.length).replace(/^[.\-]+/, '')
     })
@@ -46,7 +56,7 @@ export function parseMentions(text: string): { mentions: string[]; body: string 
     .replace(/^[\s,:;-]+/, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
-  return { mentions, body }
+  return { mentions, unknown, body }
 }
 
 /** Console ids wired to an orchestrator node (directly, or through a wired team). */
@@ -82,18 +92,13 @@ export interface DispatchResult {
  * `defaultTargetIds` when nothing is mentioned), submitting with Enter.
  */
 export function dispatchCommand(text: string, defaultTargetIds: string[] = allConsoles().map((c) => c.id)): DispatchResult {
-  const { mentions, body } = parseMentions(text)
-  const unresolved: string[] = []
+  const { mentions, unknown, body } = parseMentions(text)
+  // @words that name no console stay in the text; if none named one, it may be a misspelt name:
+  // then nothing is sent rather than everything going to the default consoles
+  const unresolved = unknown
   let targets: string[] = []
-  if (mentions.length) {
-    const set = new Set<string>()
-    for (const m of mentions) {
-      const ids = resolveMention(m)
-      if (!ids.length) unresolved.push(m)
-      ids.forEach((id) => set.add(id))
-    }
-    targets = [...set]
-  } else targets = [...new Set(defaultTargetIds)]
+  if (mentions.length) targets = [...new Set(mentions.flatMap(resolveMention))]
+  else if (!unknown.length) targets = [...new Set(defaultTargetIds)]
 
   const names = new Map(allConsoles().map((c) => [c.id, c.data.name as string]))
   const result: DispatchResult = { text: body, sent: [], skipped: [], unresolved }
@@ -144,8 +149,9 @@ export function commandFrom(scope: string, text: string, defaultTargetIds: strin
     return r
   }
   logCommand(scope, r)
-  if (r.unresolved.length) app.toast(`No console or team called ${r.unresolved.map((u) => '@' + u).join(', ')}`, 'warn')
-  if (!r.sent.length && !r.unresolved.length) app.toast('No running console to send to', 'warn')
+  // with someone to send to, other @words are just part of the text (@types/node, @Injectable)
+  if (!r.sent.length && r.unresolved.length) app.toast(`Not sent: no console or team called ${r.unresolved.map((u) => '@' + u).join(', ')}`, 'warn')
+  else if (!r.sent.length) app.toast('No running console to send to', 'warn')
   else if (r.sent.length) app.toast(`Sent to ${r.sent.length === 1 ? r.sent[0].name : `${r.sent.length} agents`}`, 'ok')
   return r
 }

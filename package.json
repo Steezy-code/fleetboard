@@ -11,7 +11,9 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "postinstall": "electron-rebuild -f -w node-pty",
-    "app": "bin/fleetboard --rebuild"
+    "app": "bin/fleetboard --rebuild",
+    "test": "node --enable-source-maps --import ./test/support/register.mjs --test 'test/unit/**/*.test.ts'",
+    "test:e2e": "electron-vite build && xvfb-run -a -s '-screen 0 1600x1000x24' node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1 'test/e2e/**/*.test.ts'"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",

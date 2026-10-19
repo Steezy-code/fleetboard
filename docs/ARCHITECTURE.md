@@ -11,13 +11,33 @@ src/shared/agents.ts     AGENTS catalog (bin, resumeArgs, yoloArgs, configEnv, h
 src/main/                Electron main process
   index.ts               window, core IPC (pty:*, pdf:fromHtml, png:capture, win:*), registers modules
   context.ts             MainContext passed to each module's register(ctx)
-  pty.ts                 PtyManager: real PTYs (node-pty), scrollback buffer, status heuristics
-  hooks.ts               Claude Code hooks → status (working/idle/needs-you)
+  pty.ts                 PtyManager: real PTYs (node-pty), raw buffer, answer(), onSpawn/onExit listeners;
+                         closing a console ends an agent CLI's whole process group (a shell's like a terminal)
+  orphans.ts             the consoles running, on disk: the next launch ends what a run that died left running
+  errors.ts              stray main-process errors: logged to ~/.fleetboard/logs/main.log, shown as a toast
+  goal.ts                runs a loop's goal command (goal:check) in the project folder, exit code = verdict
+  screen.ts              TermScreen: a headless xterm per console, what the terminal actually shows
+  status.ts              detectPrompt (menus, hints, y/n on the cursor row), StatusTracker, answerKeys: pure, clock-injected
+  hooks.ts               receives Claude Code hook events (per-run secret in FB_HOOK_TOKEN)
+  localserver.ts         secrets and request checks shared by the local HTTP servers
+  remote.ts              the phone Inbox server (off unless enabled in Settings); remote-page.ts is its page
+  fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready
+  plan.ts                links workers to the Lead's plan tasks (by id, number, title, or a clear match)
+  gemini-home.ts         a Gemini CLI home per team console (GEMINI_CLI_HOME): the user's ~/.gemini linked in,
+                         settings with the fleet MCP server added (Gemini reads MCP servers only from settings)
+  sessions.ts            each console's own conversation: ids for Claude Code / Gemini, found for Codex;
+                         resumable / taken / free / lost, as each real CLI behaves
   cli.ts                 headless one-shot runs of the user's CLI (claude -p streaming) — IPC cli:run
   store.ts               persistence (~/.fleetboard) — IPC store:*
-  fsops.ts               dialogs, fs:tree/read/write/..., shell:*
+  fsops.ts               dialogs, fs:tree (level by level, within a budget; deeper folders read when opened),
+                         fs:write (atomic; with a base, refuses to overwrite a change made on disk meanwhile), shell:*
   agents.ts              agents:detect
-  git.ts / usage.ts / profiles.ts   feature modules (stubs to fill)
+  git.ts                 the git drawer: status, diffs, commits, push/pull, branches, PRs (gh)
+  usage.ts               token usage from the CLIs' own logs, read on from where the last read stopped
+  profiles.ts            several sign-ins per CLI (its config dir per profile)
+src/shared/prompt.ts     Prompt / PromptAnswer: a question a console is waiting on, and how to answer it
+src/shared/approvals.ts  Prompt → Inbox card (title, detail, buttons), for the board and the phone
+src/shared/qr.ts, ansi.ts  QR encoder (phone link), stripAnsi for matching words in output streams
 src/preload/index.ts     window.fb = { invoke, send, on, pathForFile }
 src/renderer/src/
   lib/api.ts             invoke(), on(), uid(), runCli(), extractJson(), fileUrl(), basename()
@@ -70,5 +90,36 @@ src/renderer/src/
   `src/renderer/src/styles/<area>.css` and import it from your feature entry file (`features/<area>.ts`).
 - Do not add npm dependencies. Available: react, zustand, lucide-react, @xterm/*, marked, highlight.js,
   nanoid, @huggingface/transformers, kokoro-js.
-- Verify with `npx tsc --noEmit -p tsconfig.json` (only your files' errors matter while others work in
-  parallel) and `npx electron-vite build`. The dev app is already running; don't start another one.
+- **Console state comes from the screen.** Read what a console shows with `ptys.screen(id)` / `pty:prompt`
+  and `pty:tail` (rendered text, not the raw stream). Answer a question with `pty:answer` (it re-reads the
+  live screen and refuses if the question changed); never type option digits blindly.
+- **Local HTTP servers** take a per-run secret (hooks: in the URL, from the console's environment; fleet
+  MCP: a bearer token, from a 0600 file for Claude and an env var for Codex, never on a command line) and
+  check requests with `refuse()` (no browser Origin, Host must be 127.0.0.1/localhost). HTML from repos or models goes through `sanitizeHtml`.
+- Verify with `npx tsc --noEmit -p tsconfig.json`, `npm test` and `npm run test:e2e` (see Testing).
+
+## Testing
+
+- `npm test`: unit tests with `node:test` (test/unit). TypeScript is compiled with the same oxc transform
+  Vite uses (test/support/register.mjs); `electron` resolves to a recording stub; renderer modules run on a
+  fake preload bridge (test/support/renderer-env.ts) where tests answer IPC channels and see every call.
+- **Recorded sessions** (test/fixtures/casts): real Claude Code, Codex, Gemini and bash sessions, hook events
+  included, recorded with `node test/tools/record.mjs` and replayed through the screen model and status
+  tracker. Each mark is named `<expected status>: <what is on screen>`. `node test/tools/replay.mjs file.cast`
+  prints the screen at each mark. To cover a new CLI or screen, record it and add marks.
+- `npm run test:e2e`: builds the app and drives it under Xvfb over the DevTools protocol (test/e2e/harness.ts),
+  each run with its own `FLEETBOARD_HOME`, home folder and PATH. `claude` there is a scripted fake
+  (test/fake-agent/claude.mjs): a Claude-like TUI that runs the real hook commands, speaks MCP to the fleet
+  server and follows a JSON scenario, so Teams run end to end without tokens. `E2E_SHOTS=dir` saves screenshots.
+- test/e2e/real: the same flows with the real CLIs, run by hand. Claude Code: `FLEETBOARD_REAL_CLAUDE_CONFIG`
+  points at an onboarded config dir (copied, never changed); these spend tokens. Codex and Gemini CLI:
+  `FLEETBOARD_REAL_CODEX` / `FLEETBOARD_REAL_GEMINI` name the binary, which talks to a local mock of its
+  model API (test/support/mock-responses.ts), so no account is needed.
+- test/unit/agent-flags.test.ts checks every flag passed to Claude Code, Codex and Gemini CLI against the
+  installed CLI's `--help` (skipped for a CLI that is not installed; `FLEETBOARD_CLI_PATH` adds places to
+  look). CLIs drop flags: run it after upgrading one.
+- test/e2e/leaks.test.ts opens and closes panels, consoles and workspaces over and over and checks that
+  memory, DOM nodes, listeners and processes do not pile up.
+- Races show up under load: run the e2e suite several files at a time (`--test-concurrency=4` instead of 1)
+  now and then. That found a note opening as an empty editor, which one at a time never showed.
+- CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.

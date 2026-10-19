@@ -10,6 +10,9 @@ import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { loginEnv } from './env'
+import { newSecret, refuse, sameSecret } from './localserver'
+import { findTask, guessTask } from './plan'
+import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -23,6 +26,15 @@ fs.mkdirSync(treesDir, { recursive: true })
 
 let ctx: MainContext
 let port = 0
+/** this run's secret, from which each team console's own bearer token for the MCP server is made */
+const secret = newSecret()
+/**
+ * A member's token: good for that member only. The server takes who is calling from the URL, so one
+ * token for all would let any console that reads its own config call as another (a worker as the Lead).
+ */
+const memberToken = (id: string) => crypto.createHmac('sha256', secret).update(id).digest('base64url')
+/** the most a call may send (a report or a plan is a few KB) */
+const MAX_BODY = 4 * 1024 * 1024
 const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
@@ -37,6 +49,9 @@ const baseCommit = new Map<string, string>()
 
 const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
 const MAX_WORKERS = 4
+const TASK_STATUSES: FleetTask['status'][] = ['todo', 'doing', 'review', 'done', 'blocked']
+/** CLIs that can be team members: they reach the fleet tools over MCP (see fleetLaunch) */
+const TEAM_AGENTS = ['claude', 'codex', 'gemini']
 const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
@@ -159,7 +174,7 @@ function leadPrompt(m: FleetMember) {
     'You have fleet tools (mcp__fleet__*). Rules:',
     '1. Never edit files yourself. Read the repo to understand it, then delegate.',
     '2. Break the goal into a short plan with fleet_plan (one line per task). Keep it small: 1-4 tasks.',
-    `3. Start one worker per task with fleet_spawn_worker. Give each worker files/folders it owns that no other worker touches, and a done_when check (a command that proves it works). At most ${MAX_WORKERS} workers at once.`,
+    `3. Start one worker per task with fleet_spawn_worker, passing the plan task's id as task_ref. Give each worker files/folders it owns that no other worker touches, and a done_when check (a command that proves it works). At most ${MAX_WORKERS} workers at once.`,
     '4. After starting workers, call fleet_wait to receive their reports (it returns when something happens). Do not poll or sleep.',
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
     '6. Once everything is merged, start one reviewer with fleet_spawn_reviewer to check the combined work against the goal and run the checks. Send any findings to the worker that owns the code (fleet_send), wait, merge again.',
@@ -200,14 +215,14 @@ function briefFor(m: FleetMember, lead?: FleetMember) {
 const mcpFile = (id: string) => path.join(dirs.hooks, `mcp-${id}.json`)
 
 /** Extra CLI args/env for a console that belongs to a team. */
-export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record<string, string> } | null {
+export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, string | undefined> = process.env): { args: string[]; env: Record<string, string> } | null {
   const found = memberOf(req.id)
   if (!found || !port) return null
   const { m, s } = found
   const url = `http://127.0.0.1:${port}/mcp/${m.id}`
-  const env = { MCP_TOOL_TIMEOUT: '600000' }
+  const env: Record<string, string> = { MCP_TOOL_TIMEOUT: '600000' }
   if (m.agentId === 'claude') {
-    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url } } })
+    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: `Bearer ${memberToken(m.id)}` } } } }, 0o600)
     const lead = m.leadId ? s.members[m.leadId] : undefined
     const args = ['--mcp-config', mcpFile(m.id), '--append-system-prompt', m.role === 'lead' ? leadPrompt(m) : workerPrompt(m, lead)]
     if (m.role === 'worker') args.push('--permission-mode', 'acceptEdits')
@@ -217,12 +232,30 @@ export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record
     return { args, env }
   }
   if (m.agentId === 'codex') {
-    const args = ['-c', `mcp_servers.fleet.url="${url}"`]
-    if (m.role === 'worker') args.push('--full-auto')
+    // the token comes from the environment: command lines are visible to every process on the machine
+    const args = ['-c', `mcp_servers.fleet.url="${url}"`, '-c', 'mcp_servers.fleet.bearer_token_env_var="FB_MCP_TOKEN"']
+    // the fleet tools never ask the user (Claude Code: --allowedTools mcp__fleet); without this Codex asks
+    // "Allow the fleet MCP server to run tool …?" before every report, message and wait
+    args.push('-c', 'mcp_servers.fleet.default_tools_approval_mode="approve"')
+    env.FB_MCP_TOKEN = memberToken(m.id)
+    // edits in its worktree without asking, commands sandboxed (what --full-auto was before Codex dropped it)
+    if (m.role === 'worker') args.push(...(agentById('codex')?.editsArgs ?? []))
+    return { args, env }
+  }
+  if (m.agentId === 'gemini') {
+    // Gemini takes MCP servers only from settings: a home of its own with the fleet server added
+    env.GEMINI_CLI_HOME = geminiTeamHome(m.id, { url, token: memberToken(m.id) }, loginEnvFor)
+    const args: string[] = []
+    if (m.role === 'worker') args.push(...(agentById('gemini')?.editsArgs ?? []))
+    // its worktree is a new folder: trusted for this session when the user trusts the project itself
+    if (m.cwd.startsWith(treesDir) && geminiTrusts(s.projectPath, loginEnvFor)) args.push('--skip-trust')
     return { args, env }
   }
   return { args: [], env }
 }
+
+/** Whether a console belongs to a team (its launch arguments come from fleetLaunch). */
+export const isTeamConsole = (id: string) => !!memberOf(id)
 
 // ---------------------------------------------------------------- messaging
 
@@ -259,11 +292,22 @@ function render(s: FleetState, msg: FleetMessage) {
 
 // ---------------------------------------------------------------- folder trust
 
+/**
+ * Claude Code's global config, where it records trusted folders: ~/.claude.json, or .claude.json in
+ * CLAUDE_CONFIG_DIR when the user's environment sets one (team consoles start with that environment).
+ */
+let claudeConfigFile = ''
+async function findClaudeConfig() {
+  const env = await loginEnv()
+  claudeConfigFile = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(env.HOME || process.env.HOME || '', '.claude.json')
+}
+
 /** Is this folder (or a parent) trusted in the user's Claude Code config? Read-only. */
 let trustCache: { at: number; dirs: string[] } = { at: 0, dirs: [] }
 function claudeTrusts(dir: string) {
+  if (!claudeConfigFile) return false
   if (Date.now() - trustCache.at > 30_000) {
-    const cfg = readJson<any>(path.join(process.env.HOME ?? '', '.claude.json'), {})
+    const cfg = readJson<any>(claudeConfigFile, {})
     trustCache = {
       at: Date.now(),
       dirs: Object.entries(cfg?.projects ?? {})
@@ -285,37 +329,17 @@ function trustTick() {
     if (!claudeTrusts(s.projectPath)) continue
     for (const m of Object.values(s.members)) {
       if (m.status === 'closed' || m.agentId !== 'claude' || !m.cwd.startsWith(treesDir)) continue
-      if (ctx.ptys.status(m.id) !== 'needs-you') continue
-      const screen = ctx.ptys.tail(m.id, 1500)
-      if (!/Yes, I trust this folder/.test(screen) || !/Quick safety check|trust this folder/.test(screen)) continue
-      if (trustAnswered.has(m.id)) continue
+      if (ctx.ptys.status(m.id) !== 'needs-you' || trustAnswered.has(m.id)) continue
+      const trust = ctx.ptys.screen(m.id)?.prompt?.options?.find((o) => /^yes, i trust this folder$/i.test(o.label))
+      if (!trust) continue
       trustAnswered.add(m.id)
-      // the menu starts on "No, exit": move down to "Yes, I trust this folder" and confirm
-      ctx.ptys.write(m.id, '\x1b[B')
-      setTimeout(() => ctx.ptys.write(m.id, '\r'), 200)
+      void ctx.ptys.answer(m.id, { option: trust.label }).then((r) => {
+        if (!r.ok) trustAnswered.delete(m.id)
+      })
     }
   }
 }
 const trustAnswered = new Set<string>()
-
-/**
- * Press Enter after typing, then make sure it took: right after startup a CLI can swallow the first
- * Enter while it settles, leaving the message sitting in its input box. Retry a couple of times.
- */
-function submit(id: string, text: string, attempt = 0) {
-  setTimeout(() => {
-    // on a retry, report focus first: that unsticks an input box that ignored the first Enter
-    if (attempt) ctx.ptys.write(id, '\x1b[I')
-    ctx.ptys.write(id, '\r')
-    setTimeout(() => {
-      if (attempt >= 2 || ctx.ptys.status(id) !== 'idle') return
-      const probe = text.slice(0, 40).replace(/\s+/g, ' ')
-      const screen = ctx.ptys.tail(id, 1200).replace(/\s+/g, ' ')
-      // still in the input box (the last prompt line shows our text) → Enter again
-      if (screen.lastIndexOf(probe) > screen.length - text.length - 400) submit(id, text, attempt + 1)
-    }, 1500)
-  }, attempt ? 200 : 350)
-}
 
 /** Type queued messages into consoles that are idle. */
 function deliverTick() {
@@ -326,8 +350,7 @@ function deliverTick() {
       if (!ctx.ptys.readyForInput(msg.to)) continue
       msg.delivered = true
       const text = render(s, msg).replace(/\s*\n\s*/g, ' ').trim()
-      ctx.ptys.paste(msg.to, text, false)
-      submit(msg.to, text)
+      ctx.ptys.typeAndSubmit(msg.to, text)
       changed(s)
       break // one message per tick per project, so the CLI sees them one at a time
     }
@@ -338,6 +361,8 @@ function deliverTick() {
 
 /** Ask the board to add a node for a new team console, then start its process. */
 async function startConsole(s: FleetState, m: FleetMember, extra: { acceptEdits?: boolean } = {}) {
+  // before the board can mount the node and start it: this is a first start, not a restart
+  startedThisRun.add(m.id)
   const reqId = uid('req')
   const named = await new Promise<{ name?: string }>((resolve) => {
     acks.set(reqId, resolve)
@@ -419,7 +444,7 @@ const TOOLS: ToolDef[] = [
     name: 'fleet_update_task',
     roles: ['lead'],
     description: 'Update a task on the plan: status (todo, doing, review, done, blocked), owner (worker name) or a short note.',
-    inputSchema: { type: 'object', properties: { task: str('Task id or its exact title'), status: str('todo | doing | review | done | blocked'), owner: str('Worker name'), note: str('Short note') }, required: ['task'] }
+    inputSchema: { type: 'object', properties: { task: str('Task id, its number in the plan, or its title'), status: str('todo | doing | review | done | blocked'), owner: str('Worker name'), note: str('Short note') }, required: ['task'] }
   },
   {
     name: 'fleet_spawn_worker',
@@ -432,9 +457,9 @@ const TOOLS: ToolDef[] = [
         task: str('The task, specific and self-contained'),
         owns: strArr('Files or folders this worker may edit; no other worker may own them'),
         done_when: str('A check that proves the task is done, e.g. "npm test passes"'),
-        agent: str('Agent CLI id: claude (default), codex, gemini'),
+        agent: str('Agent CLI id: claude (default), codex or gemini'),
         name: str('Optional worker name'),
-        task_ref: str('Optional plan task id or title to mark as doing')
+        task_ref: str('The plan task this worker does: its id (from fleet_plan), number or title')
       },
       required: ['task', 'owns', 'done_when']
     }
@@ -498,7 +523,7 @@ const TOOLS: ToolDef[] = [
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true })
 
-async function callTool(callerId: string, name: string, a: any): Promise<any> {
+async function callTool(callerId: string, name: string, a: any, signal?: AbortSignal): Promise<any> {
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
@@ -513,9 +538,13 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       return text(`Plan shown on the board:\n${s.tasks.map((t, i) => `${i + 1}. ${t.title} (id ${t.id})`).join('\n')}`)
     }
     case 'fleet_update_task': {
-      const t = s.tasks.find((x) => x.id === a.task || x.title.toLowerCase() === String(a.task).toLowerCase())
-      if (!t) return fail('No such task.')
-      if (a.status) t.status = a.status
+      const t = findTask(s.tasks, a.task)
+      if (!t) return fail(`No such task. The plan:\n${s.tasks.map((x, i) => `${i + 1}. ${x.title} (id ${x.id})`).join('\n')}`)
+      if (a.status) {
+        const st = String(a.status).toLowerCase().trim()
+        if (!TASK_STATUSES.includes(st as FleetTask['status'])) return fail(`Unknown status "${a.status}". Use one of: ${TASK_STATUSES.join(', ')}.`)
+        t.status = st as FleetTask['status']
+      }
       if (a.owner) t.owner = findMember(s, a.owner)?.id ?? a.owner
       if (a.note) t.note = a.note
       changed(s)
@@ -526,7 +555,9 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       const reviewer = name === 'fleet_spawn_reviewer'
       if (!reviewer && team().filter((x) => x.role === 'worker' && x.status === 'working').length >= MAX_WORKERS)
         return fail(`You already have ${MAX_WORKERS} workers running. Wait for reports (fleet_wait) before starting more.`)
-      const agentId = agentById(a.agent ?? 'claude') ? a.agent ?? 'claude' : 'claude'
+      const agentId = String(a.agent ?? '').trim().toLowerCase() || 'claude'
+      if (!TEAM_AGENTS.includes(agentId))
+        return fail(`${agentById(agentId)?.name ?? `"${a.agent}"`} cannot join a team: it has no way to reach the fleet tools. Use ${TEAM_AGENTS.slice(0, -1).join(', ')} or ${TEAM_AGENTS.at(-1)}.`)
       const id = uid('con')
       const wname = pickName(s, a.name)
       let cwd = m.cwd
@@ -556,13 +587,17 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       }
       s.members[id] = w
       memberProject.set(id, s.projectId)
-      const ref = a.task_ref && s.tasks.find((t) => t.id === a.task_ref || t.title.toLowerCase() === String(a.task_ref).toLowerCase())
+      const ref = reviewer ? undefined : a.task_ref ? findTask(s.tasks, a.task_ref) : guessTask(s.tasks, String(a.task ?? ''))
       if (ref) Object.assign(ref, { owner: id, status: 'doing' })
+      const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
       await startConsole(s, w, { acceptEdits: !reviewer })
       post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m) })
       return text(
-        `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief. Call fleet_wait to get its report.`
+        `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
+          (ref ? ` On the plan: "${ref.title}".` : '') +
+          (unlinked ? ` It is not linked to a plan task${a.task_ref ? ` (no task "${a.task_ref}")` : ''}: call fleet_update_task with the task id and owner ${w.name}.` : '') +
+          ' Call fleet_wait to get its report.'
       )
     }
     case 'fleet_send': {
@@ -580,14 +615,26 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       }
       const ms = Math.min(WAIT_CAP_MS, Math.max(5, Number(a.timeout_seconds) || 170) * 1000)
       const events = await new Promise<FleetMessage[]>((resolve) => {
-        waiters.set(m.id, resolve)
-        setTimeout(() => {
-          if (waiters.get(m.id) === resolve) {
-            waiters.delete(m.id)
-            resolve([])
-          }
-        }, ms)
+        const finish = (ev: FleetMessage[]) => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          if (waiters.get(m.id) === waiter) waiters.delete(m.id)
+          resolve(ev)
+        }
+        const waiter = (ev: FleetMessage[]) => finish(ev)
+        // the caller hung up (interrupted, restarted): stop waiting so news is not handed to nobody
+        const onAbort = () => finish([])
+        const timer = setTimeout(() => finish([]), ms)
+        waiters.set(m.id, waiter)
+        if (signal?.aborted) onAbort()
+        else signal?.addEventListener('abort', onAbort)
       })
+      if (signal?.aborted) {
+        // arrived as the connection closed: keep it for the next fleet_wait, or to be typed in
+        for (const x of events) x.delivered = false
+        if (events.length) changed(s)
+        return text('')
+      }
       if (!events.length) {
         const working = team().filter((x) => x.status === 'working')
         return text(working.length ? `Nothing new yet. Still working: ${working.map((x) => x.name).join(', ')}. Call fleet_wait again.` : 'Nothing new, and nobody is working.')
@@ -645,13 +692,19 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
       changed(s)
       ctx.emit('fleet:asked', ask)
       const answer = await new Promise<string | null>((resolve) => {
-        askWaiters.set(ask.id, resolve)
-        setTimeout(() => {
-          if (askWaiters.get(ask.id) === resolve) {
-            askWaiters.delete(ask.id)
-            resolve(null)
-          }
-        }, WAIT_CAP_MS)
+        const finish = (v: string | null) => {
+          clearTimeout(timer)
+          signal?.removeEventListener('abort', onAbort)
+          if (askWaiters.get(ask.id) === waiter) askWaiters.delete(ask.id)
+          resolve(v)
+        }
+        const waiter = (v: string) => finish(v)
+        // without a listener, the answer is posted to the lead as a message (fleet:answer)
+        const onAbort = () => finish(null)
+        const timer = setTimeout(() => finish(null), WAIT_CAP_MS)
+        askWaiters.set(ask.id, waiter)
+        if (signal?.aborted) onAbort()
+        else signal?.addEventListener('abort', onAbort)
       })
       return text(answer ? `The user chose: ${answer}` : 'No answer yet. Carry on with anything that does not depend on it; the answer will be delivered to you when they choose.')
     }
@@ -681,16 +734,20 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
 }
 
 async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force' | 'keep') {
-  ctx.ptys.kill(m.id)
+  // closed first: the console's exit that follows is expected, not news for the lead
   m.status = 'closed'
   ctx.emit('fleet:removeConsoles', [m.id])
+  // its worktree and Gemini home go once its CLI has ended: one still shutting down would write its
+  // session into them again (Gemini CLI saves on SIGHUP)
+  await ctx.ptys.stop(m.id)
   await removeWorktree(s.projectPath, m, branch)
+  if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
   changed(s)
 }
 
 // ---------------------------------------------------------------- MCP over HTTP (JSON-RPC, streamable HTTP without streams)
 
-async function handleRpc(callerId: string, msg: any): Promise<any | null> {
+async function handleRpc(callerId: string, msg: any, signal?: AbortSignal): Promise<any | null> {
   const reply = (result: any) => ({ jsonrpc: '2.0', id: msg.id, result })
   if (msg.id === undefined || msg.id === null) return null // notification
   switch (msg.method) {
@@ -709,7 +766,7 @@ async function handleRpc(callerId: string, msg: any): Promise<any | null> {
     }
     case 'tools/call': {
       try {
-        return reply(await callTool(callerId, msg.params?.name, msg.params?.arguments ?? {}))
+        return reply(await callTool(callerId, msg.params?.name, msg.params?.arguments ?? {}, signal))
       } catch (e) {
         return reply(fail(`Fleet error: ${String(e)}`))
       }
@@ -722,14 +779,41 @@ async function handleRpc(callerId: string, msg: any): Promise<any | null> {
 function startServer(): Promise<number> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      const m = /^\/mcp\/([^/?]+)/.exec(req.url ?? '')
+      const m = /^\/mcp\/([^/?]+)\/?(?:\?|$)/.exec(req.url ?? '')
       if (!m) return res.writeHead(404).end()
+      let caller = m[1]
+      try {
+        caller = decodeURIComponent(m[1])
+      } catch {
+        /* use as is */
+      }
+      const token = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''))?.[1]
+      if (!sameSecret(token, memberToken(caller)) || refuse(req, port, { json: true })) {
+        req.resume()
+        return res.writeHead(403).end()
+      }
       if (req.method === 'GET') return res.writeHead(405, { Allow: 'POST' }).end()
       if (req.method === 'DELETE') return res.writeHead(200).end()
       if (req.method !== 'POST') return res.writeHead(405).end()
       let body = ''
-      req.on('data', (d) => (body += d))
+      // a long call (fleet_wait, fleet_ask_user) must notice when its caller goes away
+      const hangup = new AbortController()
+      res.on('close', () => {
+        if (!res.writableFinished) hangup.abort()
+      })
+      let tooBig = false
+      req.on('data', (d) => {
+        if (tooBig) return
+        body += d
+        if (body.length > MAX_BODY) {
+          tooBig = true
+          body = ''
+          res.writeHead(413, { Connection: 'close' }).end()
+          req.resume()
+        }
+      })
       req.on('end', async () => {
+        if (tooBig) return
         let parsed: any
         try {
           parsed = JSON.parse(body)
@@ -737,7 +821,8 @@ function startServer(): Promise<number> {
           return res.writeHead(400).end()
         }
         const batch = Array.isArray(parsed)
-        const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(decodeURIComponent(m[1]), x)))).filter(Boolean)
+        const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
+        if (hangup.signal.aborted) return
         if (!out.length) return res.writeHead(202).end()
         res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[1] })
         res.end(JSON.stringify(batch ? out : out[0]))
@@ -752,9 +837,75 @@ function startServer(): Promise<number> {
 
 // ---------------------------------------------------------------- renderer IPC
 
+/** Team consoles started (or restarted) by this run of the app. */
+const startedThisRun = new Set<string>()
+/** Team consoles whose process ended mid-task during this run. */
+const stoppedThisRun = new Set<string>()
+
+/**
+ * A team console started again after the app restarted, while its work was unfinished. The CLI is
+ * back (its conversation resumed, or fresh) but sitting at its prompt: its turn was cut off with the
+ * old app. Queue a briefing, typed in when it is ready, so the team picks up where it was.
+ */
+function memberStarted(req: PtySpawnRequest) {
+  if (startedThisRun.has(req.id)) return
+  startedThisRun.add(req.id)
+  const found = memberOf(req.id)
+  if (!found) return
+  const { s, m } = found
+  const lead = m.leadId ? s.members[m.leadId] : undefined
+  // a worker that died and was reported to its lead, brought back by the user: it carries on
+  if (m.role !== 'lead' && m.status === 'reported' && m.report?.startsWith('Console exited') && lead && lead.status !== 'closed') {
+    m.status = 'working'
+    m.report = undefined
+    const t = s.tasks.find((x) => x.owner === m.id)
+    if (t) t.status = 'doing'
+    post(s, { from: m.id, to: lead.id, kind: 'message', text: `${m.name}'s console was restarted; it carries on with its task and will report when done.` })
+  }
+  if (m.status !== 'working' && m.status !== 'starting') return
+  const what = stoppedThisRun.delete(m.id) ? 'Your console was restarted after it stopped.' : 'Fleetboard was restarted.'
+  const how = `${what} ${req.resume ? 'Your conversation was restored, but your last step was cut off.' : 'Your previous conversation was not restored.'}`
+  if (m.role === 'lead') {
+    const crew = Object.values(s.members).filter((x) => x.leadId === m.id && x.status !== 'closed')
+    const team = crew.length ? crew.map((x) => `${x.name} (${x.role}): ${x.status === 'working' ? 'still working' : x.status}`).join('; ') : 'nobody started yet'
+    const goal = req.resume ? '' : ` Your goal: ${m.task}`
+    post(s, { from: 'user', to: m.id, kind: 'system', text: `[Fleet] ${how}${goal} Team: ${team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.` })
+  } else {
+    post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead)}` })
+  }
+}
+
+/**
+ * A member's console ended before it reported (crashed, killed, closed from the board). Tell its lead
+ * so the team doesn't wait forever; the work so far stays in the member's worktree.
+ */
+function memberExited(id: string, code: number | undefined, appClosing: boolean) {
+  if (appClosing) return
+  const found = memberOf(id)
+  if (!found) return
+  const { s, m } = found
+  if (m.status !== 'working' && m.status !== 'starting') return
+  // started again by hand (Restart / Resume on its tile), it gets briefed like after an app restart
+  startedThisRun.delete(id)
+  stoppedThisRun.add(id)
+  // a lead that stopped is shown to the user in the Inbox (its console status is "exited")
+  const lead = m.leadId ? s.members[m.leadId] : undefined
+  if (!lead || lead.status === 'closed') return
+  const how = code ? ` (exit code ${code})` : ''
+  m.status = 'reported'
+  m.report = `Console exited${how} before reporting.`
+  const t = s.tasks.find((x) => x.owner === m.id)
+  if (t) t.status = 'blocked'
+  const work = m.role === 'worker' && m.branch ? ` Anything it changed is uncommitted in its worktree (branch ${m.branch}).` : ''
+  post(s, { from: m.id, to: lead.id, kind: 'report', text: `(blocked) ${m.name}'s console exited${how} before it reported.${work} Start a new ${m.role} if the task still needs doing.` })
+}
+
 export async function initFleet(c: MainContext) {
   ctx = c
   loadAll()
+  ctx.ptys.onExit(memberExited)
+  ctx.ptys.onSpawn(memberStarted)
+  void findClaudeConfig()
   port = await startServer()
   setInterval(deliverTick, 700)
   setInterval(trustTick, 900)
@@ -762,6 +913,11 @@ export async function initFleet(c: MainContext) {
   const { ipc } = ctx
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
   ipc.handle('fleet:startLead', (_e, opts) => startLead(opts))
+  /** whether a team in this folder works in worktrees of its own (a repository with a commit) */
+  ipc.handle('fleet:isolation', async (_e, projectPath: string): Promise<'worktrees' | 'no-commits' | 'no-repo'> => {
+    if ((await git(projectPath, ['rev-parse', '--verify', 'HEAD'])).ok) return 'worktrees'
+    return (await git(projectPath, ['rev-parse', '--git-dir'])).ok ? 'no-commits' : 'no-repo'
+  })
   ipc.handle('fleet:ack', (_e, reqId: string, v: { name?: string }) => {
     acks.get(reqId)?.(v ?? {})
     acks.delete(reqId)
@@ -773,21 +929,7 @@ export async function initFleet(c: MainContext) {
     post(f.s, { from: 'user', to: toId, kind: 'goal', text })
     return true
   })
-  ipc.handle('fleet:answer', (_e, askId: string, answer: string) => {
-    for (const s of states.values()) {
-      const ask = s.asks.find((a) => a.id === askId)
-      if (!ask) continue
-      ask.answer = answer
-      const w = askWaiters.get(askId)
-      if (w) {
-        askWaiters.delete(askId)
-        w(answer)
-      } else post(s, { from: 'user', to: ask.from, kind: 'answer', text: `The user answered "${ask.question}": ${answer}` })
-      changed(s)
-      return true
-    }
-    return false
-  })
+  ipc.handle('fleet:answer', (_e, askId: string, answer: string) => answerAsk(askId, answer))
   ipc.handle('fleet:diff', async (_e, projectId: string) => {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
@@ -795,24 +937,7 @@ export async function initFleet(c: MainContext) {
     const base = baseCommit.get(lead.id) ?? 'HEAD~1'
     return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
   })
-  /** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
-  ipc.handle('fleet:mergeReady', async (_e, projectId: string) => {
-    const s = states.get(projectId)
-    if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
-    const lead = s.members[s.ready.leadId]
-    if (lead?.branch) {
-      const current = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out
-      const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
-      if (!r.ok) {
-        await git(s.projectPath, ['merge', '--abort'])
-        return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
-      }
-      await dismissTeam(s, lead, 'merged')
-      return { ok: true, into: current }
-    }
-    await dismissTeam(s, lead, 'keep')
-    return { ok: true, into: '' }
-  })
+  ipc.handle('fleet:mergeReady', (_e, projectId: string) => mergeReady(projectId))
   /** Push the team's branch and open a draft PR whose description is the lead's summary. */
   ipc.handle('fleet:openPr', async (_e, projectId: string) => {
     const s = states.get(projectId)
@@ -852,6 +977,77 @@ export async function initFleet(c: MainContext) {
     return true
   })
 }
+
+/** The user's answer to a lead's question (the Inbox on the board or a phone). */
+export function answerAsk(askId: string, answer: string): boolean {
+  for (const s of states.values()) {
+    const ask = s.asks.find((a) => a.id === askId)
+    if (!ask) continue
+    if (ask.answer) return false
+    ask.answer = answer
+    const w = askWaiters.get(askId)
+    if (w) {
+      askWaiters.delete(askId)
+      w(answer)
+    } else post(s, { from: 'user', to: ask.from, kind: 'answer', text: `The user answered "${ask.question}": ${answer}` })
+    changed(s)
+    return true
+  }
+  return false
+}
+
+/** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
+/** What the user's checkout is in the middle of (a merge, a rebase…), if anything. */
+async function unfinishedOperation(cwd: string): Promise<string | null> {
+  const ops: [string, string][] = [
+    ['MERGE_HEAD', 'a merge'],
+    ['rebase-merge', 'a rebase'],
+    ['rebase-apply', 'a rebase'],
+    ['CHERRY_PICK_HEAD', 'a cherry-pick'],
+    ['REVERT_HEAD', 'a revert']
+  ]
+  for (const [name, what] of ops) {
+    const p = (await git(cwd, ['rev-parse', '--git-path', name])).out
+    if (p && fs.existsSync(path.resolve(cwd, p))) return what
+  }
+  return null
+}
+
+const merging = new Set<string>()
+
+/** Merge the Ready work into the user's checkout (whatever branch it is on now), then close the team. */
+export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string }> {
+  const s = states.get(projectId)
+  if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
+  // the desktop and the phone can both press Merge
+  if (merging.has(projectId)) return { ok: false, error: 'Already merging.' }
+  merging.add(projectId)
+  try {
+    const lead = s.members[s.ready.leadId]
+    if (lead?.branch) {
+      const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
+      if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
+      // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
+      const busy = await unfinishedOperation(s.projectPath)
+      if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then merge again; the work stays on ${lead.branch}.` }
+      const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
+      if (!r.ok) {
+        // undo only a merge this started (a conflict); a merge git refused to start left nothing to undo
+        if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['merge', '--abort'])
+        return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
+      }
+      await dismissTeam(s, lead, 'merged')
+      return { ok: true, into: current.out }
+    }
+    await dismissTeam(s, lead, 'keep')
+    return { ok: true, into: '' }
+  } finally {
+    merging.delete(projectId)
+  }
+}
+
+/** A project's team state, if it has one. */
+export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')

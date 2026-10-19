@@ -16,6 +16,29 @@ import type {
 import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
 import { basename, invoke, uid } from '../lib/api'
 
+/**
+ * Per-window memory that outlives the page (a crash, a reload) but not the app: sessionStorage belongs
+ * to the window, not to the page's process. Missing or blocked storage just means nothing is remembered.
+ */
+const windowSession = {
+  get: (key: string): string | null => {
+    try {
+      return sessionStorage.getItem(key)
+    } catch {
+      return null
+    }
+  },
+  set: (key: string, value: string | null) => {
+    try {
+      if (value === null) sessionStorage.removeItem(key)
+      else sessionStorage.setItem(key, value)
+    } catch {
+      /* not remembered */
+    }
+  }
+}
+const OPEN_PROJECT = 'fleetboard.openProject'
+
 export type Tool = 'select' | 'pen' | 'shape' | 'text' | 'eraser' | 'connector'
 
 export interface PanelState {
@@ -229,10 +252,21 @@ function clearFocusReturn(w: Workspace): Workspace {
 const removeNodesNow = (ids: string[]) => (useApp.getState() as any)._removeNodes(ids)
 
 let saveTimer: number | undefined
+let saveWarnedAt = 0
 function scheduleSave(p: Project | null) {
   if (!p) return
   window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => invoke('store:saveProject', p), 350)
+  saveTimer = window.setTimeout(
+    () =>
+      invoke('store:saveProject', p).catch((e) => {
+        // a board that silently stops saving loses everything done since: say so (not on every change)
+        console.error('saving the board failed', e)
+        if (Date.now() - saveWarnedAt < 30_000) return
+        saveWarnedAt = Date.now()
+        useApp.getState().toast(`Could not save the board: ${String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, 'warn')
+      }),
+    350
+  )
 }
 
 export const useApp = create<AppState>((set, get) => {
@@ -282,6 +316,11 @@ export const useApp = create<AppState>((set, get) => {
         live: Object.fromEntries(live.map((l) => [l.id, true])),
         statuses: Object.fromEntries(live.map((l) => [l.id, l.status]))
       })
+      // the page was reloaded (after a crash, or by hand): back to the board it showed
+      const reopen = windowSession.get(OPEN_PROJECT)
+      if (reopen && !get().project) await get().openProject(reopen)
+      if (await invoke<boolean>('app:crashRecovered').catch(() => false))
+        get().toast(`The window crashed and was reloaded.${live.length ? ' Your consoles kept running.' : ''}`, 'warn')
     },
     setSettings: async (patch) => {
       const settings = await invoke<Settings>('store:setSettings', patch)
@@ -310,8 +349,10 @@ export const useApp = create<AppState>((set, get) => {
       project = { ...project, workspaces: project.workspaces.map(clearFocusReturn) }
       set({ project, selection: [], panel: null, focusedNode: null })
       scheduleSave(project)
+      windowSession.set(OPEN_PROJECT, path)
     },
     closeProject: () => {
+      windowSession.set(OPEN_PROJECT, null)
       restoreFocusInstantly()
       const p = get().project
       if (p) invoke('store:saveProject', p)
@@ -360,8 +401,17 @@ export const useApp = create<AppState>((set, get) => {
     },
     updateNode: (id, patch) =>
       mutateWs((ws) => ({ ...ws, nodes: ws.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) })),
-    updateNodeData: (id, patch) =>
-      mutateWs((ws) => ({ ...ws, nodes: ws.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)) })),
+    // in whichever workspace holds the node: consoles in the background report too (a new session id)
+    updateNodeData: (id, patch) => {
+      const p = get().project
+      if (!p?.workspaces.some((w) => w.nodes.some((n) => n.id === id))) return
+      mutateProject((p) => ({
+        ...p,
+        workspaces: p.workspaces.map((w) =>
+          w.nodes.some((n) => n.id === id) ? { ...w, nodes: w.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)) } : w
+        )
+      }))
+    },
     moveNodes: (ids, dx, dy) =>
       mutateWs((ws) => {
         const set = new Set(ids)

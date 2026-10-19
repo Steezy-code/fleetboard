@@ -10,6 +10,8 @@ import { stripAnsi } from './pty'
 // handoff summaries and loop goal checks, on the subscription the CLI is already logged into.
 
 const runs = new Map<string, ChildProcess>()
+/** Linux refuses a single argument over 128 KiB (MAX_ARG_STRLEN); stay well under it. */
+export const MAX_ARG_PROMPT = 100_000
 const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)']
 
 export function register(ctx: MainContext) {
@@ -23,19 +25,37 @@ export function register(ctx: MainContext) {
 
     let args: string[]
     const isClaude = agent.id === 'claude'
+    // Claude reads the prompt from stdin: prompts with whole console logs can exceed what argv holds
     if (isClaude) {
-      args = ['-p', req.prompt, '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+      args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
       if (req.model) args.push('--model', req.model)
       if (req.allowTools) args.push('--permission-mode', 'acceptEdits', '--allowedTools', 'Bash', ...READ_ONLY_TOOLS, 'Edit', 'Write')
       else args.push('--allowedTools', ...READ_ONLY_TOOLS)
     } else {
+      if (req.prompt.length > MAX_ARG_PROMPT) {
+        const msg = `[This prompt is ${Math.round(req.prompt.length / 1000)} KB, too long to pass to ${agent.name} on its command line. Use Claude Code for it, or include less.]`
+        ctx.emit('cli:chunk', req.runId, msg)
+        ctx.emit('cli:done', req.runId, 1)
+        return { code: 1, text: msg }
+      }
       args = agent.headless(req.prompt)
     }
 
     const env = { ...(await loginEnv()), ...profileEnv(agent.id, req.profileId) }
     return new Promise<{ code: number; text: string }>((resolve) => {
-      const child = spawn(bin, args, { cwd: req.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let child: ChildProcess
+      try {
+        child = spawn(bin, args, { cwd: req.cwd, env, stdio: [isClaude ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
+      } catch (e) {
+        ctx.emit('cli:done', req.runId, 1)
+        return resolve({ code: 1, text: String(e) })
+      }
       runs.set(req.runId, child)
+      if (isClaude) {
+        // a CLI that exits before reading all of it closes the pipe: that is not our error
+        child.stdin!.on('error', () => {})
+        child.stdin!.end(req.prompt)
+      }
       let text = ''
       let pending = ''
       let finalResult: string | null = null
@@ -44,8 +64,8 @@ export function register(ctx: MainContext) {
         text += chunk
         ctx.emit('cli:chunk', req.runId, chunk)
       }
-      child.stdout.setEncoding('utf8')
-      child.stdout.on('data', (d: string) => {
+      child.stdout!.setEncoding('utf8')
+      child.stdout!.on('data', (d: string) => {
         if (!isClaude) return push(stripAnsi(d))
         pending += d
         let nl: number
@@ -70,7 +90,7 @@ export function register(ctx: MainContext) {
         }
       })
       let err = ''
-      child.stderr.on('data', (d) => (err += d.toString()))
+      child.stderr!.on('data', (d) => (err += d.toString()))
       child.on('close', (code) => {
         runs.delete(req.runId)
         const out = finalResult ?? text

@@ -159,13 +159,26 @@ const ALLOWED_TAGS = new Set(
 const DROP_TAGS = new Set('script style iframe frame frameset object embed applet template noscript form textarea select option button link meta base svg math audio video source track canvas dialog portal'.split(' '))
 const ALLOWED_ATTRS = new Set('href src alt title class align width height colspan rowspan type checked disabled start id open data-wiki lang dir'.split(' '))
 
-function safeUrl(v: string, kind: 'href' | 'src') {
+const RELATIVE_BASE = 'https://relative.invalid/'
+
+/**
+ * The URL as a browser will use it, or null when it must not be. Decided with the browser's own URL
+ * parser: it drops tabs, newlines and leading control characters, so "java&#9;script:" is javascript:.
+ */
+export function safeUrl(v: string, kind: 'href' | 'src'): string | null {
   const s = v.trim()
-  if (!s) return s
-  if (s.startsWith('#')) return s
-  if (/^(https?:|mailto:)/i.test(s)) return s
-  if (kind === 'src' && (/^fbfile:/i.test(s) || /^data:image\/(png|jpe?g|gif|webp|avif);/i.test(s))) return s
-  if (!isExternal(s)) return s // relative
+  if (!s || s.startsWith('#')) return s
+  let u: URL
+  try {
+    u = new URL(s, RELATIVE_BASE)
+  } catch {
+    return null
+  }
+  // a path in the document's folder (images, links to other files)
+  if (u.origin === new URL(RELATIVE_BASE).origin && !/^[\s\u0000-\u001f]*[a-z][a-z0-9+.\-\s\u0000-\u001f]*:/i.test(s)) return s
+  if (u.protocol === 'https:' || u.protocol === 'http:' || (kind === 'href' && u.protocol === 'mailto:')) return s
+  if (kind === 'src' && u.protocol === 'fbfile:') return s
+  if (kind === 'src' && u.protocol === 'data:' && /^data:image\/(png|jpe?g|gif|webp|avif);/i.test(s)) return s
   return null
 }
 

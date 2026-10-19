@@ -3,9 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, ChevronUp, GitMerge, GitPullRequestArrow, Inbox as InboxIcon, MessageCircleQuestion, ShieldQuestion, SquareTerminal, Trash2, X } from 'lucide-react'
 import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
-import { agentColor, consoleTail } from '../engine/consoles'
+import { agentColor } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
-import { parseApproval, type Approval } from './approvals'
+import { approvalFor, type Approval } from './approvals'
+import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 
 /** Everything that needs the user, in one place: decisions, approvals, finished work. */
 export function Inbox() {
@@ -19,22 +20,30 @@ export function Inbox() {
   useEffect(() => {
     if (!blocked.length) return setApprovals({})
     let live = true
+    const since = Date.now()
+    let t = 0
     const read = async () => {
-      const entries = await Promise.all(blocked.map(async (id) => [id, parseApproval(await consoleTail(id, 3000))] as const))
-      if (live) setApprovals(Object.fromEntries(entries))
+      const entries = await Promise.all(blocked.map(async (id) => [id, approvalFor(await invoke<Prompt | null>('pty:prompt', id).catch(() => null))] as const))
+      if (!live) return
+      setApprovals(Object.fromEntries(entries))
+      // a CLI's hook can say it is asking a moment before it draws the question: look again soon
+      const pending = entries.some(([, a]) => !a) && Date.now() - since < 5000
+      t = window.setTimeout(read, pending ? 250 : 1500)
     }
     read()
-    const t = window.setInterval(read, 1500)
     return () => {
       live = false
-      window.clearInterval(t)
+      window.clearTimeout(t)
     }
   }, [blocked.join(',')])
 
   const asks = (fleet?.asks ?? []).filter((a) => !a.answer)
   const ready = fleet?.ready ?? null
+  // a lead whose console exited mid-task: the team has nobody to merge or finish
+  const exited = useApp(useShallow((s) => Object.keys(s.statuses).filter((id) => s.statuses[id] === 'exited')))
+  const stoppedLeads = Object.values(fleet?.members ?? {}).filter((m) => m.role === 'lead' && (m.status === 'working' || m.status === 'starting') && exited.includes(m.id))
   const consoles = useMemo(() => Object.fromEntries(allConsoles().map((c) => [c.id, c])), [blocked.join(','), project])
-  const count = asks.length + blocked.length + (ready ? 1 : 0)
+  const count = asks.length + blocked.length + stoppedLeads.length + (ready ? 1 : 0)
   if (!project || !count) return null
 
   return (
@@ -49,6 +58,24 @@ export function Inbox() {
       {open && (
         <div className="inbox-body scrollable">
           {ready && <ReadyCard projectId={project.id} />}
+          {stoppedLeads.map((m) => (
+            <div key={m.id} className="inbox-card approval stopped">
+              <div className="ic-head">
+                <ShieldQuestion size={14} className="ic-icon warn" />
+                <b>{m.name}</b>
+                <span className="muted">stopped before finishing</span>
+              </div>
+              <div className="ic-title">Its console exited. Resume it on its tile to carry on (it is told where the team is), or discard the team’s work.</div>
+              <div className="ic-actions">
+                <button className="btn sm primary" onClick={() => openConsole(m.id)}>
+                  <SquareTerminal size={13} /> Open console
+                </button>
+                <button className="btn sm ghost" onClick={() => discardTeam(project.id, m.id)}>
+                  <Trash2 size={13} /> Discard team
+                </button>
+              </div>
+            </div>
+          ))}
           {asks.map((a) => (
             <AskCard key={a.id} id={a.id} from={fleet?.members[a.from]?.name ?? 'Lead'} question={a.question} options={a.options} />
           ))}
@@ -61,17 +88,18 @@ export function Inbox() {
                   <ShieldQuestion size={14} className="ic-icon warn" />
                   <span className="agent-dot" style={{ background: agentColor(c?.data.agentId ?? '') }} />
                   <b>{c?.data.name ?? 'Agent'}</b>
-                  <span className="muted">{ap ? 'wants to' : 'is waiting for you'}</span>
+                  <span className="muted">{ap ? 'asks' : 'is waiting for you'}</span>
                   <span className="spacer" />
                   <button className="icon-btn sm" title="Open console" onClick={() => openConsole(id)}>
                     <SquareTerminal size={13} />
                   </button>
                 </div>
-                {ap?.what && <pre className="ic-what">{ap.what}</pre>}
+                {ap?.title && <div className="ic-title">{ap.title}</div>}
+                {ap?.detail && <pre className="ic-what">{ap.detail}</pre>}
                 <div className="ic-actions">
                   {ap ? (
                     ap.options.map((o) => (
-                      <button key={o.key} className={`btn sm ${o.tone === 'allow' ? 'primary' : o.tone === 'deny' ? 'ghost' : ''}`} title={`Answers "${o.key}"`} onClick={() => answer(id, o.key)}>
+                      <button key={o.label} className={`btn sm ${o.tone === 'allow' ? 'primary' : o.tone === 'deny' ? 'ghost' : ''}`} title={'option' in o.answer ? o.answer.option : undefined} onClick={() => answer(id, o.answer)}>
                         {o.label}
                       </button>
                     ))
@@ -90,17 +118,17 @@ export function Inbox() {
   )
 }
 
-function answer(consoleId: string, key: string) {
-  if (key === 'trust' || key === 'exit') {
-    // arrow-key menu that starts on "No, exit"
-    if (key === 'trust') window.fb.send('pty:write', consoleId, '\x1b[B')
-    window.setTimeout(() => window.fb.send('pty:write', consoleId, '\r'), 150)
-    useApp.getState().setStatus(consoleId, 'working')
-    return
-  }
-  window.fb.send('pty:write', consoleId, key)
-  if (key === 'y' || key === 'n') window.setTimeout(() => window.fb.send('pty:write', consoleId, '\r'), 80)
-  useApp.getState().setStatus(consoleId, 'working')
+async function answer(consoleId: string, a: PromptAnswer) {
+  const res = await invoke<AnswerResult>('pty:answer', consoleId, a).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+  if (res.ok) return useApp.getState().setStatus(consoleId, 'working')
+  // the prompt was answered in the terminal, or turned into another question: nothing was typed
+  useApp.getState().toast(res.reason === 'not-live' ? 'That console has stopped' : 'That question changed; nothing was sent. Check the console.', 'warn')
+}
+
+async function discardTeam(projectId: string, leadId: string) {
+  const app = useApp.getState()
+  if (!(await app.confirm({ title: 'Discard the team’s work?', body: 'Deletes the team’s branches and worktrees and closes its consoles.', confirm: 'Discard', danger: true }))) return
+  await invoke('fleet:discard', projectId, leadId)
 }
 
 function openConsole(id: string) {
