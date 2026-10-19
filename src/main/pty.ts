@@ -35,9 +35,22 @@ interface Session {
   discover?: { since: number; cwd: string; env: Record<string, string | undefined>; tries: number; lastTry: number }
   /** when the CLI last printed something */
   outputAt: number
+  /**
+   * an agent CLI: everything in its process group ends with the console. A shell's (the user's own
+   * terminal) is left as a terminal leaves it: what the user started with nohup outlives it.
+   */
+  agentGroup: boolean
 }
 
 export { stripAnsi } from '@shared/ansi'
+
+const killGroup = (pid: number) => {
+  try {
+    process.kill(-pid, 'SIGKILL')
+  } catch {
+    /* the group is gone */
+  }
+}
 
 type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void
 type SpawnListener = (req: PtySpawnRequest) => void
@@ -150,10 +163,11 @@ export class PtyManager {
         agent?.session && !agent.session.start && !sessionId && !req.command
           ? { since: startedAt, cwd: req.cwd, env: { HOME: env.HOME, CODEX_HOME: env.CODEX_HOME }, tries: 0, lastTry: startedAt }
           : undefined,
-      outputAt: startedAt
+      outputAt: startedAt,
+      agentGroup: !req.command && !!agent && agent.id !== 'shell'
     }
     this.sessions.set(req.id, s)
-    this.record.add(req.id, proc.pid)
+    this.record.add(req.id, proc.pid, s.agentGroup)
     if (notice) {
       s.buffer += notice
       this.emit('pty:data', req.id, notice)
@@ -227,13 +241,10 @@ export class PtyManager {
     if (s.tracker.paused) this.signal(s, 'SIGCONT')
     // like closing a terminal: the whole group hangs up
     this.signal(s, 'SIGHUP')
-    // then whatever ignored that (Gemini CLI; a child its CLI started), whether or not the CLI has ended
+    // then whatever ignored that: an agent CLI's group whether or not the CLI has ended (Gemini CLI; a
+    // child it started), a shell's only while the shell itself runs on
     setTimeout(() => {
-      try {
-        process.kill(-s.proc.pid, 'SIGKILL')
-      } catch {
-        /* the group is gone */
-      }
+      if (s.agentGroup || this.sessions.get(id) === s) killGroup(s.proc.pid)
     }, 2500)
   }
 
@@ -475,14 +486,9 @@ export class PtyManager {
     const running = () => live.filter((s) => this.sessions.get(s.id) === s)
     const until = Date.now() + graceMs
     while (running().length && Date.now() < until) await new Promise((r) => setTimeout(r, 50))
-    // every group, not only the CLIs still running: a child a CLI started may ignore the hangup the CLI
+    // an agent CLI's group even when the CLI has ended: a child it started may ignore the hangup the CLI
     // took (a group's id is not given to another process while the group exists)
-    for (const s of live)
-      try {
-        process.kill(-s.proc.pid, 'SIGKILL')
-      } catch {
-        /* the group is gone */
-      }
+    for (const s of live) if (s.agentGroup || this.sessions.get(s.id) === s) killGroup(s.proc.pid)
   }
 
   get size() {
