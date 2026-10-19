@@ -230,20 +230,25 @@ test('the fleet and hook servers refuse requests without the secret, from a brow
   await waitReady(projectId)
   const hooksDir = path.join(sb.fbHome, 'hooks')
   const mcpFile = fs.readdirSync(hooksDir).find((f) => f.startsWith('mcp-'))!
-  const url = new URL(JSON.parse(fs.readFileSync(path.join(hooksDir, mcpFile), 'utf8')).mcpServers.fleet.url)
+  const server = JSON.parse(fs.readFileSync(path.join(hooksDir, mcpFile), 'utf8')).mcpServers.fleet
+  const url = new URL(server.url)
   assert.equal(fs.statSync(path.join(hooksDir, mcpFile)).mode & 0o077, 0, 'the MCP config is readable by the user only')
-  const [, , secret, member] = url.pathname.split('/')
-  const call = (pathname: string, headers: Record<string, string> = {}) =>
+  const secret = /^Bearer (\S+)$/.exec(server.headers.Authorization)![1]
+  assert.ok(!server.url.includes(secret), 'the secret is not part of the URL')
+  const member = url.pathname.split('/')[2]
+  const auth = { Authorization: `Bearer ${secret}` }
+  const call = (pathname: string, headers: Record<string, string> = auth) =>
     fetch(`http://127.0.0.1:${url.port}${pathname}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'fleet_status', arguments: {} } })
     })
-  assert.equal((await call(url.pathname)).status, 200, 'the real URL works')
-  assert.equal((await call(`/mcp/${member}`)).status, 404, 'the old URL shape is gone')
-  assert.equal((await call(`/mcp/${'0'.repeat(secret.length)}/${member}`)).status, 403, 'wrong secret')
-  assert.equal((await call(url.pathname, { Origin: 'https://evil.example' })).status, 403, 'from a web page')
-  assert.equal((await call(url.pathname, { 'Content-Type': 'text/plain' })).status, 403, 'a no-preflight content type')
+  assert.equal((await call(url.pathname)).status, 200, 'the real URL and token work')
+  assert.equal((await call(url.pathname, {})).status, 403, 'no token')
+  assert.equal((await call(url.pathname, { Authorization: `Bearer ${'0'.repeat(secret.length)}` })).status, 403, 'wrong token')
+  assert.equal((await call(`/mcp/${secret}/${member}`, {})).status, 404, 'the old secret-in-URL shape is gone')
+  assert.equal((await call(url.pathname, { ...auth, Origin: 'https://evil.example' })).status, 403, 'from a web page')
+  assert.equal((await call(url.pathname, { ...auth, 'Content-Type': 'text/plain' })).status, 403, 'a no-preflight content type')
   // the hook settings file holds no secret: it comes from each console's environment
   const hooks = fs.readFileSync(path.join(hooksDir, 'claude-hooks.json'), 'utf8')
   assert.ok(!hooks.includes(secret) && hooks.includes('${FB_HOOK_TOKEN}'))

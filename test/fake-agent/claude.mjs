@@ -123,19 +123,20 @@ async function hook(event, payload = {}) {
 
 // ------------------------------------------------------------------ MCP
 
-const mcpUrl = (() => {
+const mcpServer = (() => {
   try {
     const cfg = JSON.parse(fs.readFileSync(opts.mcpConfig, 'utf8'))
-    return Object.values(cfg.mcpServers ?? {})[0]?.url
+    return Object.values(cfg.mcpServers ?? {})[0]
   } catch {
     return undefined
   }
 })()
+const mcpUrl = mcpServer?.url
 let rpcId = 0
 async function rpc(method, params, signal) {
   const res = await fetch(mcpUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...mcpServer.headers },
     body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method, params }),
     signal
   })
