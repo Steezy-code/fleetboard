@@ -28,10 +28,20 @@ test('real: permission dialogs answered from the Inbox (allow, then deny)', { sk
     const id = await app.eval(() => (window as any).__fleetboard.spawnConsoles({ agentId: 'claude' })[0] as string)
     // SessionStart arrives through the hook server: the console is "idle", not stuck in "starting"
     await app.waitStatus(id, 'idle', 60_000)
-    const send = (text: string) => app.eval(({ id, text }) => (window as any).__fleetboard.sendToConsole(id, text), { id, text })
+    // how the app types messages it sends by itself (first prompts, handoffs, team messages)
+    const send = async (text: string) => assert.equal(await app.invoke('pty:deliver', id, text), true)
 
-    await send('Run the shell command `touch allowed.txt` with the Bash tool. Nothing else.')
-    await app.waitStatus(id, 'needs-you', 90_000)
+    // delivered by the app: it waits while Claude asks its startup question (auto mode as the default?)
+    const delivered = app.invoke('pty:deliver', id, 'Run the shell command `touch allowed.txt` with the Bash tool. Nothing else.')
+    const startup = await app
+      .waitFor(async () => (await app.texts('.inbox-card.approval')).find((t) => /auto mode your default/i.test(t)), { timeout: 8000, label: 'startup question' })
+      .catch(() => null)
+    if (startup) {
+      assert.equal(fs.existsSync(path.join(repo, 'allowed.txt')), false)
+      await app.click('.inbox-card.approval .ic-actions button', 'No, keep manual mode')
+    }
+    assert.equal(await delivered, true)
+    await app.waitFor(async () => (await app.texts('.inbox-card.approval')).some((t) => /touch allowed\.txt/.test(t)), { timeout: 90_000, label: 'permission card' })
     // the hook reports the dialog a moment before Claude draws it: the card fills in on the next refresh
     const card = await app.waitFor(async () => (await app.texts('.inbox-card.approval')).find((t) => /touch allowed\.txt/.test(t)), { label: 'Inbox card' })
     assert.match(card, /Allow once/)

@@ -78,3 +78,30 @@ test('pty:prompt reads the dialog structurally', async () => {
   await app.waitStatus(id, 'idle')
   assert.equal(app.fakeLog((e) => e.event === 'dialog-answer').at(-1).choice, 0)
 })
+
+test('a first prompt waits behind a startup question instead of answering it', async () => {
+  const sb2 = makeSandbox()
+  const repo2 = makeRepo(sb2)
+  const app2 = await App.launch({
+    sandbox: sb2,
+    scenario: {
+      startupMenu: { question: 'Make auto mode your default permission mode?', explain: 'Auto mode lets Claude handle permission prompts automatically.', options: ['Yes, set auto mode as my default permission mode', 'No, keep manual mode'] },
+      solo: [{ match: 'hello', reply: 'hi there' }]
+    }
+  })
+  try {
+    await app2.openProject(repo2)
+    const id = await app2.eval(() => (window as any).__fleetboard.spawnConsoles({ agentId: 'claude', initialPrompt: 'hello' })[0] as string)
+    await app2.waitStatus(id, 'needs-you')
+    await new Promise((r) => setTimeout(r, 3000))
+    assert.equal(app2.fakeLog((e) => e.event === 'startup-answer').length, 0, 'nothing answered the question for the user')
+    assert.equal(app2.fakeLog((e) => e.event === 'prompt').length, 0, 'the prompt is still waiting')
+    const card = await app2.waitFor(async () => (await app2.texts('.inbox-card.approval')).find((t) => /auto mode your default/.test(t)), { label: 'Inbox card' })
+    assert.match(card, /No, keep manual mode/)
+    await app2.click('.inbox-card.approval .ic-actions button', 'No, keep manual mode')
+    await app2.waitFor(() => app2.fakeLog((e) => e.event === 'prompt' && e.prompt === 'hello').length, { label: 'prompt delivered after the answer' })
+    assert.equal(app2.fakeLog((e) => e.event === 'startup-answer')[0].choice, 'No, keep manual mode')
+  } finally {
+    await app2.close()
+  }
+})

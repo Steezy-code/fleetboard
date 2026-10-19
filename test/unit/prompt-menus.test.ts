@@ -7,7 +7,7 @@ import type { Prompt } from '../../src/shared/prompt'
 const prompts = new Map<string, Prompt | null>()
 async function promptAt(file: string, mark: string) {
   if (!prompts.size) {
-    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast']) {
+    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast', 'claude-automode.cast']) {
       for (const m of (await replay(loadCast(f))).marks) prompts.set(`${f}|${m.mark}`, m.prompt)
     }
   }
@@ -68,6 +68,13 @@ test('Codex: options separated by blank lines, with descriptions', async () => {
   assert.deepEqual(menu(p), ['* Sign in with ChatGPT', 'Sign in with Device Code', 'Provide your own API key'])
   assert.equal(p?.options?.[2].detail, 'Pay for what you use')
   assert.equal((await promptAt('codex-first.cast', 'needs-you: api key'))?.kind, 'enter')
+})
+
+test('Claude Code: "make auto mode your default?" is a question for the user, never answered by typing', async () => {
+  const p = await promptAt('claude-automode.cast', 'needs-you: make auto mode the default?')
+  assert.equal(p?.question, 'Make auto mode your default permission mode?')
+  assert.deepEqual(menu(p), ['* Yes, set auto mode as my default permission mode', 'No, keep manual mode'])
+  assert.deepEqual(answerKeys(p, { option: 'No, keep manual mode' }), ['\x1b[B', '\r'])
 })
 
 test('Codex: folder trust, answered from the Inbox', async () => {

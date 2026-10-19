@@ -311,25 +311,6 @@ function trustTick() {
 }
 const trustAnswered = new Set<string>()
 
-/**
- * Press Enter after typing, then make sure it took: right after startup a CLI can swallow the first
- * Enter while it settles, leaving the message sitting in its input box. Retry a couple of times.
- */
-function submit(id: string, text: string, attempt = 0) {
-  setTimeout(() => {
-    // on a retry, report focus first: that unsticks an input box that ignored the first Enter
-    if (attempt) ctx.ptys.write(id, '\x1b[I')
-    ctx.ptys.write(id, '\r')
-    setTimeout(() => {
-      if (attempt >= 2 || ctx.ptys.status(id) !== 'idle') return
-      const probe = text.slice(0, 40).replace(/\s+/g, ' ')
-      const screen = ctx.ptys.tail(id, 1200).replace(/\s+/g, ' ')
-      // still in the input box (the last prompt line shows our text) → Enter again
-      if (screen.lastIndexOf(probe) > screen.length - text.length - 400) submit(id, text, attempt + 1)
-    }, 1500)
-  }, attempt ? 200 : 350)
-}
-
 /** Type queued messages into consoles that are idle. */
 function deliverTick() {
   for (const s of states.values()) {
@@ -339,8 +320,7 @@ function deliverTick() {
       if (!ctx.ptys.readyForInput(msg.to)) continue
       msg.delivered = true
       const text = render(s, msg).replace(/\s*\n\s*/g, ' ').trim()
-      ctx.ptys.paste(msg.to, text, false)
-      submit(msg.to, text)
+      ctx.ptys.typeAndSubmit(msg.to, text)
       changed(s)
       break // one message per tick per project, so the CLI sees them one at a time
     }

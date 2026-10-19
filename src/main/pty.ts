@@ -234,6 +234,54 @@ export class PtyManager {
   }
 
   /**
+   * Type a message and press Enter, then make sure it was taken: right after startup a CLI can swallow
+   * the first Enter while it settles, leaving the message in its input box. Retries a couple of times.
+   */
+  typeAndSubmit(id: string, text: string) {
+    this.paste(id, text, false)
+    this.submitTyped(id, text, 0)
+  }
+
+  private submitTyped(id: string, text: string, attempt: number) {
+    setTimeout(
+      () => {
+        if (!this.sessions.has(id)) return
+        // on a retry, report focus first: that unsticks an input box that ignored the first Enter
+        if (attempt) this.write(id, '\x1b[I')
+        this.write(id, '\r')
+        setTimeout(() => {
+          if (attempt >= 2 || this.status(id) !== 'idle') return
+          const probe = text.slice(0, 40).replace(/\s+/g, ' ')
+          const screen = this.tail(id, 1200).replace(/\s+/g, ' ')
+          // still at the bottom of the screen and the CLI never started working: Enter again
+          if (screen.lastIndexOf(probe) > screen.length - text.length - 400) this.submitTyped(id, text, attempt + 1)
+        }, 1500)
+      },
+      attempt ? 200 : this.sessions.get(id)?.bracketed ? 150 : 350
+    )
+  }
+
+  /**
+   * Type a message once the console can take it (it may still be starting: Claude Code drops input
+   * typed while it draws its startup notices), then make sure it was submitted. False if the console
+   * ended or never became ready.
+   */
+  async deliver(id: string, text: string, timeoutMs = 120_000): Promise<boolean> {
+    const until = Date.now() + timeoutMs
+    let seen = false
+    while (Date.now() < until) {
+      if (this.sessions.has(id)) seen = true
+      else if (seen) return false
+      if (this.readyForInput(id)) {
+        this.typeAndSubmit(id, text)
+        return true
+      }
+      await new Promise((r) => setTimeout(r, 200))
+    }
+    return false
+  }
+
+  /**
    * Safe to type a message into this console: idle, and the CLI is past its startup screens.
    * Claude Code says so through its SessionStart hook; other CLIs get a quiet period after launch.
    */
