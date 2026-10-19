@@ -11,6 +11,7 @@ import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { loginEnv } from './env'
 import { newSecret, refuse, sameSecret } from './localserver'
+import { findTask, guessTask } from './plan'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -40,6 +41,7 @@ const baseCommit = new Map<string, string>()
 
 const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
 const MAX_WORKERS = 4
+const TASK_STATUSES: FleetTask['status'][] = ['todo', 'doing', 'review', 'done', 'blocked']
 const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
@@ -162,7 +164,7 @@ function leadPrompt(m: FleetMember) {
     'You have fleet tools (mcp__fleet__*). Rules:',
     '1. Never edit files yourself. Read the repo to understand it, then delegate.',
     '2. Break the goal into a short plan with fleet_plan (one line per task). Keep it small: 1-4 tasks.',
-    `3. Start one worker per task with fleet_spawn_worker. Give each worker files/folders it owns that no other worker touches, and a done_when check (a command that proves it works). At most ${MAX_WORKERS} workers at once.`,
+    `3. Start one worker per task with fleet_spawn_worker, passing the plan task's id as task_ref. Give each worker files/folders it owns that no other worker touches, and a done_when check (a command that proves it works). At most ${MAX_WORKERS} workers at once.`,
     '4. After starting workers, call fleet_wait to receive their reports (it returns when something happens). Do not poll or sleep.',
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
     '6. Once everything is merged, start one reviewer with fleet_spawn_reviewer to check the combined work against the goal and run the checks. Send any findings to the worker that owns the code (fleet_send), wait, merge again.',
@@ -416,7 +418,7 @@ const TOOLS: ToolDef[] = [
     name: 'fleet_update_task',
     roles: ['lead'],
     description: 'Update a task on the plan: status (todo, doing, review, done, blocked), owner (worker name) or a short note.',
-    inputSchema: { type: 'object', properties: { task: str('Task id or its exact title'), status: str('todo | doing | review | done | blocked'), owner: str('Worker name'), note: str('Short note') }, required: ['task'] }
+    inputSchema: { type: 'object', properties: { task: str('Task id, its number in the plan, or its title'), status: str('todo | doing | review | done | blocked'), owner: str('Worker name'), note: str('Short note') }, required: ['task'] }
   },
   {
     name: 'fleet_spawn_worker',
@@ -431,7 +433,7 @@ const TOOLS: ToolDef[] = [
         done_when: str('A check that proves the task is done, e.g. "npm test passes"'),
         agent: str('Agent CLI id: claude (default), codex, gemini'),
         name: str('Optional worker name'),
-        task_ref: str('Optional plan task id or title to mark as doing')
+        task_ref: str('The plan task this worker does: its id (from fleet_plan), number or title')
       },
       required: ['task', 'owns', 'done_when']
     }
@@ -510,9 +512,13 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       return text(`Plan shown on the board:\n${s.tasks.map((t, i) => `${i + 1}. ${t.title} (id ${t.id})`).join('\n')}`)
     }
     case 'fleet_update_task': {
-      const t = s.tasks.find((x) => x.id === a.task || x.title.toLowerCase() === String(a.task).toLowerCase())
-      if (!t) return fail('No such task.')
-      if (a.status) t.status = a.status
+      const t = findTask(s.tasks, a.task)
+      if (!t) return fail(`No such task. The plan:\n${s.tasks.map((x, i) => `${i + 1}. ${x.title} (id ${x.id})`).join('\n')}`)
+      if (a.status) {
+        const st = String(a.status).toLowerCase().trim()
+        if (!TASK_STATUSES.includes(st as FleetTask['status'])) return fail(`Unknown status "${a.status}". Use one of: ${TASK_STATUSES.join(', ')}.`)
+        t.status = st as FleetTask['status']
+      }
       if (a.owner) t.owner = findMember(s, a.owner)?.id ?? a.owner
       if (a.note) t.note = a.note
       changed(s)
@@ -553,13 +559,17 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       }
       s.members[id] = w
       memberProject.set(id, s.projectId)
-      const ref = a.task_ref && s.tasks.find((t) => t.id === a.task_ref || t.title.toLowerCase() === String(a.task_ref).toLowerCase())
+      const ref = reviewer ? undefined : a.task_ref ? findTask(s.tasks, a.task_ref) : guessTask(s.tasks, String(a.task ?? ''))
       if (ref) Object.assign(ref, { owner: id, status: 'doing' })
+      const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
       await startConsole(s, w, { acceptEdits: !reviewer })
       post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m) })
       return text(
-        `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief. Call fleet_wait to get its report.`
+        `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
+          (ref ? ` On the plan: "${ref.title}".` : '') +
+          (unlinked ? ` It is not linked to a plan task${a.task_ref ? ` (no task "${a.task_ref}")` : ''}: call fleet_update_task with the task id and owner ${w.name}.` : '') +
+          ' Call fleet_wait to get its report.'
       )
     }
     case 'fleet_send': {

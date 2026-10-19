@@ -265,7 +265,7 @@ async function leadFlow(goal) {
   await tool('fleet_plan', { tasks: tasks.map((t) => t.title ?? t.task) })
   const started = []
   for (const t of tasks) {
-    const r = await tool('fleet_spawn_worker', { task: t.task, owns: t.owns, done_when: t.done_when, name: t.name, task_ref: t.title ?? t.task })
+    const r = await tool('fleet_spawn_worker', { task: t.task, owns: t.owns, done_when: t.done_when, name: t.name, task_ref: 'ref' in t ? (t.ref ?? undefined) : (t.title ?? t.task) })
     const name = /^(.+?) started/.exec(r.text)?.[1]
     if (name) started.push(name)
   }
