@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, webContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell, webContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import type { MainContext } from './context'
@@ -41,6 +41,8 @@ app.on('web-contents-created', (_e, contents) => {
   })
 })
 let quitConfirmed = false
+/** the window was reloaded after its page crashed; the new page says so once */
+let crashRecovered = false
 
 // On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
 // with these flags (Vulkan backend). Without an adapter the models fall back to slower CPU wasm.
@@ -95,6 +97,28 @@ function createWindow() {
     e.preventDefault()
     if (/^https?:\/\//.test(url)) shell.openExternal(url)
   })
+  // The window's page died (out of memory, a GPU fault): the consoles live on in this process, and a new
+  // page picks them up again like a reopened board. Repeated crashes are not retried forever.
+  const crashes: number[] = []
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || !win || win.isDestroyed()) return
+    const now = Date.now()
+    crashes.push(now)
+    while (now - crashes[0] > 60_000) crashes.shift()
+    console.error(`window crashed (${details.reason}, exit ${details.exitCode})`)
+    if (crashes.length > 3) {
+      // not showErrorBox: it would hold up this process, and with it every console's output
+      void dialog.showMessageBox({
+        type: 'error',
+        title: 'Fleetboard keeps crashing',
+        message: `The window crashed ${crashes.length} times in a minute (${details.reason}).`,
+        detail: 'Your consoles are still running. Restart Fleetboard to see them again.'
+      })
+      return
+    }
+    crashRecovered = true
+    win.webContents.reload()
+  })
   win.on('closed', () => {
     win = null
   })
@@ -129,6 +153,12 @@ function registerCore() {
     win?.destroy()
     win = null
     setTimeout(() => app.exit(0), 300)
+  })
+  // asked once by a page as it starts: was it reloaded after the window crashed?
+  ipcMain.handle('app:crashRecovered', () => {
+    const was = crashRecovered
+    crashRecovered = false
+    return was
   })
   ipcMain.handle('app:paths', () => ({ root: dirs.root, home: app.getPath('home'), assets: dirs.assets }))
   ipcMain.handle('win:minimize', () => win?.minimize())
