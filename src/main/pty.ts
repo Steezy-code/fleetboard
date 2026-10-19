@@ -41,8 +41,13 @@ export const stripAnsi = (s: string) =>
     .replace(ANSI, '')
     .replace(/\r/g, '')
 
+type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void
+
 export class PtyManager {
   private sessions = new Map<string, Session>()
+  private exitListeners = new Set<ExitListener>()
+  /** the app is quitting: consoles exit because of that, not on their own */
+  private disposing = false
   private tick: NodeJS.Timeout
   constructor(
     private wc: () => WebContents | null,
@@ -126,10 +131,18 @@ export class PtyManager {
       this.emit('pty:data', req.id, data)
     })
     proc.onExit(({ exitCode }) => {
-      this.sessions.delete(req.id)
+      // a respawn under the same id may already have replaced this session
+      if (this.sessions.get(req.id) === s) this.sessions.delete(req.id)
       s.screen.dispose()
       this.emit('pty:exit', req.id, exitCode)
       this.emit('pty:status', req.id, 'exited')
+      for (const l of this.exitListeners) {
+        try {
+          l(req.id, exitCode, this.disposing)
+        } catch (e) {
+          console.error('exit listener failed', e)
+        }
+      }
     })
     return this.info(s)
   }
@@ -294,7 +307,14 @@ export class PtyManager {
     for (const s of this.sessions.values()) this.evaluate(s)
   }
 
+  /** Called when a console's process ends, with its exit code. */
+  onExit(listener: ExitListener) {
+    this.exitListeners.add(listener)
+    return () => this.exitListeners.delete(listener)
+  }
+
   dispose() {
+    this.disposing = true
     clearInterval(this.tick)
     for (const id of [...this.sessions.keys()]) this.kill(id)
   }
