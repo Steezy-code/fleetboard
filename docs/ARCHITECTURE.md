@@ -19,6 +19,8 @@ src/main/                Electron main process
   remote.ts              the phone Inbox server (off unless enabled in Settings); remote-page.ts is its page
   fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready
   plan.ts                links workers to the Lead's plan tasks (by id, number, title, or a clear match)
+  sessions.ts            each console's own conversation: ids for Claude Code / Gemini, found for Codex;
+                         resumable / taken / free / lost, as each real CLI behaves
   cli.ts                 headless one-shot runs of the user's CLI (claude -p streaming) — IPC cli:run
   store.ts               persistence (~/.fleetboard) — IPC store:*
   fsops.ts               dialogs, fs:tree/read/write/..., shell:*
@@ -100,6 +102,8 @@ src/renderer/src/
   each run with its own `FLEETBOARD_HOME`, home folder and PATH. `claude` there is a scripted fake
   (test/fake-agent/claude.mjs): a Claude-like TUI that runs the real hook commands, speaks MCP to the fleet
   server and follows a JSON scenario, so Teams run end to end without tokens. `E2E_SHOTS=dir` saves screenshots.
-- test/e2e/real: the same flows with the real Claude Code, skipped unless `FLEETBOARD_REAL_CLAUDE_CONFIG`
-  points at an onboarded config dir (copied, never changed). They spend tokens; run them by hand.
+- test/e2e/real: the same flows with the real CLIs, run by hand. Claude Code: `FLEETBOARD_REAL_CLAUDE_CONFIG`
+  points at an onboarded config dir (copied, never changed); these spend tokens. Codex and Gemini CLI:
+  `FLEETBOARD_REAL_CODEX` / `FLEETBOARD_REAL_GEMINI` name the binary, which talks to a local mock of its
+  model API (test/support/mock-responses.ts), so no account is needed.
 - CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.
