@@ -26,8 +26,10 @@ async function until(fn: () => boolean, ms: number) {
   return fn()
 }
 
-test('dispose ends consoles that ignore SIGHUP, and their children, before it returns', { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async () => {
+test('dispose ends consoles that ignore SIGHUP, and their children, before it returns', { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async (t) => {
   const ptys = new PtyManager(() => null, () => DEFAULT_SETTINGS)
+  // a failed check must not leave the consoles (and this test file) running
+  t.after(() => ptys.dispose())
   const pidFile = path.join(dir, 'child.pid')
   // a console whose program ignores SIGHUP and has a child that does too
   const info = await ptys.spawn({ id: 'stubborn', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: `trap '' HUP; sleep 600 & echo $! > ${pidFile}; wait` })
@@ -42,8 +44,10 @@ test('dispose ends consoles that ignore SIGHUP, and their children, before it re
   assert.ok(await until(() => !alive(info.pid) && !alive(child) && !alive(polite.pid), 1000), 'nothing outlives the app')
 })
 
-test("dispose ends a child that ignores SIGHUP when its CLI itself took the SIGHUP and ended", { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async () => {
+test("dispose ends a child that ignores SIGHUP when its CLI itself took the SIGHUP and ended", { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async (t) => {
   const ptys = new PtyManager(() => null, () => DEFAULT_SETTINGS)
+  // a failed check must not leave the consoles (and this test file) running
+  t.after(() => ptys.dispose())
   const pidFile = path.join(dir, 'child2.pid')
   const info = await ptys.spawn({ id: 'parent', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: `(trap '' HUP; exec sleep 600) & echo $! > ${pidFile}; wait` })
   assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 5000), 'child started')
@@ -51,4 +55,20 @@ test("dispose ends a child that ignores SIGHUP when its CLI itself took the SIGH
   await ptys.dispose()
   assert.ok(await until(() => !alive(info.pid), 1000), 'the CLI ended')
   assert.ok(await until(() => !alive(child), 1000), 'and so did its child')
+})
+
+test('closing one console ends its CLI and what it started, even what ignores the hangup', { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async (t) => {
+  const ptys = new PtyManager(() => null, () => DEFAULT_SETTINGS)
+  // a failed check must not leave the consoles (and this test file) running
+  t.after(() => ptys.dispose())
+  const pidFile = path.join(dir, 'child3.pid')
+  const info = await ptys.spawn({ id: 'one', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: `(trap '' HUP; exec sleep 600) & echo $! > ${pidFile}; wait` })
+  const other = await ptys.spawn({ id: 'other', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: 'sleep 600' })
+  assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 5000), 'child started')
+  const child = Number(fs.readFileSync(pidFile, 'utf8'))
+  ptys.kill('one')
+  assert.ok(await until(() => !alive(info.pid), 1000), 'the CLI ended')
+  assert.ok(await until(() => !alive(child), 4000), 'and its child, which ignored the hangup')
+  assert.ok(alive(other.pid), 'other consoles are untouched')
+  await ptys.dispose()
 })

@@ -225,18 +225,14 @@ export class PtyManager {
     const s = this.sessions.get(id)
     if (!s) return
     if (s.tracker.paused) this.signal(s, 'SIGCONT')
-    try {
-      s.proc.kill('SIGHUP')
-    } catch {
-      /* already gone */
-    }
+    // like closing a terminal: the whole group hangs up
+    this.signal(s, 'SIGHUP')
+    // then whatever ignored that (Gemini CLI; a child its CLI started), whether or not the CLI has ended
     setTimeout(() => {
-      if (this.sessions.has(id)) {
-        try {
-          process.kill(-s.proc.pid, 'SIGKILL')
-        } catch {
-          /* gone */
-        }
+      try {
+        process.kill(-s.proc.pid, 'SIGKILL')
+      } catch {
+        /* the group is gone */
       }
     }, 2500)
   }
