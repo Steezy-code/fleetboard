@@ -259,11 +259,22 @@ function render(s: FleetState, msg: FleetMessage) {
 
 // ---------------------------------------------------------------- folder trust
 
+/**
+ * Claude Code's global config, where it records trusted folders: ~/.claude.json, or .claude.json in
+ * CLAUDE_CONFIG_DIR when the user's environment sets one (team consoles start with that environment).
+ */
+let claudeConfigFile = ''
+async function findClaudeConfig() {
+  const env = await loginEnv()
+  claudeConfigFile = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(env.HOME || process.env.HOME || '', '.claude.json')
+}
+
 /** Is this folder (or a parent) trusted in the user's Claude Code config? Read-only. */
 let trustCache: { at: number; dirs: string[] } = { at: 0, dirs: [] }
 function claudeTrusts(dir: string) {
+  if (!claudeConfigFile) return false
   if (Date.now() - trustCache.at > 30_000) {
-    const cfg = readJson<any>(path.join(process.env.HOME ?? '', '.claude.json'), {})
+    const cfg = readJson<any>(claudeConfigFile, {})
     trustCache = {
       at: Date.now(),
       dirs: Object.entries(cfg?.projects ?? {})
@@ -807,6 +818,7 @@ export async function initFleet(c: MainContext) {
   ctx = c
   loadAll()
   ctx.ptys.onExit(memberExited)
+  void findClaudeConfig()
   port = await startServer()
   setInterval(deliverTick, 700)
   setInterval(trustTick, 900)

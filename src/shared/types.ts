@@ -269,3 +269,13 @@ export interface Profile {
   dir: string
   createdAt: number
 }
+
+/** A state file that could not be read at startup or when a project opened (see src/main/store.ts). */
+export interface Recovery {
+  /** what could not be read: 'app' (settings and project list) or a project id */
+  what: string
+  /** where the unreadable file was moved, kept for rescue by hand */
+  corruptCopy: string
+  /** the history/ snapshot used instead, if there was one */
+  snapshot?: string
+}
