@@ -126,6 +126,11 @@ export function loadProject(id: string): Project | null {
   for (const w of p.workspaces) {
     w.name = typeof w.name === 'string' ? w.name : 'Workspace'
     w.nodes = w.nodes.filter((n) => isObj(n) && typeof n.id === 'string' && typeof n.type === 'string')
+    for (const n of w.nodes) {
+      n.data = isObj(n.data) ? n.data : {}
+      for (const [k, d] of [['x', 0], ['y', 0], ['z', 0]] as const) if (!Number.isFinite(n[k])) (n as any)[k] = d
+      for (const [k, d] of [['w', 480], ['h', 320]] as const) if (!Number.isFinite(n[k]) || n[k] <= 0) (n as any)[k] = d
+    }
     for (const k of ['groups', 'wires', 'ink'] as const) if (!Array.isArray(w[k])) (w as any)[k] = []
     if (!isObj(w.camera) || ![w.camera.x, w.camera.y, w.camera.zoom].every((n) => Number.isFinite(n) && n !== null)) w.camera = { x: 0, y: 0, zoom: 1 } as Workspace['camera']
     w.extras = isObj(w.extras) ? w.extras : {}

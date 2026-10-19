@@ -17,6 +17,7 @@ import { DRAWERS, PANELS } from './panels/registry'
 import { BoardOverlays } from './board/BoardOverlays'
 import './features'
 import './debug'
+import { Boundary } from './ui/Boundary'
 
 export function App() {
   const project = useApp((s) => s.project)
@@ -65,7 +66,9 @@ export function App() {
     <div className="app">
       {project ? (
         <>
-          <Board key={project.activeWorkspaceId} />
+          <Boundary what="The board" resetKey={project.activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>
+            <Board key={project.activeWorkspaceId} />
+          </Boundary>
           <TopBar />
           {/* rails and bars step aside in focus mode; the Inbox stays */}
           <div className={`board-chrome ${focused ? 'hidden' : ''}`}>
@@ -78,12 +81,20 @@ export function App() {
           </div>
           <FocusBar />
           <BoardOverlays />
-          {DrawerC && <DrawerC {...(drawer!.props ?? {})} />}
+          {DrawerC && (
+            <Boundary what={`The ${drawer!.name} drawer`} resetKey={drawer} actions={[{ label: 'Close', run: () => useApp.getState().closeDrawer() }]}>
+              <DrawerC {...(drawer!.props ?? {})} />
+            </Boundary>
+          )}
         </>
       ) : (
         <Home />
       )}
-      {Panel && <Panel {...(panel!.props ?? {})} />}
+      {Panel && (
+        <Boundary what={`The ${panel!.name} panel`} resetKey={panel} actions={[{ label: 'Close', run: () => useApp.getState().closePanel() }]}>
+          <Panel {...(panel!.props ?? {})} />
+        </Boundary>
+      )}
       <Overlays />
     </div>
   )

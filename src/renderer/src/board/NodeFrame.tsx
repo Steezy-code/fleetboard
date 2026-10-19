@@ -4,6 +4,7 @@ import type { BoardNode } from '@shared/types'
 import { NODE_DEFS } from '../nodes/registry'
 import { activeWs, connectClick, focusRect, useApp } from '../state/store'
 import { groupAt, snap } from './geometry'
+import { Boundary } from '../ui/Boundary'
 
 /**
  * Begin a drag that moves the node (and the rest of the selection) with the pointer.
@@ -156,7 +157,9 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
           }}
         >
           {Header ? (
-            <Header {...props} />
+            <Boundary what={def.label} compact resetKey={node.data}>
+              <Header {...props} />
+            </Boundary>
           ) : (
             <div className="row grow" style={{ gap: 7, minWidth: 0 }}>
               <Icon size={13} className="node-icon" />
@@ -165,7 +168,11 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
             </div>
           )}
           <div className="node-actions" onPointerDown={(e) => e.stopPropagation()}>
-            {Actions && <Actions {...props} />}
+            {Actions && (
+              <Boundary what="Actions" compact resetKey={node.data}>
+                <Actions {...props} />
+              </Boundary>
+            )}
             <button className="icon-btn sm" title={focused ? 'Back to board (Ctrl+Shift+F)' : 'Focus (click the tile, F or Ctrl+Shift+F)'} onClick={toggleFocus}>
               {focused ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
             </button>
@@ -176,7 +183,9 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
         </div>
       )}
       <div className="node-body">
-        <Body {...props} />
+        <Boundary what={`This ${def.label.toLowerCase()}`} resetKey={node.data} actions={[{ label: 'Remove tile', run: () => removeWithHooks([node.id]), danger: true }]}>
+          <Body {...props} />
+        </Boundary>
         {catcher && (
           <div
             className="zoom-catcher"

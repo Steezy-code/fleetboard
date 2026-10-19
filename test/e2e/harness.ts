@@ -77,9 +77,12 @@ export const git = (sb: Sandbox, cwd: string, ...args: string[]) => execFileSync
 class Cdp {
   private id = 0
   private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>()
+  /** protocol events (no id): method and params */
+  readonly events: ((method: string, params: any) => void)[] = []
   constructor(private ws: WebSocket) {
     ws.addEventListener('message', (e) => {
       const msg = JSON.parse(String(e.data))
+      if (!msg.id && msg.method) for (const l of this.events) l(msg.method, msg.params)
       const p = msg.id && this.pending.get(msg.id)
       if (!p) return
       this.pending.delete(msg.id)
@@ -112,6 +115,9 @@ class Cdp {
 // ------------------------------------------------------------------ app
 
 export class App {
+  /** uncaught exceptions and console.error calls in the app window, in order */
+  readonly rendererErrors: string[] = []
+
   private constructor(
     readonly sb: Sandbox,
     private proc: ChildProcess,
@@ -191,8 +197,13 @@ export class App {
     }
     if (!pageWs) throw new Error('no app window')
     const cdp = await Cdp.connect(pageWs)
-    await cdp.send('Runtime.enable')
     const app = new App(sb, proc, cdp, () => output, port)
+    cdp.events.push((method, params) => {
+      if (method === 'Runtime.exceptionThrown') app.rendererErrors.push(params.exceptionDetails?.exception?.description ?? params.exceptionDetails?.text ?? 'exception')
+      if (method === 'Runtime.consoleAPICalled' && (params.type === 'error' || params.type === 'assert'))
+        app.rendererErrors.push((params.args ?? []).map((a: any) => a.value ?? a.description ?? a.type).join(' '))
+    })
+    await cdp.send('Runtime.enable')
     await app.waitFor(() => app.eval(() => !!(window as any).__fleetboard), { label: 'app ready' })
     return app
   }

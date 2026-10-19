@@ -92,6 +92,19 @@ test('older files missing parts of a workspace are filled in', () => {
   assert.equal(p.activeWorkspaceId, 'ws1')
 })
 
+test('tiles with missing or odd data and geometry are filled in', () => {
+  const id = 'eeeeeeeeeeee'
+  const old: any = board(id, 'odd')
+  old.workspaces[0].nodes = [
+    { id: 'a', type: 'web', data: null, x: 'left', y: null, w: -5, h: 'tall' },
+    { id: 'b', type: 'note', x: 10, y: 20, w: 200, h: 150, z: 3, data: { text: 'kept' } }
+  ]
+  fs.writeFileSync(path.join(projects, `${id}.json`), JSON.stringify(old))
+  const [a, b] = store.loadProject(id)!.workspaces[0].nodes
+  assert.deepEqual([a.data, a.x, a.y, a.z, a.w, a.h], [{}, 0, 0, 0, 480, 320])
+  assert.deepEqual([b.data, b.x, b.y, b.z, b.w, b.h], [{ text: 'kept' }, 10, 20, 3, 200, 150])
+})
+
 test('saving refuses an invalid project instead of replacing a good board', () => {
   const id = 'eeeeeeeeeeee'
   store.saveProject(board(id, 'good') as any)
