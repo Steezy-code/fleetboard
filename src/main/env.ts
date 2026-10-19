@@ -25,7 +25,9 @@ export async function loginEnv(): Promise<Record<string, string>> {
   }
   // Launched from inside a Claude Code session (or another agent), the parent's session variables
   // would leak into every console and change how those CLIs behave. Start them clean.
-  for (const k of Object.keys(base)) if (/^(CLAUDECODE|CLAUDE_CODE_|CODEX_SANDBOX|GEMINI_CLI_)/.test(k)) delete base[k]
+  // (Not where an administrator points Gemini CLI at its system settings: that is configuration.)
+  for (const k of Object.keys(base))
+    if (/^(CLAUDECODE|CLAUDE_CODE_|CODEX_SANDBOX|GEMINI_CLI_)/.test(k) && !/^GEMINI_CLI_SYSTEM_(SETTINGS|DEFAULTS)_PATH$/.test(k)) delete base[k]
   base.TERM = 'xterm-256color'
   base.COLORTERM = 'truecolor'
   base.TERM_PROGRAM = 'Fleetboard'

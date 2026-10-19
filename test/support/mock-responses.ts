@@ -56,3 +56,54 @@ export async function startMockResponses() {
       })
   }
 }
+
+/**
+ * A minimal Gemini API (GOOGLE_GEMINI_BASE_URL) for the real Gemini CLI: streamed replies say how the
+ * conversation began; the CLI's side requests (routing, next speaker) get the JSON they expect.
+ */
+export async function startMockGemini() {
+  const requests: { first?: string; last?: string }[] = []
+  const server = http.createServer((req, res) => {
+    let body = ''
+    req.on('data', (d) => (body += d))
+    req.on('end', () => {
+      let j: any = {}
+      try {
+        j = JSON.parse(body)
+      } catch {
+        /* empty */
+      }
+      const url = req.url ?? ''
+      const json = (o: object) => {
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify(o))
+      }
+      const usageMetadata = { promptTokenCount: 5, candidatesTokenCount: 5, totalTokenCount: 10 }
+      if (url.includes(':countTokens')) return json({ totalTokens: 10 })
+      if (url.includes(':generateContent')) {
+        const text = JSON.stringify({ next_speaker: 'user', reasoning: 'done', model_choice: 'flash', complexity: 'simple' })
+        return json({ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP', index: 0 }], usageMetadata })
+      }
+      // what the user said: Gemini sends its own context (<session_context>…) as a part of the first turn
+      const user = (j.contents ?? [])
+        .filter((c: any) => c.role === 'user')
+        .flatMap((c: any) => (c.parts ?? []).map((p: any) => p.text ?? ''))
+        .filter((t: string) => t && !/^\s*</.test(t))
+      requests.push({ first: user[0], last: user.at(-1) })
+      const text = `Conversation started with: ${user[0] ?? '(nothing)'}`
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write(`data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP', index: 0 }], usageMetadata })}\n\n`)
+      res.end()
+    })
+  })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  return {
+    port: (server.address() as AddressInfo).port,
+    requests,
+    close: () =>
+      new Promise<void>((r) => {
+        server.closeAllConnections()
+        server.close(() => r())
+      })
+  }
+}

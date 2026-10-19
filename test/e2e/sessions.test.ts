@@ -55,6 +55,7 @@ test('several consoles in one project each get their own conversation back after
   assert.ok(byId(ids[0])!.args.includes('--resume') && byId(ids[1])!.args.includes('--resume'))
   // nothing was said in c: resuming would fail ("No conversation found"), so it starts again under its id
   assert.deepEqual(byId(ids[2])?.args.includes('--session-id') && byId(ids[2])?.history, [])
+  assert.match(String(await app.invoke('pty:buffer', c)), /No saved conversation to pick up/, 'and says so')
   // d had lost its id: the CLI's own resume, and Claude Code's SessionStart hook tells the board which conversation it is
   const legacy = restarts().filter((e) => e.args.includes('--continue'))
   assert.equal(legacy.length, 1)
