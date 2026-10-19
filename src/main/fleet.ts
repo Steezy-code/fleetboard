@@ -285,14 +285,13 @@ function trustTick() {
     if (!claudeTrusts(s.projectPath)) continue
     for (const m of Object.values(s.members)) {
       if (m.status === 'closed' || m.agentId !== 'claude' || !m.cwd.startsWith(treesDir)) continue
-      if (ctx.ptys.status(m.id) !== 'needs-you') continue
-      const screen = ctx.ptys.tail(m.id, 1500)
-      if (!/Yes, I trust this folder/.test(screen) || !/Quick safety check|trust this folder/.test(screen)) continue
-      if (trustAnswered.has(m.id)) continue
+      if (ctx.ptys.status(m.id) !== 'needs-you' || trustAnswered.has(m.id)) continue
+      const trust = ctx.ptys.screen(m.id)?.prompt?.options?.find((o) => /^yes, i trust this folder$/i.test(o.label))
+      if (!trust) continue
       trustAnswered.add(m.id)
-      // the menu starts on "No, exit": move down to "Yes, I trust this folder" and confirm
-      ctx.ptys.write(m.id, '\x1b[B')
-      setTimeout(() => ctx.ptys.write(m.id, '\r'), 200)
+      void ctx.ptys.answer(m.id, { option: trust.label }).then((r) => {
+        if (!r.ok) trustAnswered.delete(m.id)
+      })
     }
   }
 }

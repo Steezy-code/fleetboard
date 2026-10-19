@@ -1,93 +1,95 @@
-// Turn a blocked agent's terminal prompt into plain buttons.
+// Turn a blocked agent's prompt (read from its screen by the main process) into plain buttons.
+import type { Prompt, PromptAnswer } from '@shared/prompt'
 
 export interface ApprovalOption {
-  key: string
+  answer: PromptAnswer
   label: string
   tone: 'allow' | 'always' | 'deny' | 'other'
 }
 
 export interface Approval {
-  /** what the agent wants to do, in its own words */
-  what: string
+  /** the question, in the agent's words */
+  title: string
+  /** what it wants to run or change, when the dialog shows it */
+  detail?: string
   options: ApprovalOption[]
 }
 
 const RULE = /[╌─━═]{6,}/
+const PERMISSION = /\b(do you want|would you like|allow|approve|permission|proceed|trust)\b/i
 
-export function parseApproval(tail: string): Approval | null {
-  const text = tail.replace(/\r/g, '')
-  // Claude Code's folder-trust screen is an arrow-key menu without numbers
-  const trustAt = text.lastIndexOf('Yes, I trust this folder')
-  if (trustAt >= 0 && trustAt > text.length - 600) {
-    const folder = /Accessing workspace:\s*\n?\s*(\S[^\n]*)/.exec(text.slice(-1500))?.[1]?.trim()
+function tone(label: string, permission: boolean): ApprovalOption['tone'] {
+  const l = label.toLowerCase()
+  if (/^(no|deny|reject|cancel|don.?t|exit)\b/.test(l)) return 'deny'
+  if (!permission) return 'other'
+  if (/^yes\b.*\b(always|don.?t ask|for this session|for the session|from this project|accept edits)\b/.test(l)) return 'always'
+  if (/^(yes|allow|approve|proceed|trust|ok)\b/.test(l)) return 'allow'
+  return 'other'
+}
+
+/** Short button text for the long option labels CLIs use. */
+function shortLabel(label: string, t: ApprovalOption['tone'], permission: boolean): string {
+  const l = label.toLowerCase()
+  if (permission && t === 'allow' && /^yes\.?$/.test(l)) return 'Allow once'
+  if (permission && t === 'deny' && /^no\.?$/.test(l)) return 'Deny'
+  if (/^yes, i trust this folder$/.test(l)) return 'Trust folder'
+  if (/^no, exit$/.test(l)) return 'No, close agent'
+  if (/switch to accept edits/.test(l)) return 'Allow all edits this session'
+  if (/always allow access to .* from this project/.test(l)) return 'Always allow (this project)'
+  const again = /don.?t ask again for:?\s*(.+)$/i.exec(label)?.[1]
+  if (again) return `Always allow ${again.replace(/ in \/.+$/, '').slice(0, 40)}`
+  return label.length > 64 ? label.slice(0, 61) + '…' : label
+}
+
+/** Options an Inbox button can't sensibly answer: they change app-wide modes or need typing. */
+const HIDDEN = /switch to auto mode|bypass permissions|^type something\.?$/i
+
+/**
+ * In a permission dialog, what it is about. Claude Code frames it with rules: a header ("Bash command",
+ * "Create file" + path) between the dialog's top rule and the next, then the command or content.
+ */
+function detailOf(p: Prompt): string | undefined {
+  const qAt = p.question ? p.lines.findIndex((l) => l.trim() === p.question) : -1
+  if (qAt < 0) return undefined
+  const above = p.lines.slice(0, qAt)
+  const rules = above.map((l, i) => (RULE.test(l) ? i : -1)).filter((i) => i >= 0)
+  if (rules.length < 2) return undefined
+  const between = (a: number, b: number) =>
+    above
+      .slice(a + 1, b)
+      .map((l) => l.trim())
+      .filter((l) => l && !/^Tip:/.test(l))
+  const n = rules.length
+  const block = [...(n >= 3 ? between(rules[n - 3], rules[n - 2]) : []), ...between(rules[n - 2], rules[n - 1])]
+  return block.length && block.length <= 14 ? block.join('\n') : undefined
+}
+
+export function approvalFor(p: Prompt | null): Approval | null {
+  if (!p) return null
+  if (p.kind === 'menu' && p.options?.length) {
+    const permission = PERMISSION.test(p.question ?? '') || p.options.some((o) => /trust/i.test(o.label))
+    const options = p.options
+      .filter((o) => !HIDDEN.test(o.label))
+      .map((o): ApprovalOption => {
+        const t = tone(o.label, permission)
+        return { answer: { option: o.label }, label: shortLabel(o.label, t, permission), tone: t }
+      })
+    if (!options.length) return null
+    const rank = { allow: 0, always: 1, other: 2, deny: 3 }
+    if (permission) options.sort((a, b) => rank[a.tone] - rank[b.tone])
+    return { title: p.question ?? 'Choose an option', detail: detailOf(p), options }
+  }
+  if (p.kind === 'yes-no') {
     return {
-      what: `Trust this folder${folder ? `: ${folder}` : ''}? The agent can read, edit and run files there.`,
+      title: p.question ?? p.lines[p.lines.length - 1] ?? '',
       options: [
-        { key: 'trust', label: 'Trust folder', tone: 'allow' },
-        { key: 'exit', label: 'No, close agent', tone: 'deny' }
+        { answer: { yes: true }, label: 'Yes', tone: 'allow' },
+        { answer: { yes: false }, label: 'No', tone: 'deny' }
       ]
     }
   }
-  // numbered menus (Claude Code, Codex, Gemini all use them)
-  const q = Math.max(text.lastIndexOf('Do you want'), text.lastIndexOf('Would you like'), text.lastIndexOf('Allow'), text.lastIndexOf('trust'))
-  const menuStart = q >= 0 ? q : Math.max(0, text.length - 900)
-  const menu = text.slice(menuStart)
-  const opts: ApprovalOption[] = []
-  for (const m of menu.matchAll(/^[ \t>❯›]*([1-9])[.)]\s+(.+?)\s*$/gm)) {
-    if (opts.some((o) => o.key === m[1])) continue
-    const raw = m[2].replace(/\s+/g, ' ').trim()
-    const low = raw.toLowerCase()
-    let tone: ApprovalOption['tone'] = 'other'
-    let label = raw
-    if (/^(no|deny|reject|cancel)\b/.test(low) || /^no,/.test(low)) {
-      tone = 'deny'
-      label = 'Deny'
-    } else if (/don.t ask again|always|for this session|for the session/.test(low)) {
-      tone = 'always'
-      const what = /(?:for|again for):?\s*(.+)$/i.exec(raw)?.[1]
-      label = what ? `Always allow ${what.replace(/ in \/.+$/, '').slice(0, 42)}` : 'Allow for session'
-    } else if (/auto mode|bypass/.test(low)) {
-      tone = 'other'
-      label = 'Switch to auto mode'
-    } else if (/^yes\b/.test(low) || /trust/.test(low) || /^allow\b/.test(low) || /proceed/.test(low)) {
-      tone = 'allow'
-      label = /trust/.test(low) ? 'Trust folder' : 'Allow once'
-    }
-    opts.push({ key: m[1], label, tone })
+  if (p.kind === 'enter') {
+    return { title: p.lines.slice(-2).join('\n'), options: [{ answer: { enter: true }, label: 'Continue', tone: 'allow' }] }
   }
-  if (!opts.length) {
-    if (/\(y\/n\)|\[y\/n\]|\[Y\/n\]|\[y\/N\]/.test(text.slice(-400)))
-      return {
-        what: lastLines(text.slice(-400), 2),
-        options: [
-          { key: 'y', label: 'Yes', tone: 'allow' },
-          { key: 'n', label: 'No', tone: 'deny' }
-        ]
-      }
-    return null
-  }
-  // the request itself sits between the last two rules before the question
-  const before = text.slice(0, menuStart)
-  const parts = before.split(RULE)
-  let what = parts.length >= 3 ? parts[parts.length - 2] : lastLines(before, 3)
-  what = what
-    .split('\n')
-    .map((l) => l.replace(/^[\s│]+/, '').trim())
-    .filter((l) => l && !/^(Bash command|Tip:|This command requires approval)/.test(l))
-    .join('\n')
-  if (!what) what = lastLines(before, 2)
-  // menus usually put Deny last; hide "switch to auto mode" options (an app-wide decision, not a per-prompt one)
-  return { what: what.slice(0, 400), options: opts.filter((o) => o.label !== 'Switch to auto mode').sort(order) }
-}
-
-const rank = { allow: 0, always: 1, other: 2, deny: 3 }
-const order = (a: ApprovalOption, b: ApprovalOption) => rank[a.tone] - rank[b.tone]
-
-function lastLines(t: string, n: number) {
-  return t
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l && !RULE.test(l))
-    .slice(-n)
-    .join('\n')
+  return null
 }

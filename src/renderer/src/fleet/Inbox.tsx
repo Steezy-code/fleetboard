@@ -3,9 +3,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { Check, ChevronDown, ChevronUp, GitMerge, GitPullRequestArrow, Inbox as InboxIcon, MessageCircleQuestion, ShieldQuestion, SquareTerminal, Trash2, X } from 'lucide-react'
 import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
-import { agentColor, consoleTail } from '../engine/consoles'
+import { agentColor } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
-import { parseApproval, type Approval } from './approvals'
+import { approvalFor, type Approval } from './approvals'
+import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 
 /** Everything that needs the user, in one place: decisions, approvals, finished work. */
 export function Inbox() {
@@ -20,7 +21,7 @@ export function Inbox() {
     if (!blocked.length) return setApprovals({})
     let live = true
     const read = async () => {
-      const entries = await Promise.all(blocked.map(async (id) => [id, parseApproval(await consoleTail(id, 3000))] as const))
+      const entries = await Promise.all(blocked.map(async (id) => [id, approvalFor(await invoke<Prompt | null>('pty:prompt', id).catch(() => null))] as const))
       if (live) setApprovals(Object.fromEntries(entries))
     }
     read()
@@ -61,17 +62,18 @@ export function Inbox() {
                   <ShieldQuestion size={14} className="ic-icon warn" />
                   <span className="agent-dot" style={{ background: agentColor(c?.data.agentId ?? '') }} />
                   <b>{c?.data.name ?? 'Agent'}</b>
-                  <span className="muted">{ap ? 'wants to' : 'is waiting for you'}</span>
+                  <span className="muted">{ap ? 'asks' : 'is waiting for you'}</span>
                   <span className="spacer" />
                   <button className="icon-btn sm" title="Open console" onClick={() => openConsole(id)}>
                     <SquareTerminal size={13} />
                   </button>
                 </div>
-                {ap?.what && <pre className="ic-what">{ap.what}</pre>}
+                {ap?.title && <div className="ic-title">{ap.title}</div>}
+                {ap?.detail && <pre className="ic-what">{ap.detail}</pre>}
                 <div className="ic-actions">
                   {ap ? (
                     ap.options.map((o) => (
-                      <button key={o.key} className={`btn sm ${o.tone === 'allow' ? 'primary' : o.tone === 'deny' ? 'ghost' : ''}`} title={`Answers "${o.key}"`} onClick={() => answer(id, o.key)}>
+                      <button key={o.label} className={`btn sm ${o.tone === 'allow' ? 'primary' : o.tone === 'deny' ? 'ghost' : ''}`} title={'option' in o.answer ? o.answer.option : undefined} onClick={() => answer(id, o.answer)}>
                         {o.label}
                       </button>
                     ))
@@ -90,17 +92,11 @@ export function Inbox() {
   )
 }
 
-function answer(consoleId: string, key: string) {
-  if (key === 'trust' || key === 'exit') {
-    // arrow-key menu that starts on "No, exit"
-    if (key === 'trust') window.fb.send('pty:write', consoleId, '\x1b[B')
-    window.setTimeout(() => window.fb.send('pty:write', consoleId, '\r'), 150)
-    useApp.getState().setStatus(consoleId, 'working')
-    return
-  }
-  window.fb.send('pty:write', consoleId, key)
-  if (key === 'y' || key === 'n') window.setTimeout(() => window.fb.send('pty:write', consoleId, '\r'), 80)
-  useApp.getState().setStatus(consoleId, 'working')
+async function answer(consoleId: string, a: PromptAnswer) {
+  const res = await invoke<AnswerResult>('pty:answer', consoleId, a).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+  if (res.ok) return useApp.getState().setStatus(consoleId, 'working')
+  // the prompt was answered in the terminal, or turned into another question: nothing was typed
+  useApp.getState().toast(res.reason === 'not-live' ? 'That console has stopped' : 'That question changed; nothing was sent. Check the console.', 'warn')
 }
 
 function openConsole(id: string) {

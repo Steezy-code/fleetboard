@@ -92,6 +92,8 @@ function registerCore() {
   ipcMain.handle('pty:resume', (_e, id: string) => ptys.resume(id))
   ipcMain.handle('pty:buffer', (_e, id: string) => ptys.buffer(id))
   ipcMain.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
+  ipcMain.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
+  ipcMain.handle('pty:answer', (_e, id: string, answer) => ptys.answer(id, answer))
   ipcMain.handle('pty:list', () => ptys.list())
 
   ipcMain.handle('app:quit', () => {
@@ -148,7 +150,7 @@ app.whenReady().then(async () => {
   protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))
   // Microphone for push-to-talk; everything else stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read'))
-  await startHookServer((id, status, event) => ptys.hook(id, status, event))
+  await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
   for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
   sweep.register(ctx)
