@@ -25,6 +25,10 @@ scripts/install-desktop.sh   # add it to your app launcher
 ```bash
 npm test           # unit tests, including replays of real recorded CLI sessions
 npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted claude
+# by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
+#   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions}.test.ts
+#   FLEETBOARD_REAL_CODEX=$(which codex)      test/e2e/real/codex-*.test.ts   (local mock model, no account)
+#   FLEETBOARD_REAL_GEMINI=$(which gemini)    test/e2e/real/gemini-sessions.test.ts
 ```
 
 ## What's on the board
