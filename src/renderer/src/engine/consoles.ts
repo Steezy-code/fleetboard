@@ -25,6 +25,8 @@ export function wireConsoleEvents() {
     const next = sessionId || undefined
     if (allConsoles().find((c) => c.id === id)?.data.sessionId !== next) app().updateNodeData(id, { sessionId: next })
   })
+  // something failed in the background (it is in ~/.fleetboard/logs/main.log); the app keeps running
+  on('app:error', (message: string) => app().toast(`Something went wrong in the background: ${message}`, 'warn'))
   on('pty:lostSession', (id: string) => {
     const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'A console'
     app().toast(`${name}'s last conversation could not be resumed (its CLI no longer has it), so it started a new one.`, 'warn')

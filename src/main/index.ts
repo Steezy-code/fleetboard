@@ -15,6 +15,7 @@ import * as sweep from './sweep'
 import { initFleet } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
+import { catchStrayErrors } from './errors'
 
 let win: BrowserWindow | null = null
 
@@ -200,6 +201,8 @@ app.on('second-instance', () => {
   win.show()
   win.focus()
 })
+
+catchStrayErrors((message) => ctx.emit('app:error', message))
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
