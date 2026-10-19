@@ -20,15 +20,20 @@ export function Inbox() {
   useEffect(() => {
     if (!blocked.length) return setApprovals({})
     let live = true
+    const since = Date.now()
+    let t = 0
     const read = async () => {
       const entries = await Promise.all(blocked.map(async (id) => [id, approvalFor(await invoke<Prompt | null>('pty:prompt', id).catch(() => null))] as const))
-      if (live) setApprovals(Object.fromEntries(entries))
+      if (!live) return
+      setApprovals(Object.fromEntries(entries))
+      // a CLI's hook can say it is asking a moment before it draws the question: look again soon
+      const pending = entries.some(([, a]) => !a) && Date.now() - since < 5000
+      t = window.setTimeout(read, pending ? 250 : 1500)
     }
     read()
-    const t = window.setInterval(read, 1500)
     return () => {
       live = false
-      window.clearInterval(t)
+      window.clearTimeout(t)
     }
   }, [blocked.join(',')])
 

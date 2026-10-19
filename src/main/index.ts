@@ -119,6 +119,7 @@ function registerCore() {
   ipcMain.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
   ipcMain.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
   ipcMain.handle('pty:answer', (_e, id: string, answer) => ptys.answer(id, answer))
+  ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
 
   ipcMain.handle('app:quit', () => {

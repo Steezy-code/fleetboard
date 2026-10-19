@@ -139,8 +139,12 @@ function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
   return { reason: 'numbered-menu', options, top }
 }
 
-/** An unnumbered menu: the options line up with the text after the cursor. */
-function cursorMenu(lines: string[], i: number, minSiblings: number): Menu | null {
+/**
+ * An unnumbered menu: the options line up with the text after the cursor. Three or more options are
+ * a menu on their own; a two-option one ("❯ Yes, … / No, …") needs more evidence, because two lined-up
+ * lines can be plain text: a menu hint on screen, or a question just above it with nothing below.
+ */
+function cursorMenu(lines: string[], i: number, hinted: boolean): Menu | null {
   const m = CURSOR_ITEM.exec(lines[i])!
   const col = lines[i].length - m[2].length
   // tree connectors (Claude Code's "⎿ result" under a "● Tool(...)" line) are output, not options
@@ -149,7 +153,13 @@ function cursorMenu(lines: string[], i: number, minSiblings: number): Menu | nul
   let bottom = i
   while (top > 0 && sibling(lines[top - 1])) top--
   while (bottom < lines.length - 1 && sibling(lines[bottom + 1])) bottom++
-  if (bottom - top < minSiblings) return null
+  const siblings = bottom - top
+  if (siblings < 1) return null
+  if (siblings === 1 && !hinted) {
+    const last = lines.slice(bottom + 1).every((l) => !l.trim())
+    const asked = lines.slice(Math.max(0, top - 6), top).some((l) => /\?\s*$/.test(l.trim()))
+    if (!last || !asked) return null
+  }
   const options: PromptOption[] = []
   for (let j = top; j <= bottom; j++) options.push({ label: stripMark(j === i ? m[2] : lines[j]), selected: j === i })
   return { reason: 'cursor-menu', options, top }
@@ -170,7 +180,7 @@ function findMenu(lines: string[], cols: number, hinted: boolean): Menu | null {
   }
   return (
     candidates((i) => (NUMBERED_ITEM.exec(lines[i])?.[2] ? numberedMenu(lines, i, cols) : null)) ??
-    candidates((i) => (CURSOR_ITEM.test(lines[i]) && !NUMBERED_ITEM.test(lines[i]) ? cursorMenu(lines, i, hinted ? 1 : 2) : null))
+    candidates((i) => (CURSOR_ITEM.test(lines[i]) && !NUMBERED_ITEM.test(lines[i]) ? cursorMenu(lines, i, hinted) : null))
   )
 }
 

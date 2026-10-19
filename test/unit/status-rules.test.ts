@@ -29,6 +29,16 @@ describe('detectPrompt: TUI dialogs', () => {
     assert.equal(detectPrompt(view(' ❯ Dark mode\n\n some text')), null)
   })
 
+  test('a two-option menu counts under a question with nothing below it (Claude Code: make auto mode the default?)', () => {
+    const dialog = ' Make auto mode your default permission mode?\n   Auto mode lets Claude handle permission prompts.\n   ❯ Yes, set auto mode as my default permission mode\n     No, keep manual mode'
+    const p = detectPrompt(view(dialog))
+    assert.equal(p?.reason, 'cursor-menu')
+    assert.deepEqual(p?.options?.map((o) => o.label), ['Yes, set auto mode as my default permission mode', 'No, keep manual mode'])
+    // two lined-up lines are not a menu without the question, or with more text below
+    assert.equal(detectPrompt(view(' Notes\n   ❯ first point\n     second point')), null)
+    assert.equal(detectPrompt(view(dialog + '\n some log line after it')), null)
+  })
+
   test('hints', () => {
     assert.equal(detectPrompt(view(' Press any key to continue'))?.reason, 'press-key')
     assert.ok(detectPrompt(view(' Press Enter to continue…')))

@@ -191,7 +191,11 @@ function transcript(line) {
 
 function draw() {
   const bottom = []
-  if (state === 'dialog' && dialog) {
+  if (state === 'dialog' && dialog?.plain) {
+    // a startup question like Claude Code's "Make auto mode your default permission mode?": no numbers, no hint
+    bottom.push(rule(), ` ${dialog.question}`, `   ${dialog.explain}`)
+    dialog.options.forEach((o, i) => bottom.push(`   ${i === dialog.selected ? '❯' : ' '} ${o}`))
+  } else if (state === 'dialog' && dialog) {
     // laid out like Claude Code's: header, then the command between dashed rules, then the question
     const dashed = '╌'.repeat(cols())
     bottom.push(rule(), ` ${dialog.title}`, '', dashed, ...dialog.detail.map((d) => ` ${d}`), dashed, ` ${dialog.question}`)
@@ -472,3 +476,16 @@ transcript(`✻ Fake Claude Code${me.role !== 'solo' ? ` (${me.name}, ${me.role}
 await sleep(scenario.startMs ?? 300)
 await hook('SessionStart', { source: opts.resumed ? 'resume' : 'startup' })
 draw()
+if (scenario.startupMenu) {
+  // drawn a moment after SessionStart, like Claude Code's own
+  await sleep(scenario.startupMenu.afterMs ?? 600)
+  const choice = await new Promise((resolve) => {
+    dialog = { plain: true, question: scenario.startupMenu.question, explain: scenario.startupMenu.explain ?? '', options: scenario.startupMenu.options, selected: 0, resolve }
+    state = 'dialog'
+    draw()
+  })
+  dialog = null
+  state = 'idle'
+  log('startup-answer', { choice: scenario.startupMenu.options[choice] })
+  draw()
+}
