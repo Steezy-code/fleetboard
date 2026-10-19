@@ -1,0 +1,403 @@
+import { useEffect } from 'react'
+import { create } from 'zustand'
+import { useShallow } from 'zustand/react/shallow'
+import { invoke } from '../lib/api'
+import { allConsoles, useApp } from '../state/store'
+import { agentLabel, consoleTail } from '../engine/consoles'
+import { useFleet } from '../engine/fleet'
+import { approvalFor, type Approval } from './approvals'
+import { ciItems, fixCi, useCi, type CiItem } from '../workbench/ciStore'
+import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
+import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
+import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
+
+// The Inbox, as one ordered list: what blocks an agent first (its permission prompts, then the
+// Lead's questions), then finished work, then notices (red CI, review comments). The tray on the
+// command bar (InboxTray.tsx) shows it; the command bar's keys and voice answer the front item.
+
+export interface InboxAction {
+  label: string
+  /** the button the highlighted / Enter answer runs */
+  primary?: boolean
+  tone?: 'allow' | 'deny' | 'other'
+  run: () => unknown
+  /** keeps the item (opens something) instead of answering it */
+  keeps?: boolean
+}
+
+interface Base {
+  key: string
+  who: string
+  /** "Claude Code", "Lead · CSV export", "PR #9 …" */
+  sub: string
+  /** first seen, for "waiting 2m" */
+  since: number
+  actions: InboxAction[]
+  /** console to open in focus mode */
+  consoleId?: string
+  /** typed text goes to this agent (questions, finished work); otherwise to Helm */
+  replyTo?: { label: string; send: (text: string) => unknown }
+}
+
+export type InboxItem =
+  | (Base & { kind: 'approval'; approval: Approval | null; context: string[]; note: string | null })
+  | (Base & { kind: 'ask'; ask: FleetAsk; progress: string })
+  | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number })
+  | (Base & { kind: 'stopped' })
+  | (Base & { kind: 'notice'; tone: 'danger' | 'info'; head: string; lines: string[] })
+
+interface InboxUi {
+  items: InboxItem[]
+  /** key of the item in front (kept across refreshes) */
+  front: string | null
+  open: boolean
+  /** when the front item came into view: number keys and Enter wait a moment, so a new card is never answered by a key meant for something else */
+  shownAt: number
+}
+
+export const useInbox = create<InboxUi>(() => ({ items: [], front: null, open: false, shownAt: 0 }))
+
+const firstSeen = new Map<string, number>()
+const dismissed = new Set<string>()
+const seen = (key: string) => {
+  if (!firstSeen.has(key)) firstSeen.set(key, Date.now())
+  return firstSeen.get(key)!
+}
+
+export function frontItem(): InboxItem | null {
+  const { items, front } = useInbox.getState()
+  return items.find((i) => i.key === front) ?? items[0] ?? null
+}
+
+export function frontIndex(): number {
+  const { items } = useInbox.getState()
+  const f = frontItem()
+  return f ? items.indexOf(f) : -1
+}
+
+export function setFront(key: string) {
+  if (useInbox.getState().front !== key) useInbox.setState({ front: key, shownAt: Date.now() })
+}
+
+export function cycleFront(dir: 1 | -1) {
+  const { items } = useInbox.getState()
+  if (items.length < 2) return
+  const i = frontIndex()
+  setFront(items[(i + dir + items.length) % items.length].key)
+}
+
+export const toggleInbox = () => useInbox.setState((s) => ({ open: !s.open }))
+
+/** A key or Enter can answer the front card only once it has been on screen a moment. */
+export const settled = () => Date.now() - useInbox.getState().shownAt > 600
+
+/**
+ * Run one of an item's actions. Agents' items leave the tray when their state changes (the prompt is
+ * answered, the team is merged); a notice leaves as soon as it is acted on.
+ */
+export async function runAction(item: InboxItem, i: number) {
+  const a = item.actions[i]
+  if (!a) return
+  if (item.kind === 'notice' && !a.keeps) dismissed.add(item.key)
+  await a.run()
+  refreshInbox()
+}
+
+// ---------------------------------------------------------------- what an approval is about
+
+/** A plain word on what a command does, when it is clear from the command. Null when unsure. */
+export function commandNote(cmd: string | undefined): string | null {
+  if (!cmd) return null
+  const c = cmd.trim().replace(/^(sudo\s+)?/, '')
+  if (/\brm\s+-[a-z]*r|\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|push\s+(-f|--force))|\bdrop\s+(table|database)\b/i.test(c)) return 'Deletes or overwrites things'
+  if (/\bgit\s+push\b|\bnpm\s+publish\b|\bcurl\b.*-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(c)) return 'Sends something off this machine'
+  if (/^(npm|pnpm|yarn|bun)\s+(i|install|add)\b|^pip3?\s+install\b|^cargo\s+add\b/i.test(c)) return 'Installs packages'
+  if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(vitest|jest|pytest|playwright\s+test)\b|^(cargo|go)\s+test\b/i.test(c)) return 'Runs your tests'
+  if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?(typecheck|lint|build|check)\b|^(npx\s+)?tsc\b/i.test(c)) return 'Runs a check or build'
+  if (/^(ls|cat|head|tail|wc|grep|rg|find|tree|pwd|which)\b|^git\s+(status|diff|log|show|branch)\b/i.test(c)) return 'Only reads'
+  return null
+}
+
+const CHROME = /[─-▟⠀-⣿]+|[⏺⎿✻✶✳✢·•●○◯◉◐◓◑◒❯›»]+/g
+
+/** The agent's last couple of output lines before its question: what it just did and why it asks. */
+export function contextBefore(tail: string, prompt: Prompt | null, n = 2): string[] {
+  const lines = tail.split('\n').map((l) => l.replace(CHROME, ' ').replace(/\s+/g, ' ').trim())
+  // cut at the prompt: its first line, or the question
+  const marks = [prompt?.lines.find((l) => l.trim().length > 3)?.trim(), prompt?.question?.trim()].filter(Boolean) as string[]
+  let end = lines.length
+  for (const m of marks) {
+    const probe = m.replace(CHROME, ' ').replace(/\s+/g, ' ').trim().slice(0, 30)
+    const at = lines.findLastIndex((l) => probe && l.includes(probe))
+    if (at >= 0) end = Math.min(end, at)
+  }
+  return lines
+    .slice(0, end)
+    .filter((l) => l.length > 2 && !/^(esc|ctrl|\?|shift)\b|for shortcuts|to interrupt/i.test(l))
+    .slice(-n)
+}
+
+// ---------------------------------------------------------------- answers
+
+async function answerPrompt(consoleId: string, a: PromptAnswer) {
+  const res = await invoke<AnswerResult>('pty:answer', consoleId, a).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+  if (res.ok) return useApp.getState().setStatus(consoleId, 'working')
+  useApp.getState().toast(res.reason === 'not-live' ? 'That console has stopped' : 'That question changed; nothing was sent. Check the console.', 'warn')
+}
+
+export function openConsole(id: string) {
+  const app = useApp.getState()
+  const c = allConsoles().find((x) => x.id === id)
+  if (!c) return
+  if (c.workspaceId !== app.project?.activeWorkspaceId) app.switchWorkspace(c.workspaceId)
+  window.setTimeout(() => useApp.getState().enterFocus(id), 80)
+}
+
+async function mergeReady(projectId: string) {
+  const app = useApp.getState()
+  const r = await invoke<{ ok: boolean; into?: string; error?: string }>('fleet:mergeReady', projectId)
+  if (r.ok) app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
+  else app.toast(`Merge failed: ${r.error}`, 'error')
+}
+
+async function openPr(projectId: string, ready: FleetReady) {
+  const app = useApp.getState()
+  if (!(await app.confirm({ title: 'Push this branch and open a draft PR?', body: `Pushes ${ready.branch} to origin and opens a draft pull request with the team's summary as its description.`, confirm: 'Open draft PR' }))) return
+  const r = await invoke<{ ok: boolean; url?: string; error?: string }>('fleet:openPr', projectId)
+  if (r.ok) {
+    app.toast('Draft PR opened', 'ok')
+    if (r.url) invoke('shell:openExternal', r.url)
+  } else app.toast(r.error ?? 'Could not open the PR', 'error')
+}
+
+export async function discardTeam(projectId: string, leadId?: string) {
+  const app = useApp.getState()
+  if (!(await app.confirm({ title: 'Discard the team’s work?', body: 'Deletes the team’s branches and worktrees and closes its consoles.', confirm: 'Discard', danger: true }))) return
+  await invoke('fleet:discard', projectId, leadId)
+}
+
+// ---------------------------------------------------------------- building the list
+
+let approvals: Record<string, { approval: Approval | null; context: string[] }> = {}
+let refreshTimer = 0
+
+export function refreshInbox() {
+  window.clearTimeout(refreshTimer)
+  refreshTimer = window.setTimeout(build, 0)
+}
+
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
+
+function build() {
+  const app = useApp.getState()
+  const project = app.project
+  if (!project) return useInbox.setState({ items: [], front: null })
+  const fleet = useFleet.getState().state
+  const consoles = Object.fromEntries(allConsoles().map((c) => [c.id, c]))
+  const items: InboxItem[] = []
+  const memberName = (id: string) => fleet?.members[id]?.name ?? (consoles[id]?.data.name as string) ?? 'Lead'
+
+  // 1. permission prompts and other questions a console is stuck on
+  for (const id of Object.keys(app.statuses).filter((id) => app.statuses[id] === 'needs-you' && app.live[id])) {
+    const c = consoles[id]
+    const ap = approvals[id]
+    const key = `approval:${id}`
+    items.push({
+      kind: 'approval',
+      key,
+      who: (c?.data.name as string) ?? 'Agent',
+      sub: agentLabel(c?.data.agentId ?? ''),
+      since: seen(key),
+      consoleId: id,
+      approval: ap?.approval ?? null,
+      context: ap?.context ?? [],
+      note: commandNote(ap?.approval?.detail?.split('\n')[0]),
+      actions: ap?.approval
+        ? ap.approval.options.map((o, i) => ({ label: o.label, tone: o.tone === 'always' ? 'other' : o.tone, primary: i === 0 && o.tone === 'allow', run: () => answerPrompt(id, o.answer) }))
+        : [{ label: 'Open console', primary: true, keeps: true, run: () => openConsole(id) }]
+    })
+  }
+
+  // 2. the Lead's questions
+  for (const a of fleet?.asks.filter((x) => !x.answer) ?? []) {
+    const key = `ask:${a.id}`
+    const lead = fleet?.members[a.from]
+    const done = fleet?.tasks.filter((t) => t.status === 'done').length ?? 0
+    const total = fleet?.tasks.length ?? 0
+    const send = (text: string) => invoke('fleet:answer', a.id, text)
+    items.push({
+      kind: 'ask',
+      key,
+      who: memberName(a.from),
+      sub: `Lead${lead?.task ? ` · ${lead.task.slice(0, 40)}` : ''}`,
+      since: seen(key),
+      consoleId: a.from,
+      ask: a,
+      progress: total ? `${done} of ${total} tasks done` : '',
+      actions: a.options.map((o, i) => ({ label: o, primary: a.recommended != null ? i === a.recommended : i === 0, run: () => send(o) })),
+      replyTo: { label: memberName(a.from), send }
+    })
+  }
+
+  // 3. a lead that stopped mid-task
+  for (const m of Object.values(fleet?.members ?? {}).filter((m) => m.role === 'lead' && (m.status === 'working' || m.status === 'starting') && app.statuses[m.id] === 'exited')) {
+    const key = `stopped:${m.id}`
+    items.push({
+      kind: 'stopped',
+      key,
+      who: m.name,
+      sub: 'Lead',
+      since: seen(key),
+      consoleId: m.id,
+      actions: [
+        { label: 'Open console', primary: true, keeps: true, run: () => openConsole(m.id) },
+        { label: 'Discard team', tone: 'deny', run: () => discardTeam(project.id, m.id) }
+      ]
+    })
+  }
+
+  // 4. finished work
+  const ready = fleet?.ready
+  if (ready) {
+    const key = `ready:${ready.leadId}:${ready.at}`
+    const lead = fleet?.members[ready.leadId]
+    const workers = Object.values(fleet?.members ?? {}).filter((m) => m.leadId === ready.leadId && m.role === 'worker').length
+    const closeOnly = !ready.branch || ready.commits === 0 || !!ready.prUrl
+    const actions: InboxAction[] = closeOnly
+      ? [{ label: 'Done', primary: true, run: () => invoke('fleet:done', project.id) }]
+      : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id) }]
+    if (ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl) actions.push({ label: 'Open draft PR', keeps: true, run: () => openPr(project.id, ready) })
+    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
+    if (ready.prUrl) actions.push({ label: 'Open PR', keeps: true, run: () => invoke('shell:openExternal', ready.prUrl) })
+    actions.push({ label: 'Discard', tone: 'deny', run: () => discardTeam(project.id) })
+    items.push({
+      kind: 'ready',
+      key,
+      who: lead?.name ?? 'Lead',
+      sub: `Lead${lead?.task ? ` · ${lead.task.slice(0, 40)}` : ''}`,
+      since: ready.at,
+      consoleId: ready.leadId,
+      ready,
+      lead,
+      workers,
+      actions,
+      replyTo: lead ? { label: lead.name, send: (text: string) => invoke('fleet:userMessage', lead.id, text) } : undefined
+    })
+  }
+
+  // 5. notices: red CI, review comments nobody sent to an agent yet
+  const ci = useCi.getState().status
+  for (const item of ciItems(ci).filter((i) => i.state === 'failing')) {
+    const key = `ci:${item.key}:${item.rev}`
+    if (dismissed.has(key)) continue
+    const failing = item.pr?.checks.filter((c) => c.state === 'failing').map((c) => c.name) ?? []
+    items.push(ciNotice(key, item, failing))
+  }
+  const fb = useFeedback.getState().result
+  for (const pr of fb?.ok ? fb.prs : []) {
+    const fresh = unsent(pr)
+    if (!fresh.length || agentMade(pr.branch)) continue
+    const key = `review:${pr.number}:${fresh.map((c) => c.id).join(',')}`
+    if (dismissed.has(key)) continue
+    items.push(reviewNotice(key, pr, fresh.length))
+  }
+
+  const list = items
+  const { front } = useInbox.getState()
+  const keepFront = list.some((i) => i.key === front)
+  useInbox.setState({ items: list, front: keepFront ? front : (list[0]?.key ?? null), ...(keepFront ? {} : { shownAt: Date.now() }) })
+}
+
+function ciNotice(key: string, item: CiItem, failing: string[]): InboxItem {
+  const lines = failing.length ? [`failing: ${failing.join(', ')}`] : item.run ? [`${item.run.title}`] : []
+  return {
+    kind: 'notice',
+    tone: 'danger',
+    key,
+    who: 'CI',
+    sub: item.pr ? `PR #${item.pr.number} ${item.pr.title}` : `${item.run?.workflow} on ${item.branch}`,
+    head: 'checks failed',
+    lines,
+    since: item.run ? Date.parse(item.run.createdAt) || seen(key) : seen(key),
+    actions: [
+      { label: 'Fix it', primary: true, run: () => fixCi(item) },
+      { label: 'Details', keeps: true, run: () => useApp.getState().openDrawer('ci') },
+      { label: 'Dismiss', tone: 'deny', run: () => undefined }
+    ]
+  }
+}
+
+function reviewNotice(key: string, pr: PrFeedback, n: number): InboxItem {
+  const fresh = unsent(pr)
+  return {
+    kind: 'notice',
+    tone: 'info',
+    key,
+    who: fresh[0]?.author ? `@${fresh[0].author}` : 'Review',
+    sub: `PR #${pr.number} ${pr.title}`,
+    head: `left ${plural(n, 'review comment')}`,
+    lines: fresh.slice(-2).map((c) => `${c.kind === 'inline' && c.path ? `${c.path.split('/').pop()}${c.line ? `:${c.line}` : ''} · ` : ''}${c.body.replace(/\s+/g, ' ').slice(0, 140)}`),
+    since: Date.parse(fresh[0]?.createdAt ?? '') || seen(key),
+    actions: [
+      { label: 'Send to an agent', primary: true, run: () => routeFeedback(pr) },
+      { label: 'Mark handled', run: () => markSent(pr, fresh) },
+      { label: 'Open PR', keeps: true, run: () => invoke('shell:openExternal', pr.url) }
+    ]
+  }
+}
+
+/** Mounted once: keeps the list current, and reads each blocked console's question and recent output. */
+export function useInboxWatcher() {
+  const projectId = useApp((s) => s.project?.id)
+  const blocked = useApp(useShallow((s) => Object.keys(s.statuses).filter((id) => s.statuses[id] === 'needs-you' && s.live[id])))
+  const sig = useApp(useShallow((s) => [Object.keys(s.statuses).filter((id) => s.statuses[id] === 'exited').join(','), allConsoles().length]))
+  const fleet = useFleet((s) => s.state)
+  const ci = useCi((s) => s.status)
+  const fb = useFeedback((s) => s.result)
+  const sent = useApp((s) => s.project?.extras.prSent)
+
+  useEffect(refreshInbox, [projectId, blocked.join(','), sig.join('|'), fleet, ci, fb, sent])
+
+  useEffect(() => {
+    if (!blocked.length) {
+      approvals = {}
+      return
+    }
+    let live = true
+    const since = Date.now()
+    let t = 0
+    const read = async () => {
+      const entries = await Promise.all(
+        blocked.map(async (id) => {
+          const [p, tail] = await Promise.all([invoke<Prompt | null>('pty:prompt', id).catch(() => null), consoleTail(id, 2500).catch(() => '')])
+          return [id, { approval: approvalFor(p), context: contextBefore(tail, p) }] as const
+        })
+      )
+      if (!live) return
+      approvals = Object.fromEntries(entries)
+      refreshInbox()
+      // a CLI's hook can say it is asking a moment before it draws the question: look again soon
+      const pending = entries.some(([, a]) => !a.approval) && Date.now() - since < 5000
+      t = window.setTimeout(read, pending ? 250 : 1500)
+    }
+    read()
+    return () => {
+      live = false
+      window.clearTimeout(t)
+    }
+  }, [blocked.join(',')])
+
+  // "waiting 2m" ticks
+  useEffect(() => {
+    const t = window.setInterval(() => useInbox.setState((s) => ({ items: [...s.items] })), 30_000)
+    return () => window.clearInterval(t)
+  }, [])
+}
+
+export const ago = (t: number) => {
+  const s = Math.max(0, (Date.now() - t) / 1000)
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}

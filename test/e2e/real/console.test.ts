@@ -34,25 +34,25 @@ test('real: permission dialogs answered from the Inbox (allow, then deny)', { sk
     // delivered by the app: it waits while Claude asks its startup question (auto mode as the default?)
     const delivered = app.invoke('pty:deliver', id, 'Run the shell command `touch allowed.txt` with the Bash tool. Nothing else.')
     const startup = await app
-      .waitFor(async () => (await app.texts('.inbox-card.approval')).find((t) => /auto mode your default/i.test(t)), { timeout: 8000, label: 'startup question' })
+      .waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).find((t) => /auto mode your default/i.test(t)), { timeout: 8000, label: 'startup question' })
       .catch(() => null)
     if (startup) {
       assert.equal(fs.existsSync(path.join(repo, 'allowed.txt')), false)
-      await app.click('.inbox-card.approval .ic-actions button', 'No, keep manual mode')
+      await app.click('.it-card[data-kind="approval"] .it-actions button', 'No, keep manual mode')
     }
     assert.equal(await delivered, true)
-    await app.waitFor(async () => (await app.texts('.inbox-card.approval')).some((t) => /touch allowed\.txt/.test(t)), { timeout: 90_000, label: 'permission card' })
+    await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).some((t) => /touch allowed\.txt/.test(t)), { timeout: 90_000, label: 'permission card' })
     // the hook reports the dialog a moment before Claude draws it: the card fills in on the next refresh
-    const card = await app.waitFor(async () => (await app.texts('.inbox-card.approval')).find((t) => /touch allowed\.txt/.test(t)), { label: 'Inbox card' })
+    const card = await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).find((t) => /touch allowed\.txt/.test(t)), { label: 'Inbox card' })
     assert.match(card, /Allow once/)
-    await app.click('.inbox-card.approval .ic-actions button', 'Allow once')
+    await app.click('.it-card[data-kind="approval"] .it-actions button', 'Allow once')
     await app.waitFor(() => fs.existsSync(path.join(repo, 'allowed.txt')), { timeout: 60_000, label: 'command ran after Allow once' })
     await app.waitStatus(id, 'idle', 90_000)
 
     await send('Run the shell command `touch denied.txt` with the Bash tool. Nothing else.')
     await app.waitStatus(id, 'needs-you', 90_000)
-    await app.waitFor(async () => (await app.texts('.inbox-card.approval')).some((t) => /touch denied\.txt/.test(t)), { label: 'second card' })
-    await app.click('.inbox-card.approval .ic-actions button', 'Deny')
+    await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).some((t) => /touch denied\.txt/.test(t)), { label: 'second card' })
+    await app.click('.it-card[data-kind="approval"] .it-actions button', 'Deny')
     await app.waitStatus(id, 'idle', 90_000)
     assert.equal(fs.existsSync(path.join(repo, 'denied.txt')), false, 'Deny (the last option, several arrow presses away) was chosen')
   } finally {

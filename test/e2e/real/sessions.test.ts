@@ -21,8 +21,8 @@ test('real: each console resumes its own conversation after a restart', { skip: 
   let app = await App.launch({ sandbox: sb, realClaudeConfig: config })
   // a startup question (auto mode as the default?) is answered from the Inbox; delivered messages wait for it
   const answerStartup = async () => {
-    const t = await app.texts('.inbox-card.approval')
-    if (t.some((x) => /auto mode your default/i.test(x))) await app.click('.inbox-card.approval .ic-actions button', 'No, keep manual mode').catch(() => {})
+    const t = await app.texts('.it-card[data-kind="approval"]')
+    if (t.some((x) => /auto mode your default/i.test(x))) await app.click('.it-card[data-kind="approval"] .it-actions button', 'No, keep manual mode').catch(() => {})
   }
   const tell = async (id: string, text: string) => {
     const done = app.invoke('pty:deliver', id, text)

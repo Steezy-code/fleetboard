@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronUp, Mic, ShipWheel, Square } from 'lucide-react'
+import { ChevronUp, CornerDownRight, Mic, ShipWheel, Square } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { ROLE_TINT } from '@shared/types'
 import { activeWs, allConsoles, useApp } from '../state/store'
@@ -10,6 +10,7 @@ import { cancelListening, toggleListening } from './stt'
 import { stopSpeaking } from './tts'
 import { useThread, useVoice } from './thread'
 import { primaryIndex, runHelmOption, useHelm } from './helm/helm'
+import { cycleFront, frontItem, runAction, settled, toggleInbox, useInbox } from '../fleet/inboxModel'
 
 // Bottom command bar: orb · input (@mentions) · ^ thread · stop · Helm toggle · mic.
 // Hold Space (outside inputs/terminals) or Alt+Space anywhere to talk; Enter submits typed text.
@@ -28,6 +29,11 @@ export function CommandBar() {
   const helm = useApp((s) => s.settings.helm !== false)
   const helmThinking = useHelm((s) => s.thinking)
   const busy = phase !== 'idle' || speaking
+  // a question or finished work in front of the Inbox: typed text answers that agent
+  const replyTo = useInbox((s) => {
+    const f = s.items.find((i) => i.key === s.front) ?? s.items[0]
+    return f?.replyTo?.label ?? null
+  })
   const orbClass = phase === 'listening' ? 'listening' : phase === 'thinking' || phase === 'transcribing' ? 'thinking' : speaking ? 'speaking' : ''
 
   return (
@@ -48,7 +54,12 @@ export function CommandBar() {
         ) : null}
         {/* stays mounted so a half-typed command survives a listen */}
         <div className="cb-input" style={phase === 'idle' ? undefined : { display: 'none' }}>
-          <CommandInput primary placeholder={helm ? 'Ask Helm or say what you want done…' : 'Hold space to speak · @ to direct…'} />
+          {replyTo && (
+            <span className="cb-reply" title={`What you type goes to ${replyTo}`}>
+              <CornerDownRight size={12} /> {replyTo}
+            </span>
+          )}
+          <CommandInput primary placeholder={replyTo ? `Answer ${replyTo} in your own words…` : helm ? 'Ask Helm or say what you want done…' : 'Hold space to speak · @ to direct…'} />
         </div>
       </div>
       {phase === 'idle' && download && <span className="cb-sub">{downloadText(download.label, download.pct)}</span>}
@@ -236,15 +247,51 @@ export function CommandInput({
   const submit = () => {
     const t = text.trim()
     if (!t) {
-      // Enter in an empty bar runs Helm's first suggestion
+      // Enter in an empty bar runs Helm's first suggestion, else the Inbox's highlighted answer
       const i = primaryIndex()
-      if (i != null) runHelmOption(i)
+      if (i != null) return runHelmOption(i)
+      const f = primary ? frontItem() : null
+      const p = f ? f.actions.findIndex((a) => a.primary) : -1
+      if (f && p >= 0 && settled()) runAction(f, p)
       return
     }
     setText('')
     setCaret(0)
     histPos.current = null
+    // a question or finished work in front: the words go to that agent
+    const f = primary && !useHelm.getState().card ? frontItem() : null
+    if (f?.replyTo && !t.startsWith('@')) {
+      useThread.getState().add('user', `→ ${f.replyTo.label}: ${t}`, 'typed')
+      void f.replyTo.send(t)
+      useApp.getState().toast(`Sent to ${f.replyTo.label}`, 'ok')
+      return
+    }
     runCommand(t, 'typed')
+  }
+
+  /** Tab / Shift+Tab, Ctrl+I and number keys drive the Inbox tray from the bar. */
+  const inboxKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!primary || !useInbox.getState().items.length) return false
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      cycleFront(e.shiftKey ? -1 : 1)
+      return true
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'i') {
+      e.preventDefault()
+      toggleInbox()
+      return true
+    }
+    if (!text && !e.ctrlKey && !e.altKey && !e.metaKey && /^[1-9]$/.test(e.key) && !useHelm.getState().card) {
+      const f = frontItem()
+      const i = Number(e.key) - 1
+      if (f && i < f.actions.length) {
+        e.preventDefault()
+        if (settled()) runAction(f, i)
+        return true
+      }
+    }
+    return false
   }
 
   return (
@@ -284,6 +331,7 @@ export function CommandInput({
               return setClosed(true)
             }
           }
+          if (inboxKey(e)) return
           if (e.key === 'Enter') {
             e.preventDefault()
             submit()

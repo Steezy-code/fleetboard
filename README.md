@@ -55,9 +55,13 @@ Type (or say) what you want in the command bar, for example *"add a Split PDF co
 2. It starts **workers**, one per task, each in its own git worktree with files only it owns, and briefs them.
 3. Workers report back; their work is committed automatically and the Lead merges it.
 4. A read-only **reviewer** checks the combined result and runs the checks; findings go back to the owner.
-5. A **Ready** card appears in your Inbox: **Merge** brings the branch into your checkout and dismisses the team.
+5. A **Ready** card appears in the Inbox on the command bar: **Merge** brings the branch into your checkout and dismisses the team.
 
-Everything that needs you lands in the **Inbox** (top right): the Lead's questions as buttons, every agent's permission prompt as *Allow once / Always allow … / Deny*, and the Ready card. Your own uncommitted work is never touched: the team works from your last commit in separate worktrees. (That needs a git repository with a commit; in a folder without one, Fleetboard asks before the team works in your files directly.)
+Everything that needs you lands in the **Inbox**, docked on top of the command bar: every agent's permission prompt (with what it was just doing, the command, and a plain note like "Runs your tests"), the Lead's questions (each option with its trade-off, and the one the Lead would pick), the Ready card (what changed, files with lines added and removed, what the Lead verified), and notices like red CI or review comments. The front item shows in full; **Show all** (Ctrl+I) lists the rest.
+
+From the bar: **1**–**9** pick a button, **Enter** on an empty bar runs the highlighted one, **Tab** / **Shift+Tab** step through the items. When a question or a Ready card is in front, a tag shows who you're talking to and what you type goes to that agent; with a permission prompt in front, typing still goes to Helm, so a stray sentence never approves anything. Saying "allow", "deny", "merge" or "option two" answers the front item by voice. Keys wait a moment after a new card appears, so a keystroke meant for something else can't answer it. In focus mode the tray floats in the corner.
+
+Your own uncommitted work is never touched: the team works from your last commit in separate worktrees. (That needs a git repository with a commit; in a folder without one, Fleetboard asks before the team works in your files directly.)
 
 Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_spawn_worker`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
 

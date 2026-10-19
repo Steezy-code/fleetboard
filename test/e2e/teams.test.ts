@@ -228,8 +228,8 @@ test("the lead's question shows in the Inbox and the user's click reaches the le
   const { projectId } = await team({
     lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }], ask: { question: 'Which database?', options: ['Postgres', 'SQLite'] } }
   })
-  await app!.waitFor(async () => (await app!.texts('.inbox-card')).find((t) => t.includes('Which database?')), { label: 'question card' })
-  await app!.click('.inbox-card button', 'SQLite')
+  await app!.waitFor(async () => (await app!.texts('.it-card')).find((t) => t.includes('Which database?')), { label: 'question card' })
+  await app!.click('.it-card .it-opt', 'SQLite')
   await waitReady(projectId)
   assert.match(app!.fakeLog((e) => e.event === 'answer')[0]?.text ?? '', /The user chose: SQLite/)
   assert.equal((await fleet(projectId)).asks.filter((a: any) => !a.answer).length, 0)
@@ -240,9 +240,9 @@ test("a worker's permission prompt reaches the Inbox and is answered there", asy
     lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }] },
     workers: { Ada: { bash: 'npm run build' } }
   })
-  const card = await app!.waitFor(async () => (await app!.texts('.inbox-card.approval')).find((t) => t.includes('npm run build')), { label: 'approval card', timeout: 30_000 })
+  const card = await app!.waitFor(async () => (await app!.texts('.it-card[data-kind="approval"]')).find((t) => t.includes('npm run build')), { label: 'approval card', timeout: 30_000 })
   assert.match(card, /Ada/)
-  await app!.click('.inbox-card.approval button', 'Allow once')
+  await app!.click('.it-card[data-kind="approval"] .it-actions button', 'Allow once')
   const ready = await waitReady(projectId)
   assert.deepEqual(ready.files, ['a.txt'])
   assert.equal(app!.fakeLog((e) => e.event === 'dialog-answer' && e.name === 'Ada')[0]?.choice, 0)
@@ -288,7 +288,7 @@ test('a lead that stops mid-task shows in the Inbox; resumed on its tile, it is 
     lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }], crashAfterSpawn: true },
     workers: { Ada: { delayMs: 1500 } }
   })
-  const card = await app!.waitFor(async () => (await app!.texts('.inbox-card.stopped')).join(''), { label: 'stopped lead card', timeout: 20_000 })
+  const card = await app!.waitFor(async () => (await app!.texts('.it-card[data-kind="stopped"]')).join(''), { label: 'stopped lead card', timeout: 20_000 })
   assert.match(card, /Lead\s*stopped before finishing/)
   // Ada reports to the stopped lead meanwhile; the report waits for it
   await app!.waitFor(() => toolCalls('fleet_report').length > 0, { label: 'Ada reported' })
@@ -298,7 +298,7 @@ test('a lead that stops mid-task shows in the Inbox; resumed on its tile, it is 
   const briefing = app!.fakeLog((e) => e.event === 'prompt' && e.name === 'Lead' && /was restarted/.test(e.prompt))
   assert.equal(briefing.length, 1)
   assert.match(briefing[0].prompt, /Your console was restarted after it stopped/)
-  assert.equal((await app!.texts('.inbox-card.stopped')).length, 0, 'the card is gone')
+  assert.equal((await app!.texts('.it-card[data-kind="stopped"]')).length, 0, 'the card is gone')
 })
 
 test('the fleet and hook servers refuse requests without the secret, from a browser, or to another host', async () => {
@@ -352,4 +352,41 @@ test("a team console's token is good for that console only: a worker cannot call
   const big = await call(leadUrl, leadHeaders, JSON.stringify({ ...list, pad: 'x'.repeat(5 * 1024 * 1024) })).then((r) => r.status, () => 'closed')
   assert.ok(big === 413 || big === 'closed', String(big))
   assert.equal((await call(leadUrl, leadHeaders)).status, 200)
+})
+
+test('the Inbox tray on the command bar: a question shows its trade-offs and is answered with a number key; finished work shows files and checks', async () => {
+  const { projectId } = await team({
+    lead: {
+      tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }],
+      ask: { question: 'Where should exports go?', options: ['S3', 'Local disk'], notes: ['Shareable links, needs AWS keys', 'Works today, lost on redeploy'], recommended: 'Local disk' },
+      summary: '- Added a.txt\n- Kept the old export path working',
+      verified: 'typecheck and 3 tests pass'
+    }
+  })
+  const shot = async (name: string) => {
+    if (!process.env.E2E_SHOTS) return
+    await new Promise((r) => setTimeout(r, 500)) // let the tray's rise animation finish
+    await app!.screenshot(path.join(process.env.E2E_SHOTS, name))
+  }
+  const card = await app!.waitFor(async () => (await app!.texts('.it-card[data-kind="ask"]')).find((t) => t.includes('Where should exports go?')), { label: 'question card' })
+  assert.match(card, /Works today, lost on redeploy/)
+  assert.match(card, /suggests/, "the lead's pick is marked")
+  assert.match((await app!.texts('.cb-reply')).join(''), /Lead/, 'typing would answer the lead')
+  await shot('tray-ask.png')
+
+  // "2" in the empty command bar picks the second option (once the card has been up a moment)
+  await new Promise((r) => setTimeout(r, 700))
+  await app!.eval(() => {
+    const input = document.querySelector<HTMLInputElement>('.command-bar .command-input')!
+    input.focus()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: '2', bubbles: true, cancelable: true }))
+  })
+  await waitReady(projectId)
+  assert.match(app!.fakeLog((e) => e.event === 'answer')[0]?.text ?? '', /The user chose: Local disk/)
+
+  const ready = await app!.waitFor(async () => (await app!.texts('.it-card[data-kind="ready"]'))[0], { label: 'ready card' })
+  assert.match(ready, /Added a\.txt/)
+  assert.match(ready, /a\.txt\s*\+1/)
+  assert.match(ready, /typecheck and 3 tests pass/)
+  await shot('tray-ready.png')
 })
