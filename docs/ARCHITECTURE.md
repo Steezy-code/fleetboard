@@ -17,6 +17,8 @@ src/main/                Electron main process
   hooks.ts               receives Claude Code hook events (per-run secret in FB_HOOK_TOKEN)
   localserver.ts         secrets and request checks shared by the local HTTP servers
   remote.ts              the phone Inbox server (off unless enabled in Settings); remote-page.ts is its page
+  fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready
+  plan.ts                links workers to the Lead's plan tasks (by id, number, title, or a clear match)
   cli.ts                 headless one-shot runs of the user's CLI (claude -p streaming) — IPC cli:run
   store.ts               persistence (~/.fleetboard) — IPC store:*
   fsops.ts               dialogs, fs:tree/read/write/..., shell:*

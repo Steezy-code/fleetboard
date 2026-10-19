@@ -71,6 +71,33 @@ test('a goal goes plan → workers in worktrees → merge → review → Ready �
   assert.ok(Object.values(after.members).every((m: any) => m.status === 'closed'))
 })
 
+test('workers show on the plan when the lead names the task by number, by other words, or not at all', async () => {
+  const { projectId } = await team({
+    lead: {
+      tasks: [
+        { title: 'Greeting file', task: 'Put a greeting into the file a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada', ref: '1' },
+        { title: 'Release notes in b.txt', task: 'Write the release notes, in b.txt', owns: ['b.txt'], done_when: 'b.txt exists', name: 'Bo', ref: null },
+        { title: 'Changelog entry', task: 'Write c.txt', owns: ['c.txt'], done_when: 'c.txt exists', name: 'Cy', ref: null }
+      ]
+    }
+  })
+  await waitReady(projectId)
+  const s = await fleet(projectId)
+  const owner = (id: string) => (s.members[id] as any)?.name
+  assert.deepEqual(
+    s.tasks.map((t: any) => [t.title, owner(t.owner), t.status]),
+    [
+      ['Greeting file', 'Ada', 'done'],
+      ['Release notes in b.txt', 'Bo', 'done'],
+      ['Changelog entry', undefined, 'todo']
+    ],
+    'linked by number, by its words; "Write c.txt" names no task, so it is not guessed'
+  )
+  const spawns = toolCalls('fleet_spawn_worker').map((e) => e.result as string)
+  assert.match(spawns[0], /On the plan: "Greeting file"/)
+  assert.match(spawns[2], /not linked to a plan task: call fleet_update_task/, 'the lead is told how to fix it')
+})
+
 test("merging the team's work keeps the user's uncommitted changes", async () => {
   const { sb, repo, projectId } = await team(TWO_WORKERS, 'add the files', { 'README.md': '# demo\n', 'notes.md': 'mine\n' })
   fs.writeFileSync(path.join(repo, 'notes.md'), 'mine, edited while the team worked\n')
