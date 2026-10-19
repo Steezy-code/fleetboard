@@ -7,9 +7,13 @@
 //    PermissionRequest, PostToolUse, Stop) with a JSON payload on stdin, like Claude Code
 //  - speaks MCP over HTTP to the server in --mcp-config (the fleet tools)
 //  - -p: prints a stream-json reply like `claude -p --output-format stream-json`
+//  - keeps conversations like Claude Code: <config>/projects/<cwd>/<id>.jsonl once something is said;
+//    --session-id, --resume <id> and --continue pick one (with the CLI's errors), /clear starts anew
 // What it does is decided by a scenario (JSON in FAKE_CLAUDE_SCENARIO, inline or a file path).
 // Every step is appended to FAKE_CLAUDE_LOG (JSON lines) so tests can check what happened.
+import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 
@@ -17,6 +21,8 @@ import { spawn } from 'node:child_process'
 
 const argv = process.argv.slice(2)
 const opts = { allowed: [], disallowed: [] }
+/** the conversation this run is in */
+let session
 for (let i = 0; i < argv.length; i++) {
   const a = argv[i]
   const val = () => argv[++i]
@@ -34,8 +40,15 @@ for (let i = 0; i < argv.length; i++) {
   else if (a === '--output-format') opts.format = val()
   else if (a === '--allowedTools') opts.allowed.push(...list())
   else if (a === '--disallowedTools') opts.disallowed.push(...list())
-  else if (a === '--continue' || a === '--resume') opts.resumed = true
+  else if (a === '--continue' || a === '-c') opts.cont = true
+  else if (a === '--resume' || a === '-r') opts.resumeId = argv[i + 1] && !argv[i + 1].startsWith('-') ? val() : ''
+  else if (a === '--session-id') opts.sessionId = val()
   else if (a === '--dangerously-skip-permissions') opts.mode = 'bypassPermissions'
+}
+
+if (argv[0] === '--version' || argv[0] === '-v') {
+  process.stdout.write('2.1.0 (Claude Code)\n')
+  process.exit(0)
 }
 
 function readScenario() {
@@ -104,7 +117,7 @@ const settings = (() => {
 
 async function hook(event, payload = {}) {
   const groups = settings.hooks?.[event] ?? []
-  const body = JSON.stringify({ hook_event_name: event, session_id: 'fake', cwd: process.cwd(), permission_mode: opts.mode ?? 'default', ...payload })
+  const body = JSON.stringify({ hook_event_name: event, session_id: session ?? 'fake', cwd: process.cwd(), permission_mode: opts.mode ?? 'default', ...payload })
   for (const g of groups) {
     if (g.matcher && g.matcher !== '*' && payload.tool_name && !new RegExp(g.matcher).test(payload.tool_name)) continue
     for (const h of g.hooks ?? []) {
@@ -121,6 +134,18 @@ async function hook(event, payload = {}) {
   log('hook', { hook: event, tool: payload.tool_name })
 }
 
+// ------------------------------------------------------------------ conversations
+
+const projectsDir = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'))
+const transcriptOf = (id) => path.join(projectsDir, `${id}.jsonl`)
+/** the prompts said in a conversation, or null if it was never saved */
+function history(id) {
+  try {
+    return fs.readFileSync(transcriptOf(id), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l).prompt)
+  } catch {
+    return null
+  }
+}
 // ------------------------------------------------------------------ MCP
 
 const mcpServer = (() => {
@@ -372,8 +397,17 @@ async function soloFlow(prompt) {
 }
 
 async function turn(prompt) {
+  if (prompt === '/clear') {
+    session = crypto.randomUUID()
+    log('clear', { session })
+    transcript('⎿ (no content)')
+    await hook('SessionStart', { source: 'clear' })
+    return draw()
+  }
   state = 'working'
-  log('prompt', { prompt })
+  log('prompt', { prompt, session })
+  fs.mkdirSync(projectsDir, { recursive: true })
+  fs.appendFileSync(transcriptOf(session), JSON.stringify({ type: 'user', sessionId: session, prompt }) + '\n')
   transcript(`❯ ${prompt}`)
   await hook('UserPromptSubmit', { prompt })
   const spinner = setInterval(() => {
@@ -467,7 +501,37 @@ function onKeys(data) {
 
 // ------------------------------------------------------------------ start
 
-log('start', { args: argv, mode: opts.mode, allowed: opts.allowed, resumed: !!opts.resumed, mcp: !!mcpUrl })
+{
+  const fail = (msg) => {
+    log('session-error', { message: msg })
+    process.stderr.write(msg + '\n')
+    process.exit(1)
+  }
+  if (opts.resumeId !== undefined) {
+    if (!opts.resumeId) fail('Error: the session picker needs a person (pass a session id)')
+    if (!history(opts.resumeId)) fail(`No conversation found with session ID: ${opts.resumeId}`)
+    session = opts.resumeId
+  } else if (opts.cont) {
+    const latest = (() => {
+      try {
+        return fs
+          .readdirSync(projectsDir)
+          .filter((f) => f.endsWith('.jsonl'))
+          .map((f) => ({ f, t: fs.statSync(path.join(projectsDir, f)).mtimeMs }))
+          .sort((a, b) => b.t - a.t)[0]?.f
+      } catch {
+        return undefined
+      }
+    })()
+    if (!latest) fail('No conversation found to continue')
+    session = latest.replace(/\.jsonl$/, '')
+  } else if (opts.sessionId) {
+    if (history(opts.sessionId)) fail(`Error: Session ID ${opts.sessionId} is already in use.`)
+    session = opts.sessionId
+  } else session = crypto.randomUUID()
+  opts.resumed = opts.resumeId !== undefined || !!opts.cont
+}
+log('start', { args: argv, mode: opts.mode, allowed: opts.allowed, resumed: !!opts.resumed, mcp: !!mcpUrl, session, history: history(session) ?? [] })
 process.stdin.setRawMode?.(true)
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', onKeys)

@@ -20,6 +20,10 @@ export function wireConsoleEvents() {
     app().setLive(id, false)
     app().setStatus(id, 'exited')
   })
+  // the conversation a console runs under: what reopening the board resumes
+  on('pty:session', (id: string, sessionId: string) => {
+    if (allConsoles().find((c) => c.id === id)?.data.sessionId !== sessionId) app().updateNodeData(id, { sessionId })
+  })
   on('pty:held', (id: string) => {
     const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'That console'
     app().toast(`${name} is asking something, so your message waits until it's answered (see the Inbox).`, 'warn')
@@ -130,6 +134,7 @@ export async function startConsole(node: BoardNode<ConsoleData>, cols: number, r
     cols,
     rows,
     resume,
+    sessionId: node.data.sessionId,
     autoApprove: node.data.autoApprove,
     acceptEdits: node.data.acceptEdits,
     profileId: node.data.profileId,
