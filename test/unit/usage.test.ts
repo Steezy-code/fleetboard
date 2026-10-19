@@ -12,7 +12,7 @@ process.env.FLEETBOARD_HOME = path.join(home, 'fb')
 delete process.env.CLAUDE_CONFIG_DIR
 delete process.env.CODEX_HOME
 const { parseClaude, parseCodex, parseGemini, register } = await import('../../src/main/usage')
-const { ipcMain } = await import('electron')
+const { ipcMain } = await import('../support/electron-stub')
 
 const FIX = path.resolve(import.meta.dirname, '../fixtures/usage')
 const read = (f: string) => fs.readFileSync(path.join(FIX, f), 'utf8')
