@@ -24,7 +24,7 @@ fs.mkdirSync(treesDir, { recursive: true })
 
 let ctx: MainContext
 let port = 0
-/** this run's secret, part of every team console's MCP URL */
+/** this run's secret: team consoles send it as a bearer token to the MCP server */
 const secret = newSecret()
 const states = new Map<string, FleetState>()
 /** console id → project id */
@@ -207,10 +207,10 @@ export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record
   const found = memberOf(req.id)
   if (!found || !port) return null
   const { m, s } = found
-  const url = `http://127.0.0.1:${port}/mcp/${secret}/${m.id}`
-  const env = { MCP_TOOL_TIMEOUT: '600000' }
+  const url = `http://127.0.0.1:${port}/mcp/${m.id}`
+  const env: Record<string, string> = { MCP_TOOL_TIMEOUT: '600000' }
   if (m.agentId === 'claude') {
-    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url } } }, 0o600)
+    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: `Bearer ${secret}` } } } }, 0o600)
     const lead = m.leadId ? s.members[m.leadId] : undefined
     const args = ['--mcp-config', mcpFile(m.id), '--append-system-prompt', m.role === 'lead' ? leadPrompt(m) : workerPrompt(m, lead)]
     if (m.role === 'worker') args.push('--permission-mode', 'acceptEdits')
@@ -220,7 +220,9 @@ export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record
     return { args, env }
   }
   if (m.agentId === 'codex') {
-    const args = ['-c', `mcp_servers.fleet.url="${url}"`]
+    // the token comes from the environment: command lines are visible to every process on the machine
+    const args = ['-c', `mcp_servers.fleet.url="${url}"`, '-c', 'mcp_servers.fleet.bearer_token_env_var="FB_MCP_TOKEN"']
+    env.FB_MCP_TOKEN = secret
     if (m.role === 'worker') args.push('--full-auto')
     return { args, env }
   }
@@ -736,9 +738,10 @@ async function handleRpc(callerId: string, msg: any, signal?: AbortSignal): Prom
 function startServer(): Promise<number> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      const m = /^\/mcp\/([^/?]+)\/([^/?]+)/.exec(req.url ?? '')
+      const m = /^\/mcp\/([^/?]+)\/?(?:\?|$)/.exec(req.url ?? '')
       if (!m) return res.writeHead(404).end()
-      if (!sameSecret(m[1], secret) || refuse(req, port, { json: true })) {
+      const token = /^Bearer (\S+)$/.exec(String(req.headers.authorization ?? ''))?.[1]
+      if (!sameSecret(token, secret) || refuse(req, port, { json: true })) {
         req.resume()
         return res.writeHead(403).end()
       }
@@ -759,9 +762,9 @@ function startServer(): Promise<number> {
         } catch {
           return res.writeHead(400).end()
         }
-        let caller = m[2]
+        let caller = m[1]
         try {
-          caller = decodeURIComponent(m[2])
+          caller = decodeURIComponent(m[1])
         } catch {
           /* use as is */
         }
@@ -769,7 +772,7 @@ function startServer(): Promise<number> {
         const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
         if (hangup.signal.aborted) return
         if (!out.length) return res.writeHead(202).end()
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[2] })
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[1] })
         res.end(JSON.stringify(batch ? out : out[0]))
       })
     })

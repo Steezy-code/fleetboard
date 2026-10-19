@@ -80,8 +80,9 @@ src/renderer/src/
 - **Console state comes from the screen.** Read what a console shows with `ptys.screen(id)` / `pty:prompt`
   and `pty:tail` (rendered text, not the raw stream). Answer a question with `pty:answer` (it re-reads the
   live screen and refuses if the question changed); never type option digits blindly.
-- **Local HTTP servers** take a per-run secret in the URL and check requests with `refuse()` (no browser
-  Origin, Host must be 127.0.0.1/localhost). HTML from repos or models goes through `sanitizeHtml`.
+- **Local HTTP servers** take a per-run secret (hooks: in the URL, from the console's environment; fleet
+  MCP: a bearer token, from a 0600 file for Claude and an env var for Codex, never on a command line) and
+  check requests with `refuse()` (no browser Origin, Host must be 127.0.0.1/localhost). HTML from repos or models goes through `sanitizeHtml`.
 - Verify with `npx tsc --noEmit -p tsconfig.json`, `npm test` and `npm run test:e2e` (see Testing).
 
 ## Testing
