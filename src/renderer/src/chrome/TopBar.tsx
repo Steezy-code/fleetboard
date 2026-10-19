@@ -93,7 +93,12 @@ export function TopBar() {
                     const consoles = w.nodes.filter((n) => n.type === 'console' && live[n.id])
                     if (
                       consoles.length &&
-                      !(await app.confirm({ title: `Close ${w.name}?`, body: `${consoles.length} console(s) keep running until you close them.`, confirm: 'Close workspace' }))
+                      !(await app.confirm({
+                        title: `Close ${w.name}?`,
+                        body: consoles.length === 1 ? 'Its running console is closed with it.' : `Its ${consoles.length} running consoles are closed with it.`,
+                        confirm: 'Close workspace',
+                        danger: true
+                      }))
                     )
                       return
                     for (const c of consoles) invoke('pty:kill', c.id)
