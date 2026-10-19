@@ -12,6 +12,7 @@ import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
 import * as sweep from './sweep'
+import * as goal from './goal'
 import { initFleet } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
@@ -216,7 +217,7 @@ app.whenReady().then(async () => {
   web.setPermissionCheckHandler((_wc, permission, origin) => webPermission(permission, origin))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
-  for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal]) m.register(ctx)
   sweep.register(ctx)
   await initFleet(ctx)
   await remote.register(ctx)
