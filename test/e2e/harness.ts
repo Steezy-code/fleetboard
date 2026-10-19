@@ -102,10 +102,20 @@ class Cdp {
     })
     return new Cdp(ws)
   }
-  send(method: string, params: object = {}): Promise<any> {
+  /** A call that gets no answer (a crashed page never answers) fails after `timeout` instead of hanging the test. */
+  send(method: string, params: object = {}, timeout = 30_000): Promise<any> {
     const id = ++this.id
     this.ws.send(JSON.stringify({ id, method, params }))
-    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }))
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id)
+        reject(new Error(`no answer to ${method} in ${timeout} ms`))
+      }, timeout)
+      this.pending.set(id, {
+        resolve: (v) => (clearTimeout(timer), resolve(v)),
+        reject: (e) => (clearTimeout(timer), reject(e))
+      })
+    })
   }
   close() {
     this.ws.close()
@@ -206,6 +216,12 @@ export class App {
     await cdp.send('Runtime.enable')
     await app.waitFor(() => app.eval(() => !!(window as any).__fleetboard), { label: 'app ready' })
     return app
+  }
+
+  /** Crash the window's page, as running out of memory would (the protocol never answers this). */
+  async crashWindow() {
+    void this.cdp.send('Page.crash', {}, 1000).catch(() => {})
+    await new Promise((r) => setTimeout(r, 500))
   }
 
   /** Run a function in the renderer. It must be self-contained; pass data through `arg`. */
