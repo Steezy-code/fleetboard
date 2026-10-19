@@ -330,3 +330,26 @@ test('the fleet and hook servers refuse requests without the secret, from a brow
   assert.ok(!hooks.includes(secret) && hooks.includes('${FB_HOOK_TOKEN}'))
   assert.ok(app!.fakeLog((e) => e.event === 'hook' && e.hook === 'Stop').length > 0, 'hooks still arrive')
 })
+
+test("a team console's token is good for that console only: a worker cannot call as the Lead", async () => {
+  const { sb, projectId } = await team(TWO_WORKERS)
+  await waitReady(projectId)
+  const s = await fleet(projectId)
+  const members = Object.values(s.members) as any[]
+  const lead = members.find((m) => m.role === 'lead')
+  const worker = members.find((m) => m.role === 'worker')
+  const config = (id: string) => JSON.parse(fs.readFileSync(path.join(sb.fbHome, 'hooks', `mcp-${id}.json`), 'utf8')).mcpServers.fleet
+  const { url: leadUrl, headers: leadHeaders } = config(lead.id)
+  const { headers: workerHeaders } = config(worker.id)
+  const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' }
+  const call = (url: string, headers: Record<string, string>, body: unknown = list) =>
+    fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: typeof body === 'string' ? body : JSON.stringify(body) })
+  assert.equal((await call(leadUrl, leadHeaders)).status, 200, "the Lead's own token")
+  assert.equal((await call(leadUrl, workerHeaders)).status, 403, "a worker's token at the Lead's address")
+  assert.equal((await call(leadUrl.replace(lead.id, encodeURIComponent(lead.id)), workerHeaders)).status, 403, 'nor spelled another way')
+  assert.equal((await call(leadUrl, {})).status, 403, 'no token')
+  // a call too big to be real is refused, and the server goes on
+  const big = await call(leadUrl, leadHeaders, JSON.stringify({ ...list, pad: 'x'.repeat(5 * 1024 * 1024) })).then((r) => r.status, () => 'closed')
+  assert.ok(big === 413 || big === 'closed', String(big))
+  assert.equal((await call(leadUrl, leadHeaders)).status, 200)
+})
