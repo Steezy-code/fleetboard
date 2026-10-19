@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Bot, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
+import { AlertTriangle, Bot, Palette, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
 import { AGENTS } from '@shared/agents'
 import { invoke, on } from '../lib/api'
 import { useApp } from '../state/store'
 import { Modal, Seg, Switch } from '../ui/Modal'
+import { AppearanceSection } from './AppearanceSection'
 
 const VOICES = [
   { id: 'af_heart', label: 'Heart', note: 'US · warm' },
@@ -22,6 +23,7 @@ const STT_MODELS = [
 ]
 const SECTIONS = [
   { id: 'agents', label: 'Agents', icon: Bot },
+  { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'voice', label: 'Voice', icon: Mic },
   { id: 'planner', label: 'Planner', icon: Route },
   { id: 'navigation', label: 'Navigation', icon: Move },
@@ -148,10 +150,10 @@ export default function SettingsPanel({ section }: { section?: string }) {
                   {!installedAgents.some((a) => a.id === settings.defaultAgent) && <option value={settings.defaultAgent}>{settings.defaultAgent} (not installed)</option>}
                 </select>
               </div>
-              <div className="settings-row" style={settings.autoApprove ? { background: 'rgba(244, 63, 94, 0.07)' } : undefined}>
+              <div className="settings-row" style={settings.autoApprove ? { background: 'color-mix(in srgb, var(--danger) 7%, transparent)' } : undefined}>
                 <div className="grow">
                   <div className="row" style={{ gap: 6 }}>
-                    Auto-approve {settings.autoApprove && <span className="pill" style={{ color: 'var(--danger)', borderColor: 'rgba(244,63,94,.5)' }}>on</span>}
+                    Auto-approve {settings.autoApprove && <span className="pill" style={{ color: 'var(--danger)', borderColor: 'color-mix(in srgb, var(--danger) 50%, transparent)' }}>on</span>}
                   </div>
                   <div className="small" style={{ color: settings.autoApprove ? '#fda4af' : 'var(--muted)', lineHeight: 1.45 }}>
                     <AlertTriangle size={11} style={{ verticalAlign: -1 }} /> Agents stop asking before editing files or running commands. Off by default. Applies to consoles
@@ -170,6 +172,8 @@ export default function SettingsPanel({ section }: { section?: string }) {
             </div>
             <CustomAgents />
           </section>
+
+          <AppearanceSection />
 
           {/* ---------- Voice ---------- */}
           <section data-section="voice">

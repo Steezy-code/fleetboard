@@ -151,7 +151,7 @@ function useMentionOptions(query: string | null): MentionOption[] {
       const n = activeWs()!.nodes.filter((x) => x.groupId === g.id).length
       out.push({ key: g.id, token: g.name.replace(/\s+/g, ''), label: g.name, meta: `team · ${n}`, color: ROLE_TINT[g.role], team: true })
     }
-    if (!q || 'everyone'.startsWith(q) || 'all'.startsWith(q)) out.push({ key: '__all', token: 'all', label: 'everyone', meta: 'all consoles here', team: true, color: '#a8a29e' })
+    if (!q || 'everyone'.startsWith(q) || 'all'.startsWith(q)) out.push({ key: '__all', token: 'all', label: 'everyone', meta: 'all consoles here', team: true, color: 'var(--muted)' })
     return out.slice(0, 9)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, sig])

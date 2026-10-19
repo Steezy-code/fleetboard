@@ -10,7 +10,7 @@
   min-width: 360px;
   padding: 11px 12px 9px 14px;
   border-radius: 14px;
-  background: #181513;
+  background: var(--panel);
   border: 1px solid var(--line-2);
   box-shadow: var(--shadow);
   isolation: isolate;
@@ -97,7 +97,7 @@
   background: var(--accent-soft);
 }
 .helm-opt.primary:hover {
-  background: rgba(255, 74, 43, 0.2);
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 .helm-opt.ran {
   opacity: 0.7;
@@ -131,12 +131,12 @@
   background: var(--panel-3);
 }
 .helm-opt.primary .helm-opt-icon {
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
 }
 .helm-opt.ran .helm-opt-icon {
   color: var(--ok);
-  background: rgba(62, 207, 142, 0.12);
+  background: color-mix(in srgb, var(--ok) 12%, transparent);
 }
 .helm-opt-text {
   flex: 1;

@@ -10,30 +10,8 @@ import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
+import { currentTerminalTheme } from '../ui/theme'
 
-const THEME = {
-  background: '#0c0b0a',
-  foreground: '#e9e2da',
-  cursor: '#ff4a2b',
-  cursorAccent: '#0c0b0a',
-  selectionBackground: 'rgba(255,74,43,0.30)',
-  black: '#1c1917',
-  red: '#ff5f4a',
-  green: '#4ade80',
-  yellow: '#f5c06b',
-  blue: '#7aa2ff',
-  magenta: '#d68cff',
-  cyan: '#5fd7d7',
-  white: '#d6cfc7',
-  brightBlack: '#5f5750',
-  brightRed: '#ff7a63',
-  brightGreen: '#86efac',
-  brightYellow: '#fde68a',
-  brightBlue: '#a5c0ff',
-  brightMagenta: '#e9b5ff',
-  brightCyan: '#99f6e4',
-  brightWhite: '#fafaf9'
-}
 
 export const STATUS_LABEL: Record<string, string> = {
   starting: 'starting',
@@ -52,6 +30,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
   const live = useApp((s) => !!s.live[node.id])
   const status = useApp((s) => s.statuses[node.id])
   const fontSize = useApp((s) => s.settings.fontSize)
+  const themeKey = useApp((s) => `${s.settings.theme}|${s.settings.accent}`)
   const [phase, setPhase] = useState<'boot' | 'ask' | 'running' | 'exited'>('boot')
   const agent = agentById(node.data.agentId, useApp.getState().settings.customAgents)
 
@@ -61,7 +40,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       fontFamily: "'JetBrains Mono Variable', 'JetBrains Mono', monospace",
       fontSize,
       lineHeight: 1.15,
-      theme: THEME,
+      theme: currentTerminalTheme(),
       cursorBlink: true,
       allowProposedApi: true,
       scrollback: 8000,
@@ -135,6 +114,9 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       fitRef.current?.fit()
     }
   }, [fontSize])
+  useEffect(() => {
+    if (termRef.current) termRef.current.options.theme = currentTerminalTheme()
+  }, [themeKey])
 
   // The top bar's "Resume all conversations?" answers for every waiting console.
   useEffect(() => {

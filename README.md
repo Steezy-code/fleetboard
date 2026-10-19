@@ -101,6 +101,10 @@ Review comments are watched too (every two minutes): PR comments, review summari
 
 Helm sees all of this. Ask "what needs me?" or "what should I work on?" and it weighs open questions, red CI, unsent review comments and PRs waiting on you (plus the last morning sweep of your other repos), then offers one-click **Fix CI** / **Send the comments** options.
 
+## Themes
+
+Settings › **Appearance** has six themes: **Ember** (the original warm dark), **Midnight** (cool blue-gray), **Synthwave** (violet, hot pink, neon cyan), **Forest** (pine green, amber), **Graphite** (neutral grays, acid lime) and **Paper** (light). Terminals switch palettes with the theme. Pick any **accent color** to use on top of any theme; text on it turns dark or light to stay readable.
+
 ## Navigation (AutoCAD-style by default)
 
 | Input | Action |

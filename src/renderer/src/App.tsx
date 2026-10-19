@@ -18,12 +18,14 @@ import { BoardOverlays } from './board/BoardOverlays'
 import './features'
 import './debug'
 import { Boundary } from './ui/Boundary'
+import { useThemeSync } from './ui/theme'
 
 export function App() {
   const project = useApp((s) => s.project)
   const panel = useApp((s) => s.panel)
   const drawer = useApp((s) => s.drawer)
   const focused = useApp((s) => !!s.focusedNode)
+  useThemeSync()
 
   useEffect(() => {
     useApp.getState().init()

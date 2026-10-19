@@ -230,6 +230,10 @@ export interface Settings {
   helm: boolean
   names: string[]
   customAgents: AgentDef[]
+  /** app theme id (src/shared/themes.ts) */
+  theme: string
+  /** the user's own accent color (#rrggbb), '' for the theme's */
+  accent: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -249,7 +253,9 @@ export const DEFAULT_SETTINGS: Settings = {
     'Maya', 'Rafa', 'Iris', 'Zoe', 'Leo', 'Nova', 'Kai', 'Otto', 'Ada', 'Bex', 'Cy', 'Pip', 'Dax', 'Ren', 'Juno',
     'Milo', 'Ivy', 'Eli', 'Sol', 'Tess', 'Finn', 'Lux', 'Wren', 'Ash'
   ],
-  customAgents: []
+  customAgents: [],
+  theme: 'ember',
+  accent: ''
 }
 
 export interface CliRunRequest {
