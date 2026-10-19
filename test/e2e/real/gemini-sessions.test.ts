@@ -5,10 +5,10 @@
 // Manual run, skipped unless FLEETBOARD_REAL_GEMINI is the gemini binary.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
 import path from 'node:path'
 import { App, makeRepo, makeSandbox } from '../harness'
 import { startMockGemini } from '../../support/mock-responses'
+import { setupGemini } from './gemini-setup'
 
 const GEMINI = process.env.FLEETBOARD_REAL_GEMINI
 
@@ -16,12 +16,7 @@ test('real Gemini: each console resumes its own session; an untouched one starts
   const mock = await startMockGemini()
   const sb = makeSandbox({ fake: false })
   const repo = makeRepo(sb)
-  fs.writeFileSync(path.join(sb.bin, 'gemini'), `#!/bin/sh\nexec "${GEMINI}" "$@"\n`, { mode: 0o755 })
-  fs.appendFileSync(path.join(sb.home, '.bash_profile'), `export GEMINI_API_KEY=mock GOOGLE_GEMINI_BASE_URL=http://127.0.0.1:${mock.port}\n`)
-  const dot = path.join(sb.home, '.gemini')
-  fs.mkdirSync(dot, { recursive: true })
-  fs.writeFileSync(path.join(dot, 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key' } } }))
-  fs.writeFileSync(path.join(dot, 'trustedFolders.json'), JSON.stringify({ [repo]: 'TRUST_FOLDER' }))
+  setupGemini(sb, repo, GEMINI!, mock.port)
 
   let app = await App.launch({ sandbox: sb })
   const nodeData = (id: string) => app.eval((id) => (window as any).__fleetboard.useApp.getState().project.workspaces.flatMap((w: any) => w.nodes).find((n: any) => n.id === id)?.data, id)

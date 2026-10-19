@@ -12,6 +12,7 @@ import { dirs, readJson, writeJsonAtomic } from './paths'
 import { loginEnv } from './env'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
+import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -43,7 +44,7 @@ const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3
 const MAX_WORKERS = 4
 const TASK_STATUSES: FleetTask['status'][] = ['todo', 'doing', 'review', 'done', 'blocked']
 /** CLIs that can be team members: they reach the fleet tools over MCP (see fleetLaunch) */
-const TEAM_AGENTS = ['claude', 'codex']
+const TEAM_AGENTS = ['claude', 'codex', 'gemini']
 const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
@@ -207,7 +208,7 @@ function briefFor(m: FleetMember, lead?: FleetMember) {
 const mcpFile = (id: string) => path.join(dirs.hooks, `mcp-${id}.json`)
 
 /** Extra CLI args/env for a console that belongs to a team. */
-export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record<string, string> } | null {
+export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, string | undefined> = process.env): { args: string[]; env: Record<string, string> } | null {
   const found = memberOf(req.id)
   if (!found || !port) return null
   const { m, s } = found
@@ -234,8 +235,20 @@ export function fleetLaunch(req: PtySpawnRequest): { args: string[]; env: Record
     if (m.role === 'worker') args.push(...(agentById('codex')?.editsArgs ?? []))
     return { args, env }
   }
+  if (m.agentId === 'gemini') {
+    // Gemini takes MCP servers only from settings: a home of its own with the fleet server added
+    env.GEMINI_CLI_HOME = geminiTeamHome(m.id, { url, token: secret }, loginEnvFor)
+    const args: string[] = []
+    if (m.role === 'worker') args.push(...(agentById('gemini')?.editsArgs ?? []))
+    // its worktree is a new folder: trusted for this session when the user trusts the project itself
+    if (m.cwd.startsWith(treesDir) && geminiTrusts(s.projectPath, loginEnvFor)) args.push('--skip-trust')
+    return { args, env }
+  }
   return { args: [], env }
 }
+
+/** Whether a console belongs to a team (its launch arguments come from fleetLaunch). */
+export const isTeamConsole = (id: string) => !!memberOf(id)
 
 // ---------------------------------------------------------------- messaging
 
@@ -437,7 +450,7 @@ const TOOLS: ToolDef[] = [
         task: str('The task, specific and self-contained'),
         owns: strArr('Files or folders this worker may edit; no other worker may own them'),
         done_when: str('A check that proves the task is done, e.g. "npm test passes"'),
-        agent: str('Agent CLI id: claude (default) or codex'),
+        agent: str('Agent CLI id: claude (default), codex or gemini'),
         name: str('Optional worker name'),
         task_ref: str('The plan task this worker does: its id (from fleet_plan), number or title')
       },
@@ -537,7 +550,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
         return fail(`You already have ${MAX_WORKERS} workers running. Wait for reports (fleet_wait) before starting more.`)
       const agentId = String(a.agent ?? '').trim().toLowerCase() || 'claude'
       if (!TEAM_AGENTS.includes(agentId))
-        return fail(`${agentById(agentId)?.name ?? `"${a.agent}"`} cannot join a team: it has no way to reach the fleet tools. Use ${TEAM_AGENTS.join(' or ')}.`)
+        return fail(`${agentById(agentId)?.name ?? `"${a.agent}"`} cannot join a team: it has no way to reach the fleet tools. Use ${TEAM_AGENTS.slice(0, -1).join(', ')} or ${TEAM_AGENTS.at(-1)}.`)
       const id = uid('con')
       const wname = pickName(s, a.name)
       let cwd = m.cwd
@@ -719,6 +732,7 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   ctx.ptys.kill(m.id)
   ctx.emit('fleet:removeConsoles', [m.id])
   await removeWorktree(s.projectPath, m, branch)
+  if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
   changed(s)
 }
 

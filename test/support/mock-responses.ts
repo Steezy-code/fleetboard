@@ -111,7 +111,7 @@ export async function startMockResponses() {
  * conversation began; the CLI's side requests (routing, next speaker) get the JSON they expect.
  */
 export async function startMockGemini() {
-  const requests: { first?: string; last?: string }[] = []
+  const requests: { first?: string; last?: string; tools: string[] }[] = []
   const server = http.createServer((req, res) => {
     let body = ''
     req.on('data', (d) => (body += d))
@@ -134,14 +134,25 @@ export async function startMockGemini() {
         return json({ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP', index: 0 }], usageMetadata })
       }
       // what the user said: Gemini sends its own context (<session_context>…) as a part of the first turn
-      const user = (j.contents ?? [])
+      if (process.env.MOCK_DUMP) fs.appendFileSync(process.env.MOCK_DUMP, body + '\n')
+      const contents: any[] = j.contents ?? []
+      const user = contents
         .filter((c: any) => c.role === 'user')
         .flatMap((c: any) => (c.parts ?? []).map((p: any) => p.text ?? ''))
         .filter((t: string) => t && !/^\s*</.test(t))
-      requests.push({ first: user[0], last: user.at(-1) })
-      const text = `Conversation started with: ${user[0] ?? '(nothing)'}`
+      const tools: string[] = (j.tools ?? []).flatMap((t: any) => (t.functionDeclarations ?? []).map((f: any) => f.name))
+      requests.push({ first: user[0], last: user.at(-1), tools })
+      // a Fleetboard worker brief: write the file it owns, report through the fleet's MCP tool, done
+      const briefAt = contents.findLastIndex((c: any) => c.role === 'user' && (c.parts ?? []).some((p: any) => /Task from .+ You own: /.test(p.text ?? '')))
+      const owns = briefAt >= 0 ? /You own: (.+?)\.(?:\s|$)/.exec(contents[briefAt].parts.map((p: any) => p.text ?? '').join(' '))?.[1]?.split(',')[0]?.trim() : undefined
+      const answered = briefAt >= 0 ? contents.slice(briefAt + 1).flatMap((c: any) => (c.parts ?? []).filter((p: any) => p.functionResponse)).length : 0
+      const report = tools.find((t) => /fleet_report$/.test(t))
+      let part: object = { text: `Conversation started with: ${user[0] ?? '(nothing)'}` }
+      if (owns && answered === 0) part = { functionCall: { name: 'write_file', args: { file_path: owns, content: 'Gemini was here\n' } } }
+      else if (owns && answered === 1 && report) part = { functionCall: { name: report, args: { status: 'done', summary: `Wrote ${owns}.` } } }
+      else if (owns) part = { text: 'Reported to the lead.' }
       res.writeHead(200, { 'content-type': 'text/event-stream' })
-      res.write(`data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [{ text }] }, finishReason: 'STOP', index: 0 }], usageMetadata })}\n\n`)
+      res.write(`data: ${JSON.stringify({ candidates: [{ content: { role: 'model', parts: [part] }, finishReason: 'STOP', index: 0 }], usageMetadata })}\n\n`)
       res.end()
     })
   })
