@@ -1,5 +1,7 @@
 // A minimal OpenAI Responses API (streaming) for driving the real Codex CLI in tests. Each reply says
 // how the conversation began, so a test can tell which conversation a resumed console picked up.
+// "run the command `X`" makes it ask Codex to run X outside the sandbox, which Codex asks the user
+// to approve; once the command's output is back it replies "Done, the command ran." (or was refused).
 import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 
@@ -29,14 +31,27 @@ export async function startMockResponses() {
       }
       const user = said(j.input)
       requests.push({ first: user[0], last: user.at(-1) })
+      const input: any[] = j.input ?? []
+      const lastUser = input.map((i, at) => ({ i, at })).filter(({ i }) => i?.type === 'message' && i.role === 'user' && !/^\s*</.test(textOf(i.content))).at(-1)
+      const result = input.slice((lastUser?.at ?? 0) + 1).find((i) => i?.type === 'function_call_output')
+      const command = /run the command `([^`]+)`/i.exec(lastUser ? textOf(lastUser.i.content) : '')?.[1]
       const id = `resp_${++n}`
-      const text = `Conversation started with: ${user[0] ?? '(nothing)'}`
-      const item = { type: 'message', id: `msg_${n}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }
       const sse = (type: string, data: object) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`)
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
       sse('response.created', { response: { id, object: 'response', status: 'in_progress', output: [] } })
-      sse('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress', content: [] } })
-      sse('response.output_text.delta', { output_index: 0, item_id: item.id, content_index: 0, delta: text })
+      let item: any
+      if (command && !result) {
+        const args = JSON.stringify({ cmd: command, sandbox_permissions: 'require_escalated', justification: 'Do you want me to run this?' })
+        item = { type: 'function_call', id: `fc_${n}`, call_id: `call_${n}`, name: 'exec_command', arguments: args, status: 'completed' }
+        sse('response.output_item.added', { output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } })
+        sse('response.function_call_arguments.delta', { output_index: 0, item_id: item.id, delta: args })
+        sse('response.function_call_arguments.done', { output_index: 0, item_id: item.id, arguments: args })
+      } else {
+        const text = result ? 'Done, the command ran (or was refused).' : `Conversation started with: ${user[0] ?? '(nothing)'}`
+        item = { type: 'message', id: `msg_${n}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text, annotations: [] }] }
+        sse('response.output_item.added', { output_index: 0, item: { ...item, status: 'in_progress', content: [] } })
+        sse('response.output_text.delta', { output_index: 0, item_id: item.id, content_index: 0, delta: text })
+      }
       sse('response.output_item.done', { output_index: 0, item })
       sse('response.completed', {
         response: { id, object: 'response', status: 'completed', output: [item], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 }, output_tokens_details: { reasoning_tokens: 0 } } }
