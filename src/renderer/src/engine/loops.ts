@@ -1,5 +1,5 @@
 import { useApp, allConsoles } from '../state/store'
-import { runCli, uid } from '../lib/api'
+import { invoke, runCli, uid } from '../lib/api'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
 import type { ConsoleStatus } from '@shared/types'
 import { stripAnsi } from '@shared/ansi'
@@ -211,10 +211,13 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
   if (!cwd) return { met: false, note: 'no project' }
   const s = l.stop
   if (s.goalKind === 'command') {
-    const prompt = `Run \`${s.command}\` in this repo. Reply with only PASS if it exits 0, otherwise FAIL.`
-    const { text } = await runCli({ prompt, cwd, allowTools: true }).promise
-    const met = /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
-    return { met, note: met ? `\`${s.command}\` passed` : `\`${s.command}\` failed` }
+    // run by the app itself: its exit code decides (a model asked to run it could also edit the code)
+    const r = await invoke<{ code: number | null; tail: string; timedOut?: boolean; error?: string }>('goal:check', cwd, s.command)
+    const last = r.tail.trim().split('\n').filter((l) => l.trim()).at(-1)?.trim().slice(0, 140)
+    if (r.code === 0) return { met: true, note: `\`${s.command}\` passed` }
+    if (r.error) return { met: false, note: `\`${s.command}\` could not run: ${r.error}` }
+    if (r.timedOut) return { met: false, note: `\`${s.command}\` took too long and was stopped` }
+    return { met: false, note: `\`${s.command}\` failed (exit ${r.code})${last ? `: ${last}` : ''}` }
   }
   const names = new Map(allConsoles().map((c) => [c.id, c.data.name as string]))
   const tails = await Promise.all(consoleIds.slice(0, 6).map(async (id) => `### ${names.get(id) ?? id}\n${(await consoleTail(id, 3000)).trim()}`))

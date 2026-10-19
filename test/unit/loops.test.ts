@@ -116,6 +116,39 @@ test("an output loop matches words a TUI placed with cursor moves (Claude Code's
   loops.setLoopEnabled(l.id, false)
 })
 
+test('a command goal is run by the app, never by a model, and its exit code decides', async () => {
+  const runs: string[][] = []
+  let modelAsked = false
+  ipc.handle('cli:run', () => {
+    modelAsked = true
+    return { code: 0, text: 'PASS' }
+  })
+  let code = 1
+  ipc.handle('goal:check', (cwd: string, command: string) => {
+    runs.push([cwd, command])
+    return { code, tail: code ? 'Tests: 1 failed, 4 passed\n' : 'Tests: 5 passed\n' }
+  })
+  const l = loops.newLoop({ instruction: 'fix the tests', target: { kind: 'pick', ids: ['idle1'] }, stop: { ...loops.DEFAULT_STOP, goal: true, goalKind: 'command', command: 'npm test' } })
+  loops.upsertLoop(l)
+  const settle = async () => {
+    await mock.timers.tick(0)
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+  }
+  loops.runLoopNow(l.id)
+  loops.runLoopNow(l.id)
+  await settle()
+  assert.deepEqual(runs, [['/tmp/p', 'npm test']])
+  assert.equal(loop(l.id).lastCheck?.note, '`npm test` failed (exit 1): Tests: 1 failed, 4 passed')
+  assert.equal(pastes().length, 2, 'not met: it keeps going')
+  code = 0
+  loops.runLoopNow(l.id)
+  await settle()
+  assert.equal(loop(l.id).ended?.reason, 'goal')
+  assert.equal(loop(l.id).ended?.note, '`npm test` passed')
+  assert.equal(pastes().length, 2, 'met: no more sends')
+  assert.equal(modelAsked, false, 'no model was asked')
+})
+
 test('a goal judged met stops the loop before it sends again', async () => {
   ipc.handle('cli:run', () => ({ code: 0, text: 'MET\nAll tests pass now.' }))
   ipc.handle('pty:tail', () => '42 passing')
