@@ -7,7 +7,7 @@ import type { Prompt } from '../../src/shared/prompt'
 const prompts = new Map<string, Prompt | null>()
 async function promptAt(file: string, mark: string) {
   if (!prompts.size) {
-    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast', 'claude-automode.cast', 'gemini-session.cast']) {
+    for (const f of ['claude-session.cast', 'shell-session.cast', 'gemini-first.cast', 'codex-first.cast', 'codex-session.cast', 'claude-automode.cast', 'gemini-session.cast', 'codex-approval.cast']) {
       for (const m of (await replay(loadCast(f))).marks) prompts.set(`${f}|${m.mark}`, m.prompt)
     }
   }
@@ -70,6 +70,20 @@ test('Gemini: shell approval, with the command in a nested frame', async () => {
   const card = approvalFor(p)
   assert.match(card?.detail ?? '', /touch made-by-gemini\.txt/)
   assert.deepEqual(card?.options.map((o) => o.tone), ['allow', 'always', 'deny'])
+})
+
+test('Codex: command approval; the Inbox card shows the command', async () => {
+  const p = await promptAt('codex-approval.cast', 'needs-you: command approval')
+  assert.deepEqual(menu(p), [
+    '* Yes, proceed (y)',
+    "Yes, and don't ask again for commands that start with `touch made-by-codex.txt` (p)",
+    'No, and tell Codex what to do differently (esc)'
+  ])
+  const card = approvalFor(p)
+  assert.match(card?.detail ?? '', /Would you like to run the following command\?/)
+  assert.match(card?.detail ?? '', /\$ touch made-by-codex\.txt/)
+  assert.doesNotMatch(card?.detail ?? '', /please run the command|Press enter/, 'not the conversation above, not key hints')
+  assert.deepEqual(buttons(card), ['Allow once [allow]', 'Always allow `touch made-by-codex.txt` [always]', 'No, and tell Codex what to do differently [deny]'])
 })
 
 test('Codex: options separated by blank lines, with descriptions', async () => {
