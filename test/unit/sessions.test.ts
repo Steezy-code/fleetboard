@@ -1,10 +1,11 @@
 // Whether a CLI saved a conversation under an id: decides between resuming it and starting it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { hasTranscript, newSessionId, validSessionId } from '../../src/main/sessions'
+import { newSessionId, sessionState, validSessionId } from '../../src/main/sessions'
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-sessions-'))
 const put = (rel: string, text = '') => {
@@ -20,32 +21,60 @@ test('ids: only UUIDs, which is what the CLIs accept', () => {
   for (const bad of ['', 'latest', '5', '../../etc/passwd', `${ID} --dangerously-skip-permissions`, `${ID}x`, null, 42]) assert.equal(validSessionId(bad), false, String(bad))
 })
 
-test('Claude Code: <config>/projects/<cwd>/<id>.jsonl, in the default or a profile config dir', () => {
-  assert.equal(hasTranscript('claude', ID, { HOME: home }), false, 'no config dir yet')
+test('Claude Code: a saved conversation (in any project folder, as Claude resumes by id from anywhere)', () => {
+  const st = (id: string, env: Record<string, string> = { HOME: home }) => sessionState('claude', id, env, '/home/me/repo')
+  assert.equal(st(ID), 'free', 'no config dir yet')
   put(`.claude/projects/-home-me-repo/${OTHER}.jsonl`, '{}\n')
-  assert.equal(hasTranscript('claude', ID, { HOME: home }), false)
+  assert.equal(st(ID), 'free', 'nothing said yet: Claude Code has no file, and starting under the id works')
   put(`.claude/projects/-home-me-other-repo/${ID}.jsonl`, '{}\n')
-  assert.equal(hasTranscript('claude', ID, { HOME: home }), true, 'in any project folder (a console may have moved)')
-  assert.equal(hasTranscript('claude', ID, { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), false, 'another config dir')
+  assert.equal(st(ID), 'resumable')
+  assert.equal(st(ID, { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), 'free', 'another config dir (a profile)')
   put(`profile/projects/-x/${OTHER}.jsonl`)
-  assert.equal(hasTranscript('claude', OTHER, { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), true)
-  assert.equal(hasTranscript('claude', '..', { HOME: home }), false)
+  assert.equal(st(OTHER, { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), 'resumable')
+  assert.equal(st('..'), 'free')
 })
 
-test('Gemini CLI: ~/.gemini/tmp/<project>/chats/session-<time>-<id prefix>.jsonl holding the id', () => {
-  assert.equal(hasTranscript('gemini', ID, { HOME: home }), false)
-  put(`.gemini/tmp/demo/chats/session-2026-10-19T07-24-${ID.slice(0, 8)}.jsonl`, JSON.stringify({ sessionId: ID, kind: 'main' }) + '\n')
-  assert.equal(hasTranscript('gemini', ID, { HOME: home }), true)
-  // same 8-character prefix, different conversation
-  put(`.gemini/tmp/demo/chats/session-2026-10-19T07-25-${OTHER.slice(0, 8)}.json`, JSON.stringify({ sessionId: `${OTHER.slice(0, 8)}-0000-4000-8000-000000000000` }))
-  assert.equal(hasTranscript('gemini', OTHER, { HOME: home }), false)
+test('Gemini CLI: resumable once something was said; an untouched session holds its id', () => {
+  const cwd = '/home/me/proj'
+  const hash = crypto.createHash('sha256').update(cwd).digest('hex')
+  const st = (id: string, dir = cwd) => sessionState('gemini', id, { HOME: home }, dir)
+  // the lines Gemini CLI writes (seen in real chats): a header, the context it adds, then the chat
+  const header = (id: string, project = hash) => JSON.stringify({ sessionId: id, projectHash: project, startTime: '2026-10-19T08:32:22.345Z', kind: 'main' })
+  const context = JSON.stringify({ id: 'd049', type: 'user', content: [{ text: '<session_context>\nThis is the Gemini CLI. We are setting up the context for our chat.' }] })
+  const set = JSON.stringify({ $set: { lastUpdated: '2026-10-19T08:32:22.347Z' } })
+  const chat = (id: string, ...lines: string[]) => put(`.gemini/tmp/proj/chats/session-2026-10-19T08-32-${id.slice(0, 8)}.jsonl`, [header(id), ...lines].join('\n') + '\n')
+  assert.equal(st(ID), 'free')
+  chat(ID, context, set)
+  assert.equal(st(ID), 'taken', 'started, nothing said: Gemini will neither resume it nor start under it again')
+  chat(ID, context, set, JSON.stringify({ id: 'u1', type: 'user', content: [{ text: 'say hi' }] }), JSON.stringify({ id: 'g1', type: 'gemini', content: 'Hello', tokens: { input: 5 } }))
+  assert.equal(st(ID), 'resumable')
+  assert.equal(st(ID, '/home/me/elsewhere'), 'free', "another folder's project: Gemini does not look there")
+  // same 8-character prefix, different session
+  put(`.gemini/tmp/proj/chats/session-2026-10-19T07-25-${OTHER.slice(0, 8)}.jsonl`, header(`${OTHER.slice(0, 8)}-0000-4000-8000-000000000000`) + '\n')
+  assert.equal(st(OTHER), 'free')
+  // the older single-JSON chat format
+  const OLD = 'a1d00000-1111-4222-8333-444455556666'
+  put(`.gemini/tmp/proj/chats/session-2025-01-01T00-00-${OLD.slice(0, 8)}.json`, JSON.stringify({ sessionId: OLD, projectHash: hash, messages: [{ type: 'user', content: 'hello' }] }))
+  assert.equal(st(OLD), 'resumable')
   put('.gemini/tmp/notes.txt', 'not a project dir')
-  assert.equal(hasTranscript('gemini', ID, { HOME: home }), true)
+  assert.equal(st(ID), 'resumable')
+  // deleted by a sibling's startup cleanup and written on without its header (seen with the real CLI):
+  // Gemini cannot resume it, and a new id avoids two files for one short id; the user is told
+  const HURT = 'b0b0b0b0-1111-4222-8333-444455556666'
+  put(
+    `.gemini/tmp/proj/chats/session-2026-10-19T08-40-${HURT.slice(0, 8)}.jsonl`,
+    [
+      JSON.stringify({ id: 'bc3b', timestamp: '2026-10-19T08:41:00.565Z', type: 'user', content: [{ text: 'pelican' }] }),
+      JSON.stringify({ $set: { lastUpdated: '2026-10-19T08:41:00.565Z' } }),
+      JSON.stringify({ id: '555e', timestamp: '2026-10-19T08:41:03.595Z', type: 'gemini', content: 'Hello', thoughts: [] })
+    ].join('\n') + '\n'
+  )
+  assert.equal(st(HURT), 'lost')
 })
 
 test('CLIs without ids, and Codex with no sessions yet', () => {
-  assert.equal(hasTranscript('aider', ID, { HOME: home }), false)
-  assert.equal(hasTranscript('codex', ID, { HOME: home }), false)
+  assert.equal(sessionState('aider', ID, { HOME: home }, home), 'free')
+  assert.equal(sessionState('codex', ID, { HOME: home }, home), 'free')
 })
 
 // ---- Codex: no id at start; its session is found after the first turn ----
@@ -77,8 +106,8 @@ test('Codex: a rollout gives its id, folder and first prompt (not the context Co
   const files = fs.readdirSync(codexHome, { recursive: true }).map(String).filter((f) => f.endsWith(`${S1}.jsonl`))
   const s = readCodexSession(path.join(codexHome, files[0]))
   assert.deepEqual(s, { id: S1, cwd: '/work/app', startedAt: T, firstPrompt: 'fix the login bug' })
-  assert.equal(hasTranscript('codex', S1, env), true)
-  assert.equal(hasTranscript('codex', S2, env), false)
+  assert.equal(sessionState('codex', S1, env, '/work/app'), 'resumable')
+  assert.equal(sessionState('codex', S2, env, '/work/app'), 'free')
 })
 
 test('Codex: the console whose first prompt is on its screen gets the session', () => {

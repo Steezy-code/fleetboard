@@ -12,11 +12,20 @@ export const validSessionId = (id: unknown): id is string => typeof id === 'stri
 export const newSessionId = () => crypto.randomUUID()
 
 /**
- * Whether the CLI has saved a conversation under this id (it does once something was said). Resuming
- * an id it never saved fails, and so does starting a new conversation under an id it already has.
+ * What the CLI has under this id, for a console in `cwd`:
+ *  - resumable: a conversation to pick up (--resume <id>)
+ *  - taken: the id is in use but there is nothing to resume (Gemini saves a session as soon as it
+ *    starts); resuming it fails and so does starting under it again: the console needs a new id
+ *  - free: nothing yet (Claude Code saves a conversation once something was said); start under it
+ *  - lost: the CLI had a conversation under it but can no longer resume it (see Gemini below); a new
+ *    id, and the user is told
+ * Checked against the real CLIs: each refuses to resume what is not resumable, and to start under a
+ * taken id ("already in use" / "already exists").
  */
-export function hasTranscript(agentId: string, id: string, env: Record<string, string | undefined>): boolean {
-  if (!validSessionId(id)) return false
+export type SessionState = 'resumable' | 'taken' | 'free' | 'lost'
+
+export function sessionState(agentId: string, id: string, env: Record<string, string | undefined>, cwd: string): SessionState {
+  if (!validSessionId(id)) return 'free'
   const home = env.HOME || os.homedir()
   const dirs = (p: string) => {
     try {
@@ -26,27 +35,66 @@ export function hasTranscript(agentId: string, id: string, env: Record<string, s
     }
   }
   if (agentId === 'claude') {
-    // <config>/projects/<the cwd, encoded>/<id>.jsonl
+    // <config>/projects/<the cwd, encoded>/<id>.jsonl; Claude Code resumes an id from any folder
     const root = path.join(env.CLAUDE_CONFIG_DIR || path.join(home, '.claude'), 'projects')
-    return dirs(root).some((d) => fs.existsSync(path.join(root, d, `${id}.jsonl`)))
+    return dirs(root).some((d) => fs.existsSync(path.join(root, d, `${id}.jsonl`))) ? 'resumable' : 'free'
   }
   if (agentId === 'gemini') {
-    // ~/.gemini/tmp/<project>/chats/session-<time>-<first 8 of the id>.json(l), which records the full id
+    // ~/.gemini/tmp/<project>/chats/session-<time>-<first 8 of the id>.jsonl (older: .json). Gemini looks
+    // only in the folder's own project, which the file records as sha256(folder)
     const root = path.join(home, '.gemini', 'tmp')
+    const project = crypto.createHash('sha256').update(path.resolve(cwd)).digest('hex')
+    let lost = false
     for (const d of dirs(root)) {
       const chats = path.join(root, d, 'chats')
       for (const f of dirs(chats)) {
         if (!f.includes(id.slice(0, 8))) continue
-        try {
-          if (fs.readFileSync(path.join(chats, f), 'utf8').includes(id)) return true
-        } catch {
-          /* unreadable */
-        }
+        const chat = readGeminiChat(path.join(chats, f))
+        // a file without its header: Gemini deletes a session that has nothing said yet when another
+        // Gemini starts in the same project, even a running one, which then writes on without a header.
+        // Gemini cannot resume that; a new id keeps clear of it
+        if (chat && chat.sessionId === undefined && chat.said) lost = true
+        if (chat?.sessionId !== id || (chat.projectHash && chat.projectHash !== project)) continue
+        return chat.said ? 'resumable' : 'taken'
       }
     }
+    return lost ? 'lost' : 'free'
   }
-  if (agentId === 'codex') return hasCodexSession(env, id)
-  return false
+  if (agentId === 'codex') return hasCodexSession(env, id) ? 'resumable' : 'free'
+  return 'free'
+}
+
+/** A Gemini chat file's id and project, and whether anything was said in it. */
+function readGeminiChat(file: string): { sessionId?: string; projectHash?: string; said: boolean } | null {
+  let text: string
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+  const records: any[] = []
+  if (file.endsWith('.jsonl')) {
+    for (const line of text.split('\n')) {
+      try {
+        records.push(JSON.parse(line))
+      } catch {
+        /* partial line */
+      }
+    }
+  } else {
+    try {
+      const doc = JSON.parse(text)
+      records.push(doc, ...(Array.isArray(doc?.messages) ? doc.messages : []))
+    } catch {
+      return null
+    }
+  }
+  const head = records.find((r) => r && typeof r.sessionId === 'string' && typeof r.type !== 'string')
+  // the user's words or a reply; not the session context Gemini adds by itself
+  const said = records.some(
+    (r) => r?.type === 'gemini' || (r?.type === 'user' && !/^\s*<session_context>/.test(Array.isArray(r.content) ? r.content.map((c: any) => c?.text ?? '').join('') : String(r.content ?? '')))
+  )
+  return { sessionId: head?.sessionId, projectHash: head?.projectHash, said }
 }
 
 // ---------------------------------------------------------------- Codex

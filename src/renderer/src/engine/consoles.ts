@@ -25,6 +25,10 @@ export function wireConsoleEvents() {
     const next = sessionId || undefined
     if (allConsoles().find((c) => c.id === id)?.data.sessionId !== next) app().updateNodeData(id, { sessionId: next })
   })
+  on('pty:lostSession', (id: string) => {
+    const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'A console'
+    app().toast(`${name}'s last conversation could not be resumed (its CLI no longer has it), so it started a new one.`, 'warn')
+  })
   on('pty:held', (id: string) => {
     const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'That console'
     app().toast(`${name} is asking something, so your message waits until it's answered (see the Inbox).`, 'warn')

@@ -3,7 +3,7 @@ import type { WebContents } from 'electron'
 import type { ConsoleStatus, PtyInfo, PtySpawnRequest, Settings } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { loginEnv, shellPath, which } from './env'
-import { findCodexSession, hasTranscript, newSessionId, validSessionId } from './sessions'
+import { findCodexSession, newSessionId, sessionState, validSessionId } from './sessions'
 import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
 import { fleetLaunch } from './fleet'
@@ -77,6 +77,8 @@ export class PtyManager {
     let file: string
     let args: string[] = []
     let sessionId: string | undefined
+    let notice = ''
+    let lost = false
     if (req.command) {
       // a console started for one command (dev server, watcher); drop into a shell when it ends
       file = shellPath()
@@ -90,16 +92,20 @@ export class PtyManager {
       if (agent.session) {
         // this console's own conversation: resume it if the CLI saved it, else start it under its id
         const known = validSessionId(req.sessionId) ? req.sessionId : undefined
-        if (req.resume && known && hasTranscript(agent.id, known, env)) {
+        const state = known ? sessionState(agent.id, known, env, req.cwd) : 'free'
+        if (req.resume && known && state === 'resumable') {
           sessionId = known
           args.push(...agent.session.resume(known))
         } else if (req.resume && !known && agent.resumeArgs) {
           // a console saved before conversations had ids: the CLI picks (Claude's hook reports which)
           args.push(...agent.resumeArgs)
         } else if (agent.session.start) {
-          sessionId = req.resume && known ? known : newSessionId()
+          // nothing said yet: start again under the same id, unless the CLI already holds it
+          sessionId = req.resume && known && state === 'free' ? known : newSessionId()
           args.push(...agent.session.start(sessionId))
         }
+        if (req.resume && known && state !== 'resumable') notice = `\x1b[2mNo saved conversation to pick up: starting a new one.\x1b[0m\r\n`
+        if (req.resume && known && state === 'lost') lost = true
         // else a new conversation whose id the CLI picks: found after its first turn
       } else if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
@@ -142,6 +148,11 @@ export class PtyManager {
       outputAt: startedAt
     }
     this.sessions.set(req.id, s)
+    if (notice) {
+      s.buffer += notice
+      this.emit('pty:data', req.id, notice)
+    }
+    if (lost) this.emit('pty:lostSession', req.id)
     // '' forgets the conversation a console had: it was started fresh, its new id is not known yet
     if (agent?.session && !req.command) this.emit('pty:session', req.id, sessionId ?? '')
     for (const l of this.spawnListeners) {
@@ -445,10 +456,23 @@ export class PtyManager {
     return () => this.exitListeners.delete(listener)
   }
 
-  dispose() {
+  /**
+   * End every console (the app is quitting). Like closing a terminal: SIGHUP to each console's process
+   * group; then SIGKILL for whatever is still running, since some CLIs ignore SIGHUP (Gemini CLI does)
+   * and would outlive the app.
+   */
+  async dispose(graceMs = 600): Promise<void> {
     this.disposing = true
     clearInterval(this.tick)
-    for (const id of [...this.sessions.keys()]) this.kill(id)
+    const live = [...this.sessions.values()]
+    for (const s of live) {
+      if (s.tracker.paused) this.signal(s, 'SIGCONT')
+      this.signal(s, 'SIGHUP')
+    }
+    const running = () => live.filter((s) => this.sessions.get(s.id) === s)
+    const until = Date.now() + graceMs
+    while (running().length && Date.now() < until) await new Promise((r) => setTimeout(r, 50))
+    for (const s of running()) this.signal(s, 'SIGKILL')
   }
 
   get size() {

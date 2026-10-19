@@ -122,9 +122,9 @@ function registerCore() {
   ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
 
-  ipcMain.handle('app:quit', () => {
+  ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
-    ptys.dispose()
+    await ptys.dispose()
     // the board is already saved; don't let a slow child process keep the app alive
     win?.destroy()
     win = null
@@ -190,7 +190,7 @@ app.whenReady().then(async () => {
   createWindow()
 })
 
-app.on('window-all-closed', () => {
-  ptys.dispose()
+app.on('window-all-closed', async () => {
+  await ptys.dispose()
   app.quit()
 })
