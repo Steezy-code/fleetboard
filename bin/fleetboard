@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Launch Fleetboard (builds once if needed). Pass --rebuild to force a fresh build.
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+if [[ "${1:-}" == "--rebuild" || ! -f out/main/index.js ]]; then
+  [[ "${1:-}" == "--rebuild" ]] && shift
+  npx electron-vite build >/dev/null
+fi
+exec ./node_modules/.bin/electron . "$@"

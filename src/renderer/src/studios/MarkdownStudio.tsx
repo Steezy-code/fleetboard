@@ -1,0 +1,472 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BookOpenText, Check, ChevronRight, FileDown, LayoutDashboard, Loader2, Plus, RefreshCw, Search, X } from 'lucide-react'
+import { Modal, Seg } from '../ui/Modal'
+import { invoke } from '../lib/api'
+import { useApp } from '../state/store'
+import { FileTree, ancestors, flattenFiles, type Creating, type TreeEntry } from '../workbench/FileTree'
+import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
+import { extractLinks, firstHeading, handleMdClick, isMarkdownPath, renderMarkdown } from '../workbench/markdown'
+import { exportMarkdownPdf } from '../workbench/pdf'
+import { baseName, dirname, joinPath, relativeTo, stripExt } from '../workbench/paths'
+import type { FileStat } from '../workbench/useFileText'
+
+type Mode = 'reading' | 'source' | 'graph'
+type SaveState = 'saved' | 'dirty' | 'saving' | 'error'
+
+const MD_EXT = ['.md', '.mdx']
+const MAX_NOTES = 800
+const toast = (t: string, tone?: 'info' | 'warn' | 'error' | 'ok') => useApp.getState().toast(t, tone)
+
+interface VaultIndex {
+  set: Set<string>
+  byRel: Map<string, string>
+  byName: Map<string, string[]>
+}
+
+function buildIndex(paths: string[], root: string): VaultIndex {
+  const byRel = new Map<string, string>()
+  const byName = new Map<string, string[]>()
+  for (const p of paths) {
+    byRel.set(stripExt(relativeTo(root, p)).toLowerCase(), p)
+    const n = stripExt(baseName(p)).toLowerCase()
+    byName.set(n, [...(byName.get(n) ?? []), p])
+  }
+  return { set: new Set(paths), byRel, byName }
+}
+
+function resolveWiki(ix: VaultIndex, target: string, from: string | null): string | null {
+  const t = target.replace(/#.*$/, '').trim().replace(/\.(md|mdx)$/i, '').toLowerCase()
+  if (!t) return null
+  if (ix.byRel.has(t)) return ix.byRel.get(t)!
+  if (t.includes('/')) {
+    for (const [rel, p] of ix.byRel) if (rel.endsWith('/' + t)) return p
+  }
+  const hits = ix.byName.get(baseName(t))
+  if (!hits?.length) return null
+  if (from) {
+    const d = dirname(from)
+    const same = hits.find((h) => dirname(h) === d)
+    if (same) return same
+  }
+  return hits[0]
+}
+
+function resolveFile(ix: VaultIndex, href: string, from: string, root: string): string | null {
+  const abs = href.startsWith('/') ? (ix.set.has(href) ? href : joinPath(root, href)) : joinPath(dirname(from), href)
+  return ix.set.has(abs) ? abs : null
+}
+
+/** Obsidian-style vault over the project's markdown: tree, Reading / Source / Graph, autosave, PDF, Add to Board. */
+export default function MarkdownStudio(props: { path?: string }) {
+  const project = useApp((s) => s.project)
+  const root = project?.path ?? ''
+  const [tree, setTree] = useState<TreeEntry[] | null>(null)
+  const [notes, setNotes] = useState<Map<string, string>>(() => new Map())
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const [query, setQuery] = useState('')
+  const [current, setCurrent] = useState<string | null>(null)
+  const [text, setText] = useState('')
+  const [loaded, setLoaded] = useState(false)
+  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem('fb.md.mode') as Mode) || 'reading')
+  const [save, setSave] = useState<SaveState>('saved')
+  const [creating, setCreating] = useState<Creating | null>(null)
+  const [exporting, setExporting] = useState(false)
+
+  const saveTimer = useRef<number>(undefined)
+  const pending = useRef<{ path: string; text: string } | null>(null)
+  const mtimes = useRef(new Map<string, number>())
+  const currentRef = useRef<string | null>(null)
+  currentRef.current = current
+  const readingRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => localStorage.setItem('fb.md.mode', mode), [mode])
+
+  const paths = useMemo(() => (tree ? flattenFiles(tree).map((f) => f.path).filter(isMarkdownPath) : []), [tree])
+  const ix = useMemo(() => buildIndex(paths, root), [paths, root])
+
+  // ---------- loading ----------
+  const loadTree = useCallback(async () => {
+    if (!root) return []
+    const t = await invoke<TreeEntry[]>('fs:tree', root, 8, MD_EXT).catch(() => [] as TreeEntry[])
+    setTree(t)
+    return t
+  }, [root])
+
+  const loadAll = useCallback(async (t: TreeEntry[]) => {
+    const list = flattenFiles(t).map((f) => f.path).filter(isMarkdownPath).slice(0, MAX_NOTES)
+    const entries = await Promise.all(
+      list.map(async (p) => {
+        try {
+          return [p, await invoke<string>('fs:read', p)] as const
+        } catch {
+          return [p, ''] as const
+        }
+      })
+    )
+    setNotes((prev) => {
+      const next = new Map(entries)
+      // never clobber the note being edited with a stale disk read
+      const pend = pending.current
+      if (pend && next.has(pend.path)) next.set(pend.path, pend.text)
+      for (const [k, v] of prev) if (!next.has(k) && list.includes(k)) next.set(k, v)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    loadTree().then((t) => {
+      setLoaded(true)
+      loadAll(t)
+    })
+  }, [loadTree, loadAll])
+
+  // ---------- saving ----------
+  const flush = useCallback(async () => {
+    window.clearTimeout(saveTimer.current)
+    const p = pending.current
+    if (!p) return
+    pending.current = null
+    setSave('saving')
+    try {
+      await invoke('fs:write', p.path, p.text)
+      const st = await invoke<FileStat | null>('fs:stat', p.path)
+      if (st) mtimes.current.set(p.path, st.mtime)
+      if (!pending.current) setSave('saved')
+    } catch (e: any) {
+      setSave('error')
+      toast(`Could not save ${baseName(p.path)}: ${e?.message ?? e}`, 'error')
+    }
+  }, [])
+
+  useEffect(() => () => void flush(), [flush])
+
+  function edit(v: string) {
+    if (!current) return
+    setText(v)
+    setNotes((m) => new Map(m).set(current, v))
+    pending.current = { path: current, text: v }
+    setSave('dirty')
+    window.clearTimeout(saveTimer.current)
+    saveTimer.current = window.setTimeout(flush, 600)
+  }
+
+  // ---------- navigation ----------
+  const open = useCallback(
+    async (path: string, nextMode?: Mode) => {
+      await flush()
+      setCreating(null)
+      setExpanded((s) => new Set([...s, ...ancestors(root, path)]))
+      setCurrent(path)
+      if (nextMode) setMode(nextMode)
+      const cached = notes.get(path)
+      if (cached != null) setText(cached)
+      try {
+        const [st, fresh] = await Promise.all([invoke<FileStat | null>('fs:stat', path), invoke<string>('fs:read', path)])
+        if (st) mtimes.current.set(path, st.mtime)
+        if (currentRef.current === path) setText(fresh)
+        setNotes((m) => new Map(m).set(path, fresh))
+      } catch (e: any) {
+        if (cached == null) setText('')
+        toast(`Could not open ${baseName(path)}`, 'error')
+      }
+      setSave('saved')
+      readingRef.current?.scrollTo({ top: 0 })
+    },
+    [flush, notes, root]
+  )
+
+  // first note: requested path, else README, else the first one
+  useEffect(() => {
+    if (!loaded || current) return
+    if (props.path) {
+      open(props.path)
+      return
+    }
+    const pick = paths.find((p) => /^readme\.mdx?$/i.test(relativeTo(root, p))) ?? paths.find((p) => dirname(p) === root) ?? paths[0]
+    if (pick) open(pick)
+  }, [loaded]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // pick up edits made outside (agents writing docs) while we have nothing pending
+  useEffect(() => {
+    if (!current) return
+    const id = window.setInterval(async () => {
+      const p = currentRef.current
+      if (!p || pending.current || document.visibilityState !== 'visible') return
+      const st = await invoke<FileStat | null>('fs:stat', p).catch(() => null)
+      if (!st || st.mtime === mtimes.current.get(p)) return
+      mtimes.current.set(p, st.mtime)
+      const fresh = await invoke<string>('fs:read', p).catch(() => null)
+      if (fresh == null || pending.current || currentRef.current !== p) return
+      setText(fresh)
+      setNotes((m) => new Map(m).set(p, fresh))
+    }, 3000)
+    return () => window.clearInterval(id)
+  }, [current])
+
+  async function createNote(name: string, dir?: string) {
+    const c = creating
+    setCreating(null)
+    const target = dir ?? c?.dir ?? root
+    const clean = name.replace(/[\\:*?"<>|]/g, '-').trim()
+    if (!clean) return
+    const file = /\.(md|mdx)$/i.test(clean) ? clean : clean + '.md'
+    const path = joinPath(target, file)
+    if (!path.startsWith(root + '/')) return toast('Stay inside the project folder', 'warn')
+    if (await invoke<boolean>('fs:exists', path)) return open(path)
+    try {
+      await invoke('fs:write', path, `# ${stripExt(baseName(file))}\n\n`)
+      const t = await loadTree()
+      loadAll(t)
+      await open(path, 'source')
+      toast(`Created ${relativeTo(root, path)}`, 'ok')
+    } catch (e: any) {
+      toast(String(e?.message ?? e), 'error')
+    }
+  }
+
+  // ---------- links ----------
+  const onWiki = (target: string) => {
+    const hit = resolveWiki(ix, target, current)
+    if (hit) return open(hit, mode === 'graph' ? 'reading' : undefined)
+    const name = target.replace(/#.*$/, '').trim()
+    if (name) createNote(name.split('/').pop()!, current ? dirname(current) : root)
+  }
+
+  const onFile = (abs: string) => {
+    if (isMarkdownPath(abs)) {
+      if (ix.set.has(abs)) open(abs)
+      else toast(`${relativeTo(root, abs)} does not exist`, 'warn')
+    } else invoke('shell:openPath', abs)
+  }
+
+  const html = useMemo(
+    () => (current && mode === 'reading' ? renderMarkdown(text, { baseDir: dirname(current), wikiExists: (t) => !!resolveWiki(ix, t, current) }) : ''),
+    [text, current, mode, ix]
+  )
+
+  const graph = useMemo(() => {
+    if (mode !== 'graph') return { nodes: [] as GraphNode[], edges: [] as [string, string][] }
+    const nodes = paths.map((p) => ({ id: p, label: stripExt(baseName(p)) }))
+    const edges: [string, string][] = []
+    for (const p of paths) {
+      const src = notes.get(p)
+      if (!src) continue
+      const { wiki, files } = extractLinks(src)
+      for (const w of wiki) {
+        const t = resolveWiki(ix, w, p)
+        if (t && t !== p) edges.push([p, t])
+      }
+      for (const f of files) {
+        const t = resolveFile(ix, f, p, root)
+        if (t && t !== p) edges.push([p, t])
+      }
+    }
+    return { nodes, edges }
+  }, [mode, paths, notes, ix, root])
+
+  const contentMatch = useCallback(
+    (p: string) => {
+      const q = query.trim().toLowerCase()
+      return q.length > 2 && !!notes.get(p)?.toLowerCase().includes(q)
+    },
+    [notes, query]
+  )
+
+  const title = current ? firstHeading(text) || stripExt(baseName(current)) : ''
+  const rel = current ? relativeTo(root, current) : ''
+  const crumbs = rel ? rel.split('/') : []
+  const words = useMemo(() => (text.match(/\S+/g) ?? []).length, [text])
+
+  function addToBoard() {
+    if (!current) return
+    flush()
+    const app = useApp.getState()
+    const id = app.addNode({ type: 'doc', title, data: { path: current } })
+    app.closePanel()
+    app.setSelection([id])
+    toast(`Added ${title} to the board`, 'ok')
+  }
+
+  async function exportPdf() {
+    if (!current) return
+    await flush()
+    setExporting(true)
+    await exportMarkdownPdf(text, title, { defaultDir: dirname(current), fileName: stripExt(baseName(current)) })
+    setExporting(false)
+  }
+
+  return (
+    <Modal
+      title="Markdown"
+      sub={project?.name}
+      icon={<BookOpenText size={17} />}
+      width="min(1200px, 94vw)"
+      height="86vh"
+      bare
+      onClose={() => {
+        flush()
+        useApp.getState().closePanel()
+      }}
+    >
+      <div className="wbs">
+        <aside className="wbs-side">
+          <div className="wbs-side-head">
+            <div className="wbs-search">
+              <Search size={13} className="dim" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${paths.length} notes`} />
+              {query && (
+                <button className="icon-btn sm" onClick={() => setQuery('')}>
+                  <X size={12} />
+                </button>
+              )}
+            </div>
+            <button
+              className="icon-btn sm"
+              title="Refresh"
+              onClick={async () => {
+                const t = await loadTree()
+                loadAll(t)
+              }}
+            >
+              <RefreshCw size={13} />
+            </button>
+            <button
+              className="icon-btn sm wb-accent-btn"
+              title="New note"
+              onClick={() => {
+                setQuery('')
+                const dir = current ? dirname(current) : root
+                if (dir !== root) setExpanded((s) => new Set([...s, dir, ...ancestors(root, dir + '/x')]))
+                setCreating({ dir, kind: 'file' })
+              }}
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <div className="wbs-tree scrollable">
+            {!loaded ? (
+              <div className="ftree-none">
+                <Loader2 size={14} className="spin" />
+              </div>
+            ) : paths.length === 0 && !creating ? (
+              <div className="wbs-none">
+                <div className="dim">No markdown files in this project yet.</div>
+                <button className="btn sm" onClick={() => setCreating({ dir: root, kind: 'file' })}>
+                  <Plus size={12} /> New note
+                </button>
+              </div>
+            ) : (
+              <FileTree
+                entries={tree ?? []}
+                root={root}
+                active={current}
+                query={query}
+                expanded={expanded}
+                onToggle={(d) =>
+                  setExpanded((s) => {
+                    const n = new Set(s)
+                    if (n.has(d)) n.delete(d)
+                    else n.add(d)
+                    return n
+                  })
+                }
+                onOpen={(p) => open(p, mode === 'graph' ? 'reading' : undefined)}
+                hideExt
+                extraMatch={contentMatch}
+                creating={creating}
+                onCreate={(n) => createNote(n)}
+                onCancelCreate={() => setCreating(null)}
+              />
+            )}
+          </div>
+        </aside>
+
+        <section className="wbs-main">
+          <div className="wbs-bar">
+            <div className="wb-crumbs grow" title={current ?? ''}>
+              {crumbs.length === 0 && <span className="dim">{mode === 'graph' ? 'Graph of all notes' : 'No note open'}</span>}
+              {crumbs.map((c, i) => (
+                <span key={i} className="row" style={{ gap: 4 }}>
+                  {i > 0 && <ChevronRight size={11} className="dim" />}
+                  <span className={i === crumbs.length - 1 ? 'wb-crumb-last' : 'wb-crumb'}>{i === crumbs.length - 1 ? stripExt(c) : c}</span>
+                </span>
+              ))}
+              {current && mode === 'source' && (
+                <span className={`wb-save-state ${save}`}>
+                  {save === 'saving' ? (
+                    <>
+                      <Loader2 size={11} className="spin" /> Saving…
+                    </>
+                  ) : save === 'dirty' ? (
+                    'Editing…'
+                  ) : save === 'error' ? (
+                    'Not saved'
+                  ) : (
+                    <>
+                      <Check size={11} /> Saved
+                    </>
+                  )}
+                </span>
+              )}
+            </div>
+            <Seg<Mode>
+              value={mode}
+              onChange={(m) => {
+                if (m !== 'source') flush()
+                setMode(m)
+              }}
+              options={[
+                { value: 'reading', label: 'Reading' },
+                { value: 'source', label: 'Source' },
+                { value: 'graph', label: 'Graph' }
+              ]}
+            />
+            <button className="btn sm" onClick={addToBoard} disabled={!current} title="Place this note on the board as a document card">
+              <LayoutDashboard size={13} /> Add to Board
+            </button>
+            <button className="btn sm primary" onClick={exportPdf} disabled={!current || exporting}>
+              {exporting ? <Loader2 size={13} className="spin" /> : <FileDown size={13} />} Export PDF
+            </button>
+          </div>
+
+          <div className="wbs-editor">
+            {mode === 'graph' ? (
+              paths.length ? (
+                <LinkGraph nodes={graph.nodes} edges={graph.edges} current={current} onOpen={(p) => open(p, 'reading')} />
+              ) : (
+                <div className="empty">No notes to graph yet</div>
+              )
+            ) : !current ? (
+              <div className="empty">
+                <BookOpenText size={28} className="dim" />
+                <div>{loaded ? 'Pick a note, or create one with +' : 'Loading vault…'}</div>
+              </div>
+            ) : mode === 'source' ? (
+              <textarea
+                key={current}
+                className="wb-md-source scrollable"
+                value={text}
+                spellCheck={false}
+                onChange={(e) => edit(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                    e.preventDefault()
+                    flush()
+                  }
+                }}
+                autoFocus
+              />
+            ) : (
+              <div className="wb-md-reading scrollable" ref={readingRef}>
+                <div className="md wb-md-page" onClick={(e) => handleMdClick(e, { baseDir: dirname(current), onWiki, onFile })} dangerouslySetInnerHTML={{ __html: html }} />
+                <div className="wb-md-foot dim small">
+                  {words.toLocaleString()} words · {rel}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      </div>
+    </Modal>
+  )
+}

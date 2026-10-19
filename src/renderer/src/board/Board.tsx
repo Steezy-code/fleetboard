@@ -1,0 +1,398 @@
+import { useEffect, useRef, useState } from 'react'
+import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM } from '../state/store'
+import { NodeFrame, removeWithHooks } from './NodeFrame'
+import { GroupFrame } from './GroupFrame'
+import { Wires } from './Wires'
+import { InkLayer } from './InkLayer'
+import { intersects } from './geometry'
+import { fileUrl, invoke } from '../lib/api'
+
+const within = (box: { x: number; y: number; w: number; h: number }, r: { x: number; y: number; w: number; h: number }) =>
+  r.x >= box.x && r.y >= box.y && r.x + r.w <= box.x + box.w && r.y + r.h <= box.y + box.h
+
+/** Zoom Object: fit the current selection. */
+export function zoomToSelection() {
+  const app = useApp.getState()
+  const ws = activeWs()
+  if (!ws) return
+  const items = [...ws.nodes, ...ws.groups, ...ws.ink].filter((i) => app.selection.includes(i.id))
+  if (!items.length) return app.toast('Select something to zoom to')
+  const l = Math.min(...items.map((b) => b.x))
+  const t = Math.min(...items.map((b) => b.y))
+  const r = Math.max(...items.map((b) => b.x + b.w))
+  const b = Math.max(...items.map((b) => b.y + b.h))
+  app.zoomToRect({ x: l, y: t, w: r - l, h: b - t }, 40, 1.4)
+}
+
+const isTyping = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null
+  return !!el?.closest?.('input, textarea, select, [contenteditable="true"], .xterm, [data-terminal], webview')
+}
+
+export function Board() {
+  const ref = useRef<HTMLDivElement>(null)
+  const project = useApp((s) => s.project)
+  const ws = project?.workspaces.find((w) => w.id === project.activeWorkspaceId)
+  const selection = useApp((s) => s.selection)
+  const focusedNode = useApp((s) => s.focusedNode)
+  const tool = useApp((s) => s.tool)
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number; mode: 'window' | 'crossing' | 'zoom' } | null>(null)
+  const [panning, setPanning] = useState(false)
+  const settingsNav = useApp((s) => s.settings.navigation)
+  // AutoCAD-style command line: 'zoom' waits for E/P/W/O, 'window' waits for a drag
+  const [cmd, setCmdState] = useState<'zoom' | 'window' | null>(null)
+  const cmdRef = useRef<typeof cmd>(null)
+  const setCmd = (c: typeof cmd | ((c: typeof cmd) => typeof cmd)) => {
+    const next = typeof c === 'function' ? c(cmdRef.current) : c
+    cmdRef.current = next
+    setCmdState(next)
+  }
+
+  // viewport size
+  useEffect(() => {
+    const el = ref.current!
+    const ro = new ResizeObserver(() => useApp.setState({ viewport: { w: el.clientWidth, h: el.clientHeight } }))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Wheel. CAD navigation (default, like AutoCAD): the wheel zooms at the cursor, Shift+wheel pans
+  // sideways, Alt+wheel pans up/down. Trackpad navigation: the wheel pans, Ctrl+wheel/pinch zooms.
+  // Content that scrolls (terminals, lists) keeps its wheel unless Ctrl is held.
+  useEffect(() => {
+    const el = ref.current!
+    const onWheel = (e: WheelEvent) => {
+      const target = e.target as HTMLElement
+      const ctrl = e.ctrlKey || e.metaKey
+      if (!ctrl && target.closest('.no-board-wheel, .scrollable, .modal, .drawer, .menu')) return
+      e.preventDefault()
+      stopCameraAnimation()
+      const app = useApp.getState()
+      const cam = activeWs()?.camera
+      if (!cam) return
+      const unit = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 800 : 1
+      const dx = e.deltaX * unit
+      const dy = e.deltaY * unit
+      const r = el.getBoundingClientRect()
+      const cad = app.settings.navigation !== 'trackpad'
+      if (ctrl || (cad && !e.shiftKey && !e.altKey)) {
+        app.zoomAt(Math.exp(-dy * (ctrl && !cad ? 0.0022 : 0.0016)), e.clientX - r.left, e.clientY - r.top)
+      } else if (cad) {
+        if (e.shiftKey) app.setCamera({ x: cam.x - (dx || dy) })
+        else app.setCamera({ y: cam.y - dy, x: cam.x - dx })
+      } else {
+        const hx = e.shiftKey && !dx ? dy : dx
+        const hy = e.shiftKey && !dx ? 0 : dy
+        app.setCamera({ x: cam.x - hx, y: cam.y - hy })
+      }
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // Middle button: drag to pan from anywhere (even over consoles), double-click for Zoom Extents.
+  useEffect(() => {
+    const el = ref.current!
+    let lastMiddle = 0
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 1) return
+      e.preventDefault()
+      e.stopPropagation()
+      stopCameraAnimation()
+      const now = Date.now()
+      if (now - lastMiddle < 350) {
+        lastMiddle = 0
+        useApp.getState().fitAll()
+        return
+      }
+      lastMiddle = now
+      const app = useApp.getState()
+      const start = { ...activeWs()!.camera }
+      const sx = e.clientX
+      const sy = e.clientY
+      el.setPointerCapture(e.pointerId)
+      setPanning(true)
+      const move = (ev: PointerEvent) => app.setCamera({ x: start.x + ev.clientX - sx, y: start.y + ev.clientY - sy })
+      const up = () => {
+        el.removeEventListener('pointermove', move)
+        el.removeEventListener('pointerup', up)
+        setPanning(false)
+      }
+      el.addEventListener('pointermove', move)
+      el.addEventListener('pointerup', up)
+    }
+    // stop Linux middle-click paste and autoscroll on the board
+    const noMiddle = (e: MouseEvent) => e.button === 1 && e.preventDefault()
+    el.addEventListener('pointerdown', onDown, { capture: true })
+    el.addEventListener('mousedown', noMiddle, { capture: true })
+    el.addEventListener('auxclick', noMiddle, { capture: true })
+    return () => {
+      el.removeEventListener('pointerdown', onDown, { capture: true })
+      el.removeEventListener('mousedown', noMiddle, { capture: true })
+      el.removeEventListener('auxclick', noMiddle, { capture: true })
+    }
+  }, [])
+
+  // keyboard (including AutoCAD-style "Z" zoom commands: Z E, Z P, Z W, Z O)
+  useEffect(() => {
+    let chordTimer = 0
+    const endChord = () => {
+      window.clearTimeout(chordTimer)
+      setCmd((c) => (c === 'zoom' ? null : c))
+    }
+    const onKey = (e: KeyboardEvent) => {
+      const app = useApp.getState()
+      if (isTyping(e.target)) {
+        if (e.key === 'Escape' && app.focusedNode) app.setFocusedNode(null)
+        return
+      }
+      const mod = e.ctrlKey || e.metaKey
+      const key = e.key.toLowerCase()
+
+      if (cmdRef.current === 'zoom' && !mod && !e.altKey) {
+        e.preventDefault()
+        endChord()
+        if (key === 'e' || key === 'a') app.fitAll()
+        else if (key === 'p') !app.zoomPrevious() && app.toast('No previous view')
+        else if (key === 'w') setCmd('window')
+        else if (key === 'o' || key === 's') zoomToSelection()
+        return
+      }
+      if (cmdRef.current === 'window' && e.key === 'Escape') return setCmd(null)
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && app.selection.length) {
+        const ws = activeWs()!
+        const sel = app.selection
+        const wires = ws.wires.filter((w) => sel.includes(w.id))
+        wires.forEach((w) => app.removeWire(w.id))
+        const groups = ws.groups.filter((g) => sel.includes(g.id))
+        groups.forEach((g) => app.removeGroup(g.id))
+        const ink = ws.ink.filter((i) => sel.includes(i.id)).map((i) => i.id)
+        if (ink.length) app.removeInk(ink)
+        removeWithHooks(sel.filter((id) => ws.nodes.some((n) => n.id === id)))
+      } else if (e.key === 'Escape') {
+        if (app.focusedNode) app.setFocusedNode(null)
+        else if (app.panel) app.closePanel()
+        else {
+          app.setSelection([])
+          app.setTool('select')
+        }
+      } else if (e.key === 'Home') {
+        app.fitAll()
+      } else if (mod && (e.key === '=' || e.key === '+')) {
+        e.preventDefault()
+        app.zoomAt(1.2)
+      } else if (mod && e.key === '-') {
+        e.preventDefault()
+        app.zoomAt(1 / 1.2)
+      } else if (mod && e.key === '0') {
+        e.preventDefault()
+        app.fitAll()
+      } else if (mod && e.key === '1') {
+        e.preventDefault()
+        const vp = app.viewport
+        const cam = activeWs()!.camera
+        app.centerOn((vp.w / 2 - cam.x) / cam.zoom, (vp.h / 2 - cam.y) / cam.zoom, 1)
+      } else if (mod && key === 'a') {
+        e.preventDefault()
+        const ws = activeWs()!
+        app.setSelection(ws.nodes.map((n) => n.id))
+      } else if (!mod && !e.altKey && key === 'z') {
+        setCmd('zoom')
+        window.clearTimeout(chordTimer)
+        chordTimer = window.setTimeout(endChord, 2500)
+      } else if (!mod && !e.altKey && key === 'f' && app.selection.length) {
+        zoomToSelection()
+      } else if (!mod && !e.altKey) {
+        const map: Record<string, any> = { v: 'select', p: 'pen', e: 'eraser', r: 'shape', t: 'text' }
+        if (map[key]) app.setTool(map[key])
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  if (!ws) return null
+  const cam = ws.camera
+  const cad = settingsNav !== 'trackpad'
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.button === 1) return
+    if (e.target !== e.currentTarget && !(e.target as HTMLElement).classList.contains('world')) return
+    const app = useApp.getState()
+    stopCameraAnimation()
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+    if (tool === 'text' && e.button === 0) {
+      const p = screenToWorld(e.clientX - ref.current!.getBoundingClientRect().left, e.clientY - ref.current!.getBoundingClientRect().top)
+      const id = app.addNode({ type: 'text', x: p.x, y: p.y - 20, w: 320, h: 60, data: { text: '', autoFocus: true } })
+      app.setSelection([id])
+      app.setTool('select')
+      return
+    }
+    if (e.button !== 0) return
+    const startX = e.clientX
+    const startY = e.clientY
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    const rect = ref.current!.getBoundingClientRect()
+
+    // Selection window (CAD left-drag, or Shift+drag) and Zoom Window.
+    //  left→right = WINDOW: picks what is fully inside;  right→left = CROSSING: picks what it touches.
+    if (cad || e.shiftKey || cmdRef.current === 'window') {
+      const zoomWindow = cmdRef.current === 'window'
+      const additive = e.shiftKey
+      const before = app.selection
+      let moved = false
+      const move = (ev: PointerEvent) => {
+        if (Math.abs(ev.clientX - startX) + Math.abs(ev.clientY - startY) > 3) moved = true
+        if (!moved) return
+        setMarquee({
+          x: Math.min(startX, ev.clientX) - rect.left,
+          y: Math.min(startY, ev.clientY) - rect.top,
+          w: Math.abs(ev.clientX - startX),
+          h: Math.abs(ev.clientY - startY),
+          mode: zoomWindow ? 'zoom' : ev.clientX >= startX ? 'window' : 'crossing'
+        })
+      }
+      const up = (ev: PointerEvent) => {
+        el.removeEventListener('pointermove', move)
+        el.removeEventListener('pointerup', up)
+        setMarquee(null)
+        if (!moved) {
+          if (!additive && !zoomWindow) app.setSelection([])
+          return
+        }
+        const a = screenToWorld(Math.min(startX, ev.clientX) - rect.left, Math.min(startY, ev.clientY) - rect.top)
+        const b = screenToWorld(Math.max(startX, ev.clientX) - rect.left, Math.max(startY, ev.clientY) - rect.top)
+        const box = { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y }
+        if (zoomWindow) {
+          setCmd(null)
+          app.zoomToRect(box, 10, MAX_ZOOM)
+          return
+        }
+        const crossing = ev.clientX < startX
+        const w = activeWs()!
+        const pick = (r: { x: number; y: number; w: number; h: number }) => (crossing ? intersects(box, r) : within(box, r))
+        const hits = [...w.nodes, ...w.ink, ...(crossing ? [] : w.groups)].filter(pick).map((n) => n.id)
+        app.setSelection(additive ? [...new Set([...before, ...hits])] : hits)
+      }
+      el.addEventListener('pointermove', move)
+      el.addEventListener('pointerup', up)
+      return
+    }
+
+    // trackpad navigation: left drag on empty board pans
+    app.setSelection([])
+    setPanning(true)
+    const start = { ...cam }
+    const move = (ev: PointerEvent) => app.setCamera({ x: start.x + ev.clientX - startX, y: start.y + ev.clientY - startY })
+    const up = () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      setPanning(false)
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+  }
+
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    const app = useApp.getState()
+    const rect = ref.current!.getBoundingClientRect()
+    const p = screenToWorld(e.clientX - rect.left, e.clientY - rect.top)
+    const url = e.dataTransfer.getData('text/uri-list') || e.dataTransfer.getData('text/plain')
+    const files = [...e.dataTransfer.files]
+    let offset = 0
+    for (const f of files) {
+      const path = window.fb.pathForFile(f)
+      if (f.type.startsWith('image/')) {
+        const img = await loadImageSize(path)
+        const scale = Math.min(1, 640 / img.w)
+        app.addNode({ type: 'image', x: p.x + offset, y: p.y + offset, w: img.w * scale, h: img.h * scale, data: { path } })
+      } else {
+        const stat = await invoke<{ dir: boolean } | null>('fs:stat', path)
+        if (stat && !stat.dir) app.addNode({ type: 'file', x: p.x + offset, y: p.y + offset, data: { path } })
+      }
+      offset += 30
+    }
+    if (!files.length && /^https?:\/\//.test(url)) app.addNode({ type: 'web', x: p.x, y: p.y, w: 720, h: 480, data: { url: url.trim() } })
+  }
+
+  return (
+    <div
+      ref={ref}
+      className={`board tool-${tool} ${panning ? 'panning' : ''} ${cmd === 'window' ? 'zoom-window' : ''}`}
+      style={{
+        backgroundSize: `${22 * cam.zoom}px ${22 * cam.zoom}px`,
+        backgroundPosition: `${cam.x}px ${cam.y}px`
+      }}
+      onPointerDown={onPointerDown}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+    >
+      <div className="world" style={{ transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.zoom})` }}>
+        {ws.groups.map((g) => (
+          <GroupFrame key={g.id} group={g} selected={selection.includes(g.id)} />
+        ))}
+        <Wires ws={ws} />
+        {ws.nodes.map((n) =>
+          n.id === focusedNode ? (
+            <NodeFrame key={n.id} node={n} selected={false} zoom={1} maximized />
+          ) : (
+            <NodeFrame key={n.id} node={n} selected={selection.includes(n.id)} zoom={cam.zoom} />
+          )
+        )}
+      </div>
+      <InkLayer ws={ws} />
+      {marquee && <div className={`marquee ${marquee.mode}`} style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
+      {cmd && (
+        <div className="cad-cmd">
+          {cmd === 'zoom' ? (
+            <>
+              <b>ZOOM</b> <span>[<u>E</u>]xtents</span> <span>[<u>P</u>]revious</span> <span>[<u>W</u>]indow</span> <span>[<u>O</u>]bject</span>
+            </>
+          ) : (
+            <>
+              <b>ZOOM WINDOW</b> <span>drag a window to zoom into · Esc to cancel</span>
+            </>
+          )}
+        </div>
+      )}
+      {!ws.nodes.length && !ws.groups.length && !ws.ink.length && <EmptyBoard />}
+    </div>
+  )
+}
+
+function loadImageSize(path: string): Promise<{ w: number; h: number }> {
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight })
+    img.onerror = () => resolve({ w: 480, h: 320 })
+    img.src = fileUrl(path)
+  })
+}
+
+function EmptyBoard() {
+  const app = useApp.getState()
+  return (
+    <div className="empty-board">
+      <div className="empty-title">
+        An empty board. <em>Put some agents on it.</em>
+      </div>
+      <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
+        <button className="btn primary" onClick={() => app.openPanel('composer')}>
+          Compose a team
+        </button>
+        <button className="btn" onClick={() => app.openPanel('presets')}>
+          Presets
+        </button>
+        <button className="btn" onClick={() => app.openPanel('spawn')}>
+          New console
+        </button>
+      </div>
+      <div className="dim" style={{ marginTop: 14, fontSize: 12 }}>
+        Scroll to zoom · Middle-drag to pan · Double-middle-click to fit · Hold <span className="kbd">Space</span> to speak
+      </div>
+    </div>
+  )
+}

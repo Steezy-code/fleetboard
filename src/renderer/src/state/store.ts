@@ -1,0 +1,513 @@
+import { create } from 'zustand'
+import type {
+  AgentAvailability,
+  BoardNode,
+  Camera,
+  ConsoleStatus,
+  Group,
+  InkItem,
+  NodeType,
+  Project,
+  ProjectMeta,
+  Settings,
+  Wire,
+  Workspace
+} from '@shared/types'
+import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
+import { basename, invoke, uid } from '../lib/api'
+
+export type Tool = 'select' | 'pen' | 'shape' | 'text' | 'eraser' | 'connector'
+
+export interface PanelState {
+  name: string
+  props?: Record<string, any>
+}
+
+export interface Toast {
+  id: string
+  text: string
+  tone?: 'info' | 'warn' | 'error' | 'ok'
+}
+
+export interface ConfirmRequest {
+  id: string
+  title: string
+  body?: string
+  confirm?: string
+  danger?: boolean
+  resolve: (ok: boolean) => void
+}
+
+interface AppState {
+  settings: Settings
+  agents: AgentAvailability[]
+  projects: ProjectMeta[]
+  project: Project | null
+  tool: Tool
+  /** shape sub-tool for the shape tool */
+  shapeKind: InkItem['kind']
+  inkStyle: { stroke: string; width: number; fill?: string; opacity: number; dashed: boolean; sloppy: boolean; rounded: boolean }
+  selection: string[]
+  statuses: Record<string, ConsoleStatus>
+  /** consoles with a live process in the main process */
+  live: Record<string, boolean>
+  /** node shown full-window (maximize button) */
+  focusedNode: string | null
+  panel: PanelState | null
+  /** secondary floating panel on the right (usage, accounts, orchestrator, git) */
+  drawer: PanelState | null
+  toasts: Toast[]
+  confirms: ConfirmRequest[]
+  /** viewport size in px, kept by the board */
+  viewport: { w: number; h: number }
+  /** first end of a wire while the connector tool is active */
+  wireFrom: string | null
+
+  // app
+  init: () => Promise<void>
+  setSettings: (patch: Partial<Settings>) => Promise<void>
+  refreshAgents: (force?: boolean) => Promise<void>
+  openProject: (path: string) => Promise<void>
+  closeProject: () => void
+
+  // workspaces
+  addWorkspace: (name?: string) => string
+  switchWorkspace: (id: string) => void
+  renameWorkspace: (id: string, name: string) => void
+  closeWorkspace: (id: string) => void
+  setProjectExtra: (key: string, value: any) => void
+  setWsExtra: (key: string, value: any) => void
+
+  // board items
+  addNode: (n: Partial<BoardNode> & { type: NodeType }) => string
+  updateNode: (id: string, patch: Partial<BoardNode>) => void
+  updateNodeData: (id: string, patch: Record<string, any>) => void
+  moveNodes: (ids: string[], dx: number, dy: number) => void
+  removeNodes: (ids: string[]) => void
+  bringToFront: (id: string) => void
+  addGroup: (g: Partial<Group>) => string
+  updateGroup: (id: string, patch: Partial<Group>) => void
+  removeGroup: (id: string, withNodes?: boolean) => void
+  fitGroup: (id: string) => void
+  addWire: (from: string, to: string) => string
+  removeWire: (id: string) => void
+  addInk: (items: InkItem[]) => void
+  updateInk: (id: string, patch: Partial<InkItem>) => void
+  removeInk: (ids: string[]) => void
+
+  // view
+  setCamera: (c: Partial<Camera>) => void
+  zoomAt: (factor: number, sx?: number, sy?: number) => void
+  centerOn: (x: number, y: number, zoom?: number, animate?: boolean) => void
+  /** fit a world rect in view (zoom window / zoom object) */
+  zoomToRect: (r: { x: number; y: number; w: number; h: number }, pad?: number, maxZoom?: number) => void
+  /** go back to the view before the last fit / focus / zoom window; false if there is none */
+  zoomPrevious: () => boolean
+  fitAll: () => void
+  focusItem: (id: string) => void
+  setTool: (t: Tool) => void
+  setSelection: (ids: string[]) => void
+  setFocusedNode: (id: string | null) => void
+  openPanel: (name: string, props?: Record<string, any>) => void
+  closePanel: () => void
+  openDrawer: (name: string, props?: Record<string, any>) => void
+  closeDrawer: () => void
+  toast: (text: string, tone?: Toast['tone']) => void
+  confirm: (req: Omit<ConfirmRequest, 'id' | 'resolve'>) => Promise<boolean>
+  setStatus: (id: string, s: ConsoleStatus) => void
+  setLive: (id: string, live: boolean) => void
+}
+
+export const newWorkspace = (name: string): Workspace => ({
+  id: uid('ws'),
+  name,
+  nodes: [],
+  groups: [],
+  wires: [],
+  ink: [],
+  camera: { x: 0, y: 0, zoom: 1 },
+  extras: {}
+})
+
+export const MIN_ZOOM = 0.05
+export const MAX_ZOOM = 4
+
+// "Zoom Previous": views saved before each fit / focus / zoom window, per workspace.
+const viewHistory = new Map<string, Camera[]>()
+export function pushView(wsId: string, cam: Camera) {
+  const stack = viewHistory.get(wsId) ?? []
+  const last = stack[stack.length - 1]
+  if (last && Math.abs(last.x - cam.x) < 1 && Math.abs(last.y - cam.y) < 1 && last.zoom === cam.zoom) return
+  stack.push({ ...cam })
+  if (stack.length > 40) stack.shift()
+  viewHistory.set(wsId, stack)
+}
+
+// Smooth camera moves. Zoom interpolates in log space so it feels even at every scale.
+let animFrame = 0
+export function animateCamera(target: Camera, ms = 260) {
+  cancelAnimationFrame(animFrame)
+  const ws = activeWs()
+  if (!ws) return
+  const from = { ...ws.camera }
+  const vp = useApp.getState().viewport
+  // animate the world point at the viewport center, so the move doesn't swing sideways
+  const cx = vp.w / 2
+  const cy = vp.h / 2
+  const fromWorld = { x: (cx - from.x) / from.zoom, y: (cy - from.y) / from.zoom }
+  const toWorld = { x: (cx - target.x) / target.zoom, y: (cy - target.y) / target.zoom }
+  const lz0 = Math.log(from.zoom)
+  const lz1 = Math.log(target.zoom)
+  const t0 = performance.now()
+  const ease = (t: number) => 1 - Math.pow(1 - t, 3)
+  const step = (now: number) => {
+    const t = Math.min(1, (now - t0) / ms)
+    const k = ease(t)
+    const zoom = Math.exp(lz0 + (lz1 - lz0) * k)
+    const wx = fromWorld.x + (toWorld.x - fromWorld.x) * k
+    const wy = fromWorld.y + (toWorld.y - fromWorld.y) * k
+    useApp.getState().setCamera(t === 1 ? target : { zoom, x: cx - wx * zoom, y: cy - wy * zoom })
+    if (t < 1) animFrame = requestAnimationFrame(step)
+  }
+  animFrame = requestAnimationFrame(step)
+}
+export const stopCameraAnimation = () => cancelAnimationFrame(animFrame)
+
+let saveTimer: number | undefined
+function scheduleSave(p: Project | null) {
+  if (!p) return
+  window.clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(() => invoke('store:saveProject', p), 350)
+}
+
+export const useApp = create<AppState>((set, get) => {
+  /** Apply a change to the active workspace and persist. */
+  const mutateWs = (fn: (ws: Workspace) => Workspace) => {
+    const p = get().project
+    if (!p) return
+    const workspaces = p.workspaces.map((w) => (w.id === p.activeWorkspaceId ? fn(w) : w))
+    const project = { ...p, workspaces }
+    set({ project })
+    scheduleSave(project)
+  }
+  const mutateProject = (fn: (p: Project) => Project) => {
+    const p = get().project
+    if (!p) return
+    const project = fn(p)
+    set({ project })
+    scheduleSave(project)
+  }
+  const maxZ = (ws: Workspace) => ws.nodes.reduce((m, n) => Math.max(m, n.z), 0)
+
+  return {
+    settings: DEFAULT_SETTINGS,
+    agents: [],
+    projects: [],
+    project: null,
+    tool: 'select',
+    shapeKind: 'rect',
+    inkStyle: { stroke: '#ff4a2b', width: 3, opacity: 1, dashed: false, sloppy: true, rounded: true },
+    selection: [],
+    statuses: {},
+    live: {},
+    focusedNode: null,
+    panel: null,
+    drawer: null,
+    toasts: [],
+    confirms: [],
+    viewport: { w: window.innerWidth, h: window.innerHeight },
+    wireFrom: null,
+
+    init: async () => {
+      const [settings, projects] = await Promise.all([invoke<Settings>('store:settings'), invoke<ProjectMeta[]>('store:projects')])
+      set({ settings: { ...DEFAULT_SETTINGS, ...settings }, projects })
+      get().refreshAgents()
+      const live = await invoke<{ id: string; status: ConsoleStatus }[]>('pty:list')
+      set({
+        live: Object.fromEntries(live.map((l) => [l.id, true])),
+        statuses: Object.fromEntries(live.map((l) => [l.id, l.status]))
+      })
+    },
+    setSettings: async (patch) => {
+      const settings = await invoke<Settings>('store:setSettings', patch)
+      set({ settings })
+    },
+    refreshAgents: async (force) => set({ agents: await invoke('agents:detect', force) }),
+
+    openProject: async (path) => {
+      const id = await invoke<string>('store:projectId', path)
+      let project = await invoke<Project | null>('store:loadProject', id)
+      if (!project) {
+        const ws = newWorkspace('Workspace 1')
+        project = {
+          schema: SCHEMA_VERSION,
+          id,
+          name: basename(path),
+          path,
+          workspaces: [ws],
+          activeWorkspaceId: ws.id,
+          lastOpened: Date.now(),
+          extras: {}
+        }
+      }
+      project = { ...project, path, lastOpened: Date.now() }
+      set({ project, selection: [], panel: null, focusedNode: null })
+      scheduleSave(project)
+    },
+    closeProject: () => {
+      const p = get().project
+      if (p) invoke('store:saveProject', p)
+      set({ project: null, selection: [], panel: null, drawer: null, focusedNode: null })
+      invoke<ProjectMeta[]>('store:projects').then((projects) => set({ projects }))
+    },
+
+    addWorkspace: (name) => {
+      const p = get().project!
+      const ws = newWorkspace(name ?? `Workspace ${p.workspaces.length + 1}`)
+      mutateProject((p) => ({ ...p, workspaces: [...p.workspaces, ws], activeWorkspaceId: ws.id }))
+      set({ selection: [] })
+      return ws.id
+    },
+    switchWorkspace: (id) => {
+      mutateProject((p) => ({ ...p, activeWorkspaceId: id }))
+      set({ selection: [], focusedNode: null })
+    },
+    renameWorkspace: (id, name) =>
+      mutateProject((p) => ({ ...p, workspaces: p.workspaces.map((w) => (w.id === id ? { ...w, name } : w)) })),
+    closeWorkspace: (id) =>
+      mutateProject((p) => {
+        const workspaces = p.workspaces.filter((w) => w.id !== id)
+        if (!workspaces.length) workspaces.push(newWorkspace('Workspace 1'))
+        const activeWorkspaceId = p.activeWorkspaceId === id ? workspaces[0].id : p.activeWorkspaceId
+        return { ...p, workspaces, activeWorkspaceId }
+      }),
+    setProjectExtra: (key, value) => mutateProject((p) => ({ ...p, extras: { ...p.extras, [key]: value } })),
+    setWsExtra: (key, value) => mutateWs((w) => ({ ...w, extras: { ...w.extras, [key]: value } })),
+
+    addNode: (n) => {
+      const id = n.id ?? uid(n.type.slice(0, 3))
+      mutateWs((ws) => {
+        const vp = get().viewport
+        const cam = ws.camera
+        const w = n.w ?? 480
+        const h = n.h ?? 320
+        // default position: center of the current view
+        const x = n.x ?? (vp.w / 2 - cam.x) / cam.zoom - w / 2
+        const y = n.y ?? (vp.h / 2 - cam.y) / cam.zoom - h / 2
+        const node: BoardNode = { data: {}, ...n, id, x, y, w, h, z: maxZ(ws) + 1 }
+        return { ...ws, nodes: [...ws.nodes, node] }
+      })
+      return id
+    },
+    updateNode: (id, patch) =>
+      mutateWs((ws) => ({ ...ws, nodes: ws.nodes.map((n) => (n.id === id ? { ...n, ...patch } : n)) })),
+    updateNodeData: (id, patch) =>
+      mutateWs((ws) => ({ ...ws, nodes: ws.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)) })),
+    moveNodes: (ids, dx, dy) =>
+      mutateWs((ws) => {
+        const set = new Set(ids)
+        return {
+          ...ws,
+          nodes: ws.nodes.map((n) => (set.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n)),
+          groups: ws.groups.map((g) => (set.has(g.id) ? { ...g, x: g.x + dx, y: g.y + dy } : g)),
+          ink: ws.ink.map((i) =>
+            set.has(i.id) ? { ...i, x: i.x + dx, y: i.y + dy, points: i.points?.map(([px, py]) => [px + dx, py + dy] as [number, number]) } : i
+          )
+        }
+      }),
+    removeNodes: (ids) =>
+      mutateWs((ws) => {
+        const s = new Set(ids)
+        return {
+          ...ws,
+          nodes: ws.nodes.filter((n) => !s.has(n.id)),
+          wires: ws.wires.filter((w) => !s.has(w.from) && !s.has(w.to)),
+          ink: ws.ink.filter((i) => !s.has(i.id)),
+          groups: ws.groups.filter((g) => !s.has(g.id))
+        }
+      }),
+    bringToFront: (id) =>
+      mutateWs((ws) => {
+        const top = maxZ(ws)
+        const n = ws.nodes.find((x) => x.id === id)
+        if (!n || n.z === top) return ws
+        return { ...ws, nodes: ws.nodes.map((x) => (x.id === id ? { ...x, z: top + 1 } : x)) }
+      }),
+
+    addGroup: (g) => {
+      const id = g.id ?? uid('grp')
+      mutateWs((ws) => ({
+        ...ws,
+        groups: [...ws.groups, { name: 'Team', role: 'General', x: 0, y: 0, w: 600, h: 400, ...g, id }]
+      }))
+      return id
+    },
+    updateGroup: (id, patch) => mutateWs((ws) => ({ ...ws, groups: ws.groups.map((g) => (g.id === id ? { ...g, ...patch } : g)) })),
+    removeGroup: (id, withNodes) =>
+      mutateWs((ws) => ({
+        ...ws,
+        groups: ws.groups.filter((g) => g.id !== id),
+        wires: ws.wires.filter((w) => w.from !== id && w.to !== id),
+        nodes: withNodes ? ws.nodes.filter((n) => n.groupId !== id) : ws.nodes.map((n) => (n.groupId === id ? { ...n, groupId: undefined } : n))
+      })),
+    fitGroup: (id) =>
+      mutateWs((ws) => {
+        const members = ws.nodes.filter((n) => n.groupId === id)
+        if (!members.length) return ws
+        const pad = 24
+        const x = Math.min(...members.map((n) => n.x)) - pad
+        const y = Math.min(...members.map((n) => n.y)) - pad - 34
+        const r = Math.max(...members.map((n) => n.x + n.w)) + pad
+        const b = Math.max(...members.map((n) => n.y + n.h)) + pad
+        return { ...ws, groups: ws.groups.map((g) => (g.id === id ? { ...g, x, y, w: r - x, h: b - y } : g)) }
+      }),
+    addWire: (from, to) => {
+      const id = uid('wire')
+      mutateWs((ws) =>
+        ws.wires.some((w) => (w.from === from && w.to === to) || (w.from === to && w.to === from))
+          ? ws
+          : { ...ws, wires: [...ws.wires, { id, from, to }] }
+      )
+      return id
+    },
+    removeWire: (id) => mutateWs((ws) => ({ ...ws, wires: ws.wires.filter((w) => w.id !== id) })),
+    addInk: (items) => mutateWs((ws) => ({ ...ws, ink: [...ws.ink, ...items] })),
+    updateInk: (id, patch) => mutateWs((ws) => ({ ...ws, ink: ws.ink.map((i) => (i.id === id ? { ...i, ...patch } : i)) })),
+    removeInk: (ids) => {
+      const s = new Set(ids)
+      mutateWs((ws) => ({ ...ws, ink: ws.ink.filter((i) => !s.has(i.id)) }))
+    },
+
+    setCamera: (c) => mutateWs((ws) => ({ ...ws, camera: { ...ws.camera, ...c } })),
+    zoomAt: (factor, sx, sy) =>
+      mutateWs((ws) => {
+        const vp = get().viewport
+        const cx = sx ?? vp.w / 2
+        const cy = sy ?? vp.h / 2
+        const cam = ws.camera
+        const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, cam.zoom * factor))
+        const k = zoom / cam.zoom
+        return { ...ws, camera: { zoom, x: cx - (cx - cam.x) * k, y: cy - (cy - cam.y) * k } }
+      }),
+    centerOn: (x, y, zoom, animate = true) => {
+      const ws = activeWs()
+      if (!ws) return
+      const vp = get().viewport
+      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom ?? ws.camera.zoom))
+      const target = { zoom: z, x: vp.w / 2 - x * z, y: vp.h / 2 - y * z }
+      pushView(ws.id, ws.camera)
+      if (animate) animateCamera(target)
+      else get().setCamera(target)
+    },
+    zoomToRect: (r, pad = 60, maxZoom = 1.6) => {
+      const vp = get().viewport
+      const w = Math.max(r.w, 1)
+      const h = Math.max(r.h, 1)
+      // leave room for the top bar, rails and the bottom bar
+      const zoom = Math.min(maxZoom, Math.max(MIN_ZOOM, Math.min((vp.w - 120 - pad * 2) / w, (vp.h - 230 - pad * 2) / h)))
+      get().centerOn(r.x + w / 2, r.y + h / 2 + 40 / zoom, zoom)
+    },
+    zoomPrevious: () => {
+      const ws = activeWs()
+      if (!ws) return false
+      const stack = viewHistory.get(ws.id)
+      const prev = stack?.pop()
+      if (!prev) return false
+      animateCamera(prev)
+      return true
+    },
+    fitAll: () => {
+      const ws = activeWs()
+      if (!ws) return
+      const boxes = [...ws.nodes, ...ws.groups, ...ws.ink]
+      if (!boxes.length) return get().centerOn(0, 0, 1)
+      const l = Math.min(...boxes.map((b) => b.x))
+      const t = Math.min(...boxes.map((b) => b.y))
+      const r = Math.max(...boxes.map((b) => b.x + b.w))
+      const b = Math.max(...boxes.map((b) => b.y + b.h))
+      get().zoomToRect({ x: l, y: t, w: r - l, h: b - t }, 40, 1.2)
+    },
+    focusItem: (id) => {
+      const ws = activeWs()
+      const item = ws?.nodes.find((n) => n.id === id) ?? ws?.groups.find((g) => g.id === id)
+      if (!item) return
+      get().zoomToRect(item, 40, 1.1)
+      set({ selection: [id] })
+    },
+    setTool: (tool) => set({ tool }),
+    setSelection: (selection) => set({ selection }),
+    setFocusedNode: (focusedNode) => set({ focusedNode }),
+    openPanel: (name, props) => set({ panel: { name, props } }),
+    closePanel: () => set({ panel: null }),
+    openDrawer: (name, props) => set((s) => ({ drawer: s.drawer?.name === name && !props ? null : { name, props } })),
+    closeDrawer: () => set({ drawer: null }),
+    toast: (text, tone = 'info') => {
+      const id = uid('t')
+      set((s) => ({ toasts: [...s.toasts, { id, text, tone }] }))
+      window.setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 4200)
+    },
+    confirm: (req) =>
+      new Promise<boolean>((resolve) => {
+        const id = uid('c')
+        set((s) => ({
+          confirms: [
+            ...s.confirms,
+            {
+              ...req,
+              id,
+              resolve: (ok) => {
+                set((st) => ({ confirms: st.confirms.filter((c) => c.id !== id) }))
+                resolve(ok)
+              }
+            }
+          ]
+        }))
+      }),
+    setStatus: (id, s) => set((st) => (st.statuses[id] === s ? st : { statuses: { ...st.statuses, [id]: s } })),
+    setLive: (id, live) =>
+      set((st) => {
+        const next = { ...st.live }
+        if (live) next[id] = true
+        else delete next[id]
+        return { live: next }
+      })
+  }
+})
+
+/** The active workspace (non-reactive read). */
+export const activeWs = (): Workspace | null => {
+  const p = useApp.getState().project
+  return p?.workspaces.find((w) => w.id === p.activeWorkspaceId) ?? null
+}
+
+/** Reactive hook for the active workspace. */
+export const useWs = <T,>(sel: (ws: Workspace) => T): T | undefined =>
+  useApp((s) => {
+    const p = s.project
+    const ws = p?.workspaces.find((w) => w.id === p.activeWorkspaceId)
+    return ws ? sel(ws) : undefined
+  })
+
+/** Every console node across every workspace of the open project. */
+export const allConsoles = (): (BoardNode & { workspaceId: string })[] => {
+  const p = useApp.getState().project
+  if (!p) return []
+  return p.workspaces.flatMap((w) => w.nodes.filter((n) => n.type === 'console').map((n) => ({ ...n, workspaceId: w.id })))
+}
+
+export const screenToWorld = (sx: number, sy: number) => {
+  const cam = activeWs()?.camera ?? { x: 0, y: 0, zoom: 1 }
+  return { x: (sx - cam.x) / cam.zoom, y: (sy - cam.y) / cam.zoom }
+}
+
+/** Connector tool: first click picks the source, second click the target. */
+export function connectClick(id: string) {
+  const s = useApp.getState()
+  if (!s.wireFrom) {
+    useApp.setState({ wireFrom: id })
+    s.toast('Now click the item to connect to')
+  } else if (s.wireFrom !== id) {
+    s.addWire(s.wireFrom, id)
+    useApp.setState({ wireFrom: null, tool: 'select' })
+  }
+}

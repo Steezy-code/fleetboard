@@ -1,0 +1,398 @@
+/* ---------- voice: command bar, caption, thread drawer ---------- */
+
+.command-bar .cb-main {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.command-bar.listening {
+  border-color: var(--accent-line);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5), 0 0 0 3px var(--accent-soft);
+}
+
+/* orb states */
+.orb {
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+.orb.listening {
+  animation: orb-breathe 1.1s ease-in-out infinite;
+  box-shadow: 0 0 22px rgba(255, 106, 43, 0.75), 0 0 0 4px rgba(255, 74, 43, 0.18);
+}
+.orb.speaking {
+  animation: orb-breathe 0.7s ease-in-out infinite;
+  box-shadow: 0 0 20px rgba(255, 176, 58, 0.7);
+}
+.orb.thinking {
+  animation: orb-spin 1.6s linear infinite;
+  background: conic-gradient(from 0deg, #ffe2a8, #ff6a2b, #c2361d, #ffb03a, #ffe2a8);
+  box-shadow: 0 0 18px rgba(255, 140, 50, 0.55);
+}
+.orb.sm {
+  width: 18px;
+  height: 18px;
+  box-shadow: 0 0 8px rgba(255, 140, 50, 0.35);
+}
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+@keyframes orb-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* listening row */
+.cb-listening {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text-2);
+  min-width: 0;
+}
+.cb-listening .rec {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: rec-blink 1.2s ease-in-out infinite;
+}
+@keyframes rec-blink {
+  50% {
+    opacity: 0.35;
+  }
+}
+.cb-meter {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+}
+.cb-meter i {
+  display: block;
+  width: 4px;
+  min-height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: height 0.07s linear;
+}
+.cb-sub {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* shimmer text for Thinking… / Transcribing… */
+.cb-shimmer {
+  font-size: 13px;
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 35%, #fff2e6 50%, var(--muted) 65%, var(--muted) 100%);
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 1.6s linear infinite;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@keyframes shimmer {
+  from {
+    background-position: 110% 0;
+  }
+  to {
+    background-position: -110% 0;
+  }
+}
+
+.cb-progress {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.cb-progress > i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+.cb-progress.indeterminate > i {
+  width: 30% !important;
+  animation: indet 1.2s ease-in-out infinite;
+}
+@keyframes indet {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+
+.command-bar .icon-btn.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.command-bar .icon-btn.mic-on {
+  background: var(--accent);
+  color: #fff;
+}
+.command-bar .icon-btn.stop {
+  color: var(--text);
+}
+
+/* @mention autocomplete */
+.mention-pop {
+  position: absolute;
+  left: 40px;
+  bottom: calc(100% + 8px);
+  width: 300px;
+  max-height: 300px;
+  overflow: auto;
+  padding: 5px;
+  z-index: 960;
+  background: rgba(24, 21, 19, 0.99);
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  box-shadow: var(--shadow);
+  animation: rise 0.12s ease-out;
+}
+.mention-pop.up-right {
+  left: auto;
+  right: 0;
+}
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 32px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12.5px;
+}
+.mention-item.on,
+.mention-item:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+.mention-item .mi-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-item .mi-meta {
+  color: var(--dim);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.mention-item .mi-team {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: none;
+}
+.mention-head {
+  padding: 6px 9px 3px;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+
+/* caption bubble above the bar */
+.voice-caption {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 455;
+  width: 560px;
+  max-width: calc(100vw - 420px);
+  min-width: 360px;
+  padding: 11px 14px;
+  border-radius: 14px;
+  background: rgba(24, 21, 19, 0.97);
+  border: 1px solid var(--line-2);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  animation: rise 0.14s ease-out;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.voice-caption .vc-user {
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.voice-caption .vc-user.live {
+  color: var(--text-2);
+}
+.voice-caption .vc-user.placeholder {
+  color: var(--dim);
+  font-style: italic;
+}
+.voice-caption .vc-reply {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.voice-caption .vc-reply .orb {
+  margin-top: 1px;
+}
+.voice-caption .vc-plan {
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 9px 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vc-plan .vc-plan-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+.vc-plan ol {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.vc-plan .vc-prompt {
+  color: var(--text);
+  font-size: 13px;
+}
+.vc-plan .vc-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* thread drawer */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
+}
+.thread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 1;
+  padding-bottom: 6px;
+}
+.thread-day {
+  align-self: center;
+  font-size: 10.5px;
+  color: var(--dim);
+  letter-spacing: 0.04em;
+}
+.th-user {
+  align-self: flex-end;
+  max-width: 84%;
+  padding: 8px 12px;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.42;
+  word-wrap: break-word;
+  user-select: text;
+}
+.th-user .th-src {
+  display: inline-flex;
+  margin-right: 5px;
+  opacity: 0.75;
+  vertical-align: -2px;
+}
+.th-sys {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 94%;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+  user-select: text;
+}
+.th-sys .orb {
+  margin-top: 1px;
+}
+.th-sys.plan .th-text {
+  color: var(--text);
+}
+.th-sys.plan .th-text b {
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.th-sys.error .th-text {
+  color: #fb7185;
+}
+.thread-input {
+  position: sticky;
+  bottom: -12px;
+  margin: 0 -14px -12px;
+  padding: 10px 12px 12px;
+  background: rgba(22, 20, 18, 0.98);
+  border-top: 1px solid var(--line);
+}
+.thread-input .ti-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 6px 0 11px;
+  border-radius: 11px;
+  border: 1px solid var(--line-2);
+  background: var(--panel-2);
+}
+.thread-input .ti-box:focus-within {
+  border-color: #4d453e;
+}
+.thread-input .command-input {
+  font-size: 13px;
+}
+.thread-input .mention-pop {
+  left: 0;
+}
+.command-bar .cb-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  align-items: center;
+}
