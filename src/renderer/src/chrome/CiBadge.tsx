@@ -1,6 +1,7 @@
-import { CircleCheck, CircleDashed, CircleX, LoaderCircle } from 'lucide-react'
+import { CircleCheck, CircleDashed, CircleX, LoaderCircle, MessageSquareText } from 'lucide-react'
 import { useApp } from '../state/store'
 import { ciSummary, useCi, useCiWatcher, type CiState } from '../workbench/ciStore'
+import { unsent, useFeedback } from '../workbench/prFeedback'
 
 export function CiIcon({ state, size = 13 }: { state: CiState; size?: number }) {
   if (state === 'failing') return <CircleX size={size} className="ci-ic failing" />
@@ -16,6 +17,9 @@ export function CiBadge() {
   useCiWatcher()
   const status = useCi((s) => s.status)
   const open = useApp((s) => s.drawer?.name === 'ci')
+  const feedback = useFeedback((s) => s.result)
+  useApp((s) => s.project?.extras.prSent) // recount when comments are sent
+  const newComments = feedback?.ok ? feedback.prs.reduce((n, p) => n + unsent(p).length, 0) : 0
   if (!status?.ok || (!status.runs.length && !status.prs.length)) return null
   const { state, failingPrs } = ciSummary(status)
   const tip = [
@@ -29,6 +33,11 @@ export function CiBadge() {
       <CiIcon state={state} />
       <span>CI {WORD[state]}</span>
       {failingPrs > 0 && <span className="ci-badge-prs">{failingPrs} PR{failingPrs === 1 ? '' : 's'} red</span>}
+      {newComments > 0 && (
+        <span className="ci-badge-fb" title={`${newComments} new review comment${newComments === 1 ? '' : 's'}`}>
+          <MessageSquareText size={11} /> {newComments}
+        </span>
+      )}
     </button>
   )
 }

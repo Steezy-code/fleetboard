@@ -1,7 +1,7 @@
 // CI watcher: turning gh's run/check JSON into one state per item, and cleaning failed logs.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { cleanLog, overall, runState, summarizeChecks } from '../../src/main/ci'
+import { cleanLog, feedbackOf, overall, runState, summarizeChecks } from '../../src/main/ci'
 
 test('a run is running until it completes, and only real failures are red', () => {
   assert.equal(runState('in_progress', null), 'running')
@@ -47,4 +47,41 @@ test('failed logs lose the job/step columns and timestamps, and keep the end', (
   assert.equal(lines.at(-1), '##[error]Process completed with exit code 1.')
   assert.equal(lines[1], 'line 142')
   assert.ok(!/\d{4}-\d\d-\d\dT/.test(log))
+})
+
+test('review feedback: what a person asked for, not bots, bare approvals, resolved threads or our agents', () => {
+  const user = { login: 'alice', __typename: 'User' }
+  const bot = { login: 'vercel', __typename: 'Bot' }
+  const reviewBot = { login: 'copilot-pull-request-reviewer', __typename: 'Bot' }
+  const got = feedbackOf({
+    comments: {
+      nodes: [
+        { databaseId: 1, author: user, body: 'Can we rename this flag?', createdAt: '2026-10-19T10:00:00Z', url: 'u1' },
+        { databaseId: 2, author: bot, body: 'Preview deployed to https://x.vercel.app', createdAt: '2026-10-19T10:01:00Z', url: 'u2' },
+        { databaseId: 3, author: user, body: '🤖 Renamed it to --dry-run.', createdAt: '2026-10-19T10:30:00Z', url: 'u3' }
+      ]
+    },
+    reviews: {
+      nodes: [
+        { databaseId: 10, author: user, body: '', state: 'APPROVED', submittedAt: '2026-10-19T11:00:00Z', url: 'u10' },
+        { databaseId: 11, author: user, body: 'Needs a test for the empty case.', state: 'CHANGES_REQUESTED', submittedAt: '2026-10-19T09:00:00Z', url: 'u11' },
+        { databaseId: 12, author: reviewBot, body: 'Possible null dereference.', state: 'COMMENTED', submittedAt: '2026-10-19T09:30:00Z', url: 'u12' }
+      ]
+    },
+    reviewThreads: {
+      nodes: [
+        { isResolved: false, path: 'src/a.ts', line: 42, comments: { nodes: [{ databaseId: 20, author: user, body: 'Off by one?', createdAt: '2026-10-19T09:10:00Z', url: 'u20' }] } },
+        { isResolved: true, path: 'src/b.ts', line: 7, comments: { nodes: [{ databaseId: 21, author: user, body: 'Old nit', createdAt: '2026-10-19T08:00:00Z', url: 'u21' }] } }
+      ]
+    }
+  })
+  assert.deepEqual(
+    got.map((c) => [c.id, c.kind, c.path ?? c.state ?? '']),
+    [
+      ['r11', 'review', 'CHANGES_REQUESTED'],
+      ['i20', 'inline', 'src/a.ts'],
+      ['r12', 'review', 'COMMENTED'],
+      ['c1', 'comment', '']
+    ]
+  )
 })
