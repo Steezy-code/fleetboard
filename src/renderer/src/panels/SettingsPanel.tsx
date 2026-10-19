@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
 import { AGENTS } from '@shared/agents'
-import { invoke } from '../lib/api'
+import { invoke, on } from '../lib/api'
 import { useApp } from '../state/store'
 import { Modal, Seg, Switch } from '../ui/Modal'
 
@@ -474,7 +474,10 @@ function PhoneInbox() {
   const [st, setSt] = useState<RemoteStatus | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
-    invoke<RemoteStatus>('remote:status').then(setSt)
+    const load = () => invoke<RemoteStatus>('remote:status').then(setSt, () => {})
+    load()
+    // it moved to a new address, or lost or found its network
+    return on('remote:changed', load)
   }, [])
   if (!st) return null
   const run = async (channel: string, ...args: unknown[]) => {

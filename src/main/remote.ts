@@ -126,6 +126,8 @@ function readBody(req: http.IncomingMessage): Promise<any> {
       }
     })
     req.on('error', () => resolve(null))
+    // destroyed (too big) or the phone went away: no 'end' comes
+    req.on('close', () => resolve(null))
   })
 }
 
@@ -218,7 +220,17 @@ function stop() {
   bound = null
 }
 
-async function start(): Promise<void> {
+let queue: Promise<void> = Promise.resolve()
+let starting = 0
+/** (Re)start on the network's current address; starts run one after another, each with the config of its time. */
+function start(): Promise<void> {
+  starting++
+  const run = queue.then(doStart).finally(() => starting--)
+  queue = run.catch(() => {})
+  return run
+}
+
+async function doStart(): Promise<void> {
   stop()
   lastError = ''
   const address = addressFor(config.network)
@@ -240,6 +252,8 @@ async function start(): Promise<void> {
   try {
     // keep the same port so a saved link keeps working; take a new one if it is taken
     const port = await listen(config.port).catch(() => listen(0))
+    // turned off while it was starting
+    if (!config.enabled) return stop()
     bound = { address, port }
     if (port !== config.port) {
       config.port = port
@@ -249,6 +263,23 @@ async function start(): Promise<void> {
     lastError = `Could not listen on ${address}: ${e?.message ?? e}`
   }
 }
+
+/**
+ * The address can change under a running Inbox: Tailscale connects after the app starts at login, Wi-Fi
+ * hands out a new address, the laptop moves networks. While it is on, follow the network's address:
+ * listen once there is one, move when it changes, stop listening when it is gone (and say so).
+ */
+export async function followAddress(): Promise<boolean> {
+  if (!config.enabled || starting) return false
+  const want = addressFor(config.network)
+  if (want === (bound?.address ?? null) && (bound || !lastError.startsWith('Could not listen'))) return false
+  const before = `${bound?.address}:${bound?.port}:${lastError}`
+  await start()
+  const changed = before !== `${bound?.address}:${bound?.port}:${lastError}`
+  if (changed) ctx?.emit('remote:changed')
+  return changed
+}
+let follower: NodeJS.Timeout | null = null
 
 export function remoteStatus(): RemoteStatus {
   const url = bound ? `http://${bound.address}:${bound.port}/#${config.token}` : undefined
@@ -266,6 +297,8 @@ export async function register(c: MainContext) {
     save()
   }
   if (config.enabled) await start()
+  follower ??= setInterval(() => void followAddress().catch(() => {}), 10_000)
+  follower.unref?.()
   c.ipc.handle('remote:status', () => remoteStatus())
   c.ipc.handle('remote:enable', async (_e, network: RemoteNetwork) => {
     if (!['tailscale', 'lan', 'local'].includes(network)) throw new Error('bad network')
