@@ -29,6 +29,8 @@ interface Props {
   creating?: Creating | null
   onCreate?: (name: string) => void
   onCancelCreate?: () => void
+  /** read a folder the tree has not read yet (too deep, or a big project), once it is opened */
+  onLoad?: (dir: string) => Promise<void>
 }
 
 export function flattenFiles(entries: TreeEntry[], out: TreeEntry[] = []): TreeEntry[] {
@@ -37,6 +39,16 @@ export function flattenFiles(entries: TreeEntry[], out: TreeEntry[] = []): TreeE
     else out.push(e)
   }
   return out
+}
+
+/** The tree with `dir`'s children read in. */
+export function graft(entries: TreeEntry[], dir: string, children: TreeEntry[]): TreeEntry[] {
+  return entries.map((e) => {
+    if (!e.dir) return e
+    if (e.path === dir) return { ...e, children }
+    if (e.children && (dir.startsWith(e.path + '/') || dir.startsWith(e.path + '\\'))) return { ...e, children: graft(e.children, dir, children) }
+    return e
+  })
 }
 
 /** Expand every folder on the way to `path`. */
@@ -53,6 +65,16 @@ export function ancestors(root: string, path: string): string[] {
 export function FileTree(p: Props) {
   const q = (p.query ?? '').trim().toLowerCase()
   const activeRef = useRef<HTMLDivElement>(null)
+  // open folders not read yet, found while rendering: read after it
+  const unread: string[] = []
+  const loading = useRef(new Set<string>())
+  useEffect(() => {
+    for (const d of unread) {
+      if (!p.onLoad || loading.current.has(d)) continue
+      loading.current.add(d)
+      p.onLoad(d).finally(() => loading.current.delete(d))
+    }
+  })
 
   const hits = useMemo(() => {
     if (!q) return null
@@ -114,7 +136,10 @@ export function FileTree(p: Props) {
         )
         if (open) {
           if (e.children) rows.push(...render(e.children, depth + 1, e.path))
-          else rows.push(<div key={e.path + '/…'} className="ftree-none" style={{ paddingLeft: 26 + depth * 14 }}>…</div>)
+          else {
+            unread.push(e.path)
+            rows.push(<div key={e.path + '/…'} className="ftree-none" style={{ paddingLeft: 26 + depth * 14 }}>…</div>)
+          }
         }
       } else {
         const active = e.path === p.active

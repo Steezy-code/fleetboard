@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, net, protocol, session, shell, webContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell, webContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import type { MainContext } from './context'
@@ -12,11 +12,40 @@ import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
 import * as sweep from './sweep'
+import * as goal from './goal'
 import { initFleet } from './fleet'
+import * as remote from './remote'
 import { dirs } from './paths'
+import { catchStrayErrors, logError } from './errors'
+import { endOrphans } from './orphans'
 
 let win: BrowserWindow | null = null
+
+/** The session web tiles browse in (WebNode's <webview partition>). */
+const WEB_PARTITION = 'persist:fleetboard-web'
+const HARMLESS = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'])
+function webPermission(permission: string, url: string | undefined) {
+  if (HARMLESS.has(permission)) return true
+  try {
+    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(url ?? '').hostname)
+  } catch {
+    return false
+  }
+}
+
+// Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('will-attach-webview', (_ev, prefs) => {
+    delete prefs.preload
+    prefs.nodeIntegration = false
+    prefs.nodeIntegrationInSubFrames = false
+    prefs.contextIsolation = true
+    prefs.sandbox = true
+  })
+})
 let quitConfirmed = false
+/** the window was reloaded after its page crashed; the new page says so once */
+let crashRecovered = false
 
 // On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
 // with these flags (Vulkan backend). Without an adapter the models fall back to slower CPU wasm.
@@ -60,7 +89,8 @@ function createWindow() {
     }
   })
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    // only web and mail links leave the app; other schemes could start arbitrary handlers
+    if (/^(https?:\/\/|mailto:)/i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
   // Never let a stray link navigate the app window away; open it in the browser instead.
@@ -69,6 +99,28 @@ function createWindow() {
     if (dev && url.startsWith(dev)) return
     e.preventDefault()
     if (/^https?:\/\//.test(url)) shell.openExternal(url)
+  })
+  // The window's page died (out of memory, a GPU fault): the consoles live on in this process, and a new
+  // page picks them up again like a reopened board. Repeated crashes are not retried forever.
+  const crashes: number[] = []
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || !win || win.isDestroyed()) return
+    const now = Date.now()
+    crashes.push(now)
+    while (now - crashes[0] > 60_000) crashes.shift()
+    console.error(`window crashed (${details.reason}, exit ${details.exitCode})`)
+    if (crashes.length > 3) {
+      // not showErrorBox: it would hold up this process, and with it every console's output
+      void dialog.showMessageBox({
+        type: 'error',
+        title: 'Fleetboard keeps crashing',
+        message: `The window crashed ${crashes.length} times in a minute (${details.reason}).`,
+        detail: 'Your consoles are still running. Restart Fleetboard to see them again.'
+      })
+      return
+    }
+    crashRecovered = true
+    win.webContents.reload()
   })
   win.on('closed', () => {
     win = null
@@ -85,22 +137,31 @@ function createWindow() {
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
-  ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.paste(id, text, submit))
+  ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.send(id, String(text), submit))
   ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
   ipcMain.handle('pty:kill', (_e, id: string) => ptys.kill(id))
   ipcMain.handle('pty:pause', (_e, id: string) => ptys.pause(id))
   ipcMain.handle('pty:resume', (_e, id: string) => ptys.resume(id))
   ipcMain.handle('pty:buffer', (_e, id: string) => ptys.buffer(id))
   ipcMain.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
+  ipcMain.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
+  ipcMain.handle('pty:answer', (_e, id: string, answer) => ptys.answer(id, answer))
+  ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
 
-  ipcMain.handle('app:quit', () => {
+  ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
-    ptys.dispose()
+    await ptys.dispose()
     // the board is already saved; don't let a slow child process keep the app alive
     win?.destroy()
     win = null
     setTimeout(() => app.exit(0), 300)
+  })
+  // asked once by a page as it starts: was it reloaded after the window crashed?
+  ipcMain.handle('app:crashRecovered', () => {
+    const was = crashRecovered
+    crashRecovered = false
+    return was
   })
   ipcMain.handle('app:paths', () => ({ root: dirs.root, home: app.getPath('home'), assets: dirs.assets }))
   ipcMain.handle('win:minimize', () => win?.minimize())
@@ -143,20 +204,31 @@ app.on('second-instance', () => {
   win.focus()
 })
 
+catchStrayErrors((message) => ctx.emit('app:error', message))
+
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))
   // Microphone for push-to-talk; everything else stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read'))
-  await startHookServer((id, status, event) => ptys.hook(id, status, event))
+  // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
+  // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
+  const web = session.fromPartition(WEB_PARTITION)
+  web.setPermissionRequestHandler((_wc, permission, cb, details) => cb(webPermission(permission, details.requestingUrl)))
+  web.setPermissionCheckHandler((_wc, permission, origin) => webPermission(permission, origin))
+  // before any console starts: what a run that died left running would otherwise work on unseen
+  const orphans = await endOrphans().catch(() => 0)
+  if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
+  await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
-  for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal]) m.register(ctx)
   sweep.register(ctx)
   await initFleet(ctx)
+  await remote.register(ctx)
   createWindow()
 })
 
-app.on('window-all-closed', () => {
-  ptys.dispose()
+app.on('window-all-closed', async () => {
+  await ptys.dispose()
   app.quit()
 })

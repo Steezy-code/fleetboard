@@ -1123,3 +1123,49 @@
 .focus-bar .btn.sm {
   border-radius: 999px;
 }
+
+/* Settings → Phone Inbox: the QR code keeps its white quiet zone on the dark panel */
+.phone-qr {
+  flex: none;
+  width: 156px;
+  height: 156px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+.phone-qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* a tile, panel or drawer that failed to render (ui/Boundary.tsx) */
+.boundary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  margin: 8px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  user-select: text;
+}
+.boundary-title {
+  font-weight: 600;
+}
+.boundary-detail {
+  font-family: var(--mono);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.boundary.compact {
+  display: inline;
+  padding: 0 6px;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--danger);
+}

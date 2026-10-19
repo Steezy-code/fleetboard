@@ -83,6 +83,12 @@
 .ic-icon.ok {
   color: var(--ok);
 }
+.ic-title {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .ic-what {
   margin: 0;
   padding: 7px 9px;

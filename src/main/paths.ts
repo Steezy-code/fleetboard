@@ -15,10 +15,11 @@ export const dirs = {
 }
 for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true })
 
-/** Write JSON atomically so a crash mid-write never corrupts state. */
-export function writeJsonAtomic(file: string, value: unknown) {
+/** Write JSON atomically so a crash mid-write never corrupts state. `mode` 0o600 for files only the user may read. */
+export function writeJsonAtomic(file: string, value: unknown, mode?: number) {
   const tmp = `${file}.${process.pid}.tmp`
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2))
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), mode === undefined ? undefined : { mode })
+  if (mode !== undefined) fs.chmodSync(tmp, mode)
   fs.renameSync(tmp, file)
 }
 

@@ -2,22 +2,26 @@ import type { AgentDef } from './types'
 
 // Catalog of terminal coding agents. Each runs as its real interactive CLI in a PTY.
 // resumeArgs: the CLI's native "pick up the last conversation" flags.
+// session: start a conversation under an id Fleetboard picks, and resume exactly that one later.
 // yoloArgs: the CLI's auto-approval flag, only used when the global opt-in is on.
 export const AGENTS: AgentDef[] = [
   {
     id: 'claude', name: 'Claude Code', vendor: 'Anthropic', bin: 'claude', color: '#d97757',
     resumeArgs: ['--continue'], yoloArgs: ['--dangerously-skip-permissions'], editsArgs: ['--permission-mode', 'acceptEdits'], configEnv: 'CLAUDE_CONFIG_DIR',
+    session: { start: (id) => ['--session-id', id], resume: (id) => ['--resume', id] },
     headless: (p) => ['-p', p], homepage: 'https://claude.com/product/claude-code',
     install: 'npm i -g @anthropic-ai/claude-code'
   },
   {
     id: 'codex', name: 'Codex', vendor: 'OpenAI', bin: 'codex', color: '#6b7cff',
-    resumeArgs: ['resume', '--last'], yoloArgs: ['--dangerously-bypass-approvals-and-sandbox'], editsArgs: ['--full-auto'], configEnv: 'CODEX_HOME',
+    resumeArgs: ['resume', '--last'], yoloArgs: ['--dangerously-bypass-approvals-and-sandbox'], editsArgs: ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'], configEnv: 'CODEX_HOME',
+    session: { resume: (id) => ['resume', id] },
     headless: (p) => ['exec', '--skip-git-repo-check', p], homepage: 'https://openai.com/codex/', install: 'npm i -g @openai/codex'
   },
   {
     id: 'gemini', name: 'Gemini CLI', vendor: 'Google', bin: 'gemini', color: '#4f8df7',
     resumeArgs: ['--resume', 'latest'], yoloArgs: ['--yolo'], editsArgs: ['--approval-mode', 'auto_edit'], headless: (p) => ['-p', p],
+    session: { start: (id) => ['--session-id', id], resume: (id) => ['--resume', id] },
     homepage: 'https://github.com/google-gemini/gemini-cli', install: 'npm i -g @google/gemini-cli'
   },
   { id: 'grok', name: 'Grok', vendor: 'xAI', bin: 'grok', color: '#e5e5e5', headless: (p) => ['-p', p], homepage: 'https://x.ai/' },

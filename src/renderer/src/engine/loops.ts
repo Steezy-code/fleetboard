@@ -1,7 +1,8 @@
 import { useApp, allConsoles } from '../state/store'
-import { runCli, uid } from '../lib/api'
+import { invoke, runCli, uid } from '../lib/api'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
 import type { ConsoleStatus } from '@shared/types'
+import { stripAnsi } from '@shared/ansi'
 
 // Loops: recurring instructions typed into consoles on a schedule, when an agent goes idle, or when
 // its output matches. Stored per project in extras.loops; run by startLoops() (registered engine).
@@ -143,6 +144,8 @@ export function describeLoop(l: Pick<Loop, 'trigger' | 'target' | 'stop'>): stri
         ? `, until \`${s.command || '…'}\` passes`
         : `, until ${agentLabel(s.judgeAgent).replace(/ Code$| CLI$/, '')} judges the goal met`
   }
+  // nothing ends it: say so, it costs tokens for as long as it runs
+  if (!limits.length && !s.goal) sentence += ', with no end: it runs until you turn it off'
   return sentence + '.'
 }
 
@@ -161,9 +164,10 @@ const OUTPUT_DEBOUNCE_MS = 30_000
 const IDLE_DEBOUNCE_MS = 8000
 const BUF = 4096
 
-const strip = (s: string) =>
-  // eslint-disable-next-line no-control-regex
-  s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-_]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
+// TUIs place words with cursor moves (Claude Code: ESC[9G before each word); those become spaces,
+// so a pattern like "tests failed" matches what the user sees
+// eslint-disable-next-line no-control-regex
+const strip = (s: string) => stripAnsi(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '')
 
 const buffers = new Map<string, string>()
 const dataSubs = new Map<string, () => void>()
@@ -182,12 +186,18 @@ function compile(t: Extract<LoopTrigger, { kind: 'output' }>): RegExp | null {
   }
 }
 
-/** Consoles this loop may fire into now: live, not paused, active workspace unless background. */
+/**
+ * Statuses a loop never types into. A console that needs you shows a question: the instruction's
+ * keys would land in it and its Enter would pick the highlighted answer (often "Yes").
+ */
+const NOT_NOW = new Set<ConsoleStatus>(['needs-you', 'starting', 'paused', 'exited', 'done'])
+
+/** Consoles this loop may fire into now: live, not asking or stopped, active workspace unless background. */
 function eligible(l: Loop, ids = loopTargets(l)): string[] {
   const app = useApp.getState()
   const activeId = app.project?.activeWorkspaceId
   const wsOf = new Map(allConsoles().map((c) => [c.id, c.workspaceId]))
-  return ids.filter((id) => isLive(id) && app.statuses[id] !== 'paused' && (l.background || wsOf.get(id) === activeId))
+  return ids.filter((id) => isLive(id) && !NOT_NOW.has(app.statuses[id]) && (l.background || wsOf.get(id) === activeId))
 }
 
 function retire(l: Loop, reason: 'goal' | 'runs' | 'time', note?: string) {
@@ -203,10 +213,13 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
   if (!cwd) return { met: false, note: 'no project' }
   const s = l.stop
   if (s.goalKind === 'command') {
-    const prompt = `Run \`${s.command}\` in this repo. Reply with only PASS if it exits 0, otherwise FAIL.`
-    const { text } = await runCli({ prompt, cwd, allowTools: true }).promise
-    const met = /\bPASS\b/i.test(text) && !/\bFAIL\b/i.test(text)
-    return { met, note: met ? `\`${s.command}\` passed` : `\`${s.command}\` failed` }
+    // run by the app itself: its exit code decides (a model asked to run it could also edit the code)
+    const r = await invoke<{ code: number | null; tail: string; timedOut?: boolean; error?: string }>('goal:check', cwd, s.command)
+    const last = r.tail.trim().split('\n').filter((l) => l.trim()).at(-1)?.trim().slice(0, 140)
+    if (r.code === 0) return { met: true, note: `\`${s.command}\` passed` }
+    if (r.error) return { met: false, note: `\`${s.command}\` could not run: ${r.error}` }
+    if (r.timedOut) return { met: false, note: `\`${s.command}\` took too long and was stopped` }
+    return { met: false, note: `\`${s.command}\` failed (exit ${r.code})${last ? `: ${last}` : ''}` }
   }
   const names = new Map(allConsoles().map((c) => [c.id, c.data.name as string]))
   const tails = await Promise.all(consoleIds.slice(0, 6).map(async (id) => `### ${names.get(id) ?? id}\n${(await consoleTail(id, 3000)).trim()}`))

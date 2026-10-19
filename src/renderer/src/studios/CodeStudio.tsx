@@ -4,11 +4,12 @@ import { Modal } from '../ui/Modal'
 import { fileUrl, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { CodeEditor } from '../workbench/CodeEditor'
-import { FileTree, ancestors, type Creating, type TreeEntry } from '../workbench/FileTree'
+import { FileTree, ancestors, graft, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { FileIcon } from '../workbench/icons'
 import { isImagePath, langFromPath, langLabel } from '../workbench/markdown'
 import { baseName, dirname, joinPath, relativeTo } from '../workbench/paths'
 import { MAX_TEXT_BYTES, type FileStat } from '../workbench/useFileText'
+import type { WriteResult } from '@shared/types'
 
 interface Doc {
   path: string
@@ -45,10 +46,18 @@ export default function CodeStudio(props: { path?: string }) {
     setTree(t)
   }, [root])
 
+  /** a folder the first read left out, read once it is opened */
+  const loadDir = useCallback(async (dir: string) => {
+    const children = await invoke<TreeEntry[]>('fs:tree', dir, 1).catch(() => null)
+    if (children) setTree((t) => t && graft(t, dir, children))
+  }, [])
+
   useEffect(() => {
     loadTree()
   }, [loadTree])
 
+  /** the file asked for last: an earlier open whose read comes back later is dropped */
+  const opening = useRef('')
   const open = useCallback(
     async (path: string, force = false) => {
       const cur = docRef.current
@@ -59,7 +68,9 @@ export default function CodeStudio(props: { path?: string }) {
       }
       setLoadingFile(true)
       setExpanded((s) => new Set([...s, ...ancestors(root, path)]))
+      opening.current = path
       const st = await invoke<FileStat | null>('fs:stat', path).catch(() => null)
+      if (opening.current !== path) return
       if (!st || st.dir) {
         setDoc({ path, text: null, saved: '', error: st?.dir ? 'This is a folder' : 'File not found', mtime: 0 })
       } else if (isImagePath(path)) {
@@ -69,9 +80,11 @@ export default function CodeStudio(props: { path?: string }) {
       } else {
         try {
           const text = await invoke<string>('fs:read', path)
+          if (opening.current !== path) return
           if (text.slice(0, 8000).includes('\u0000')) setDoc({ path, text: null, saved: '', binary: true, mtime: st.mtime })
           else setDoc({ path, text, saved: text, mtime: st.mtime })
         } catch (e: any) {
+          if (opening.current !== path) return
           setDoc({ path, text: null, saved: '', error: String(e?.message ?? e), mtime: st.mtime })
         }
       }
@@ -122,7 +135,22 @@ export default function CodeStudio(props: { path?: string }) {
     }
     setSaving(true)
     try {
-      await invoke('fs:write', cur.path, cur.text)
+      // only over what we loaded: an agent may have changed the file since
+      const r = await invoke<WriteResult>('fs:write', cur.path, cur.text, { base: cur.saved })
+      if (!r.ok) {
+        const disk = r.current
+        const name = cur.path.split('/').pop()
+        const app = useApp.getState()
+        if (await app.confirm({ title: `${name} changed on disk`, body: `It was ${disk === null ? 'deleted' : 'changed'} since you opened it, maybe by an agent. Replace it with your version?`, confirm: 'Replace with mine', danger: true })) {
+          await invoke<WriteResult>('fs:write', cur.path, cur.text)
+        } else {
+          if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your unsaved edits to it are lost. Otherwise you keep editing yours.', confirm: 'Load the version on disk', danger: true }))) {
+            const st = await invoke<FileStat | null>('fs:stat', cur.path)
+            setDoc((d) => (d && d.path === cur.path ? { ...d, text: disk, saved: disk, mtime: st?.mtime ?? d.mtime } : d))
+          }
+          return false
+        }
+      }
       const st = await invoke<FileStat | null>('fs:stat', cur.path)
       setDoc((d) => (d && d.path === cur.path ? { ...d, saved: cur.text!, mtime: st?.mtime ?? d.mtime } : d))
       flashSaved()
@@ -243,6 +271,7 @@ export default function CodeStudio(props: { path?: string }) {
                 active={doc?.path}
                 query={query}
                 expanded={expanded}
+                onLoad={loadDir}
                 onToggle={(d) =>
                   setExpanded((s) => {
                     const n = new Set(s)

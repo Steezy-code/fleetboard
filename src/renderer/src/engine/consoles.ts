@@ -20,6 +20,21 @@ export function wireConsoleEvents() {
     app().setLive(id, false)
     app().setStatus(id, 'exited')
   })
+  // the conversation a console runs under: what reopening the board resumes
+  on('pty:session', (id: string, sessionId: string) => {
+    const next = sessionId || undefined
+    if (allConsoles().find((c) => c.id === id)?.data.sessionId !== next) app().updateNodeData(id, { sessionId: next })
+  })
+  // something failed in the background (it is in ~/.fleetboard/logs/main.log); the app keeps running
+  on('app:error', (message: string) => app().toast(`Something went wrong in the background: ${message}`, 'warn'))
+  on('pty:lostSession', (id: string) => {
+    const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'A console'
+    app().toast(`${name}'s last conversation could not be resumed (its CLI no longer has it), so it started a new one.`, 'warn')
+  })
+  on('pty:held', (id: string) => {
+    const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'That console'
+    app().toast(`${name} is asking something, so your message waits until it's answered (see the Inbox).`, 'warn')
+  })
 }
 
 export const consoleNodes = (): BoardNode<ConsoleData>[] => (activeWs()?.nodes.filter((n) => n.type === 'console') ?? []) as BoardNode<ConsoleData>[]
@@ -126,6 +141,7 @@ export async function startConsole(node: BoardNode<ConsoleData>, cols: number, r
     cols,
     rows,
     resume,
+    sessionId: node.data.sessionId,
     autoApprove: node.data.autoApprove,
     acceptEdits: node.data.acceptEdits,
     profileId: node.data.profileId,
@@ -183,7 +199,7 @@ export function resolveTargets(word: string): string[] {
   const byName = consoles.filter((c) => c.data.name.toLowerCase() === w || c.data.name.toLowerCase().replace(/\s+/g, '') === w.replace(/\s+/g, ''))
   if (byName.length) return byName.map((c) => c.id)
   const group = ws?.groups.find((g) => g.name.toLowerCase() === w || g.role.toLowerCase() === w)
-  if (group) return ws!.nodes.filter((n) => n.groupId === group.id).map((n) => n.id)
+  if (group) return ws!.nodes.filter((n) => n.groupId === group.id && n.type === 'console').map((n) => n.id)
   const byAgent = consoles.filter((c) => c.data.agentId === w || agentLabel(c.data.agentId).toLowerCase() === w)
   return byAgent.map((c) => c.id)
 }

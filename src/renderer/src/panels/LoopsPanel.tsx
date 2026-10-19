@@ -459,7 +459,7 @@ function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft:
                   {s.goalKind === 'command' ? (
                     <>
                       <input className="input mono" placeholder="npm test" value={s.command} onChange={(e) => setStop({ command: e.target.value })} />
-                      <div className="dim small">Run in the project folder by your planner CLI. Exit code 0 means the goal is met.</div>
+                      <div className="dim small">Fleetboard runs it in the project folder, in your shell, before each run. Exit code 0 means the goal is met.</div>
                     </>
                   ) : (
                     <>

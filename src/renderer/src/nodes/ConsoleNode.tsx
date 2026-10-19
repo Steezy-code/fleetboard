@@ -7,7 +7,7 @@ import type { BoardNode, ConsoleData } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
-import { agentColor, agentLabel, killConsoles, onConsoleData, sendToConsole, spawnConsoles, startConsole } from '../engine/consoles'
+import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
 
@@ -100,6 +100,8 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
         term.write(buffer)
         setPhase('running')
         useApp.getState().setLive(node.id, true)
+        // started elsewhere (a team console the fleet launched): a reopened board asks before resuming it too
+        if (node.data.launch !== 'ask') useApp.getState().updateNodeData(node.id, { launch: 'ask' })
         return
       }
       const canResume = !!agent?.resumeArgs
@@ -146,14 +148,17 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
     if (status === 'exited' && phase === 'running') setPhase('exited')
   }, [status, phase])
 
-  // Deliver a queued first prompt once the CLI is ready for input.
+  // Deliver a queued first prompt (spawn with a prompt, a handoff's brief). The main process waits until
+  // the CLI can take input and makes sure Enter took: typed at the first "idle", Claude Code could drop it.
   useEffect(() => {
     const pending = (node.data as any).pendingPrompt as string | undefined
-    if (pending && live && status === 'idle') {
-      useApp.getState().updateNodeData(node.id, { pendingPrompt: undefined })
-      sendToConsole(node.id, pending)
-    }
-  }, [status, live, node.id, node.data])
+    if (!pending || !live) return
+    useApp.getState().updateNodeData(node.id, { pendingPrompt: undefined })
+    invoke<boolean>('pty:deliver', node.id, pending.trim()).then(
+      (ok) => !ok && useApp.getState().toast(`${node.data.name} did not start in time; its first message was not sent`, 'warn'),
+      () => {}
+    )
+  }, [live, node.id, node.data])
 
   async function launch(resume: boolean) {
     const term = termRef.current!
@@ -164,7 +169,8 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       // From now on a reopened board asks before resuming.
       useApp.getState().updateNodeData(node.id, { launch: 'ask' })
     } catch (e) {
-      term.write(`\r\n\x1b[31mCould not start ${agentLabel(node.data.agentId)}: ${String(e)}\x1b[0m\r\n`)
+      const why = String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      term.write(`\r\n\x1b[31mCould not start ${agentLabel(node.data.agentId)}: ${why}\x1b[0m\r\n`)
       setPhase('exited')
     }
   }

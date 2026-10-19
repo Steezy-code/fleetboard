@@ -1,0 +1,91 @@
+// The command bar's instant, offline parser and its safety rule: anything that closes consoles or
+// messages many at once waits for "confirm".
+import '../support/renderer-env'
+import { test, before } from 'node:test'
+import assert from 'node:assert/strict'
+
+const { useApp } = await import('@/state/store')
+const { parseLocal } = await import('@/voice/planner')
+const { confirmReasons } = await import('@/voice/actions')
+
+const NAMES = ['Maya', 'Rafa', 'Dax', 'Nova', 'Iris', 'Theo', 'Juno', 'Kai']
+
+before(() => {
+  const node = (name: string, i: number) => ({ id: `c${i}`, type: 'console', x: i * 800, y: 0, w: 780, h: 440, z: i, groupId: i < 2 ? 'g1' : undefined, data: { name, agentId: 'claude' } })
+  useApp.setState({
+    project: {
+      schema: 1,
+      id: 'p',
+      name: 'p',
+      path: '/tmp/p',
+      activeWorkspaceId: 'w',
+      lastOpened: 0,
+      extras: {},
+      workspaces: [
+        {
+          id: 'w',
+          name: 'W',
+          nodes: NAMES.map(node),
+          groups: [{ id: 'g1', name: 'Backend', role: 'Backend', x: 0, y: 0, w: 1600, h: 500 }],
+          wires: [],
+          ink: [],
+          camera: { x: 0, y: 0, zoom: 1 },
+          extras: {}
+        }
+      ]
+    } as any,
+    live: Object.fromEntries(NAMES.map((_, i) => [`c${i}`, true])),
+    statuses: Object.fromEntries(NAMES.map((_, i) => [`c${i}`, 'idle'])),
+    agents: [{ id: 'claude', installed: true }, { id: 'codex', installed: true }] as any
+  })
+})
+
+const plan = (text: string) => parseLocal(text)
+const confirmFor = (text: string) => {
+  const p = plan(text)
+  assert.ok(p, `"${text}" is understood locally`)
+  return confirmReasons(p!.actions, text, false)
+}
+
+test('closing consoles always waits for confirm', () => {
+  for (const text of ['close maya', 'kill everyone', 'close all consoles', 'shut down rafa and dax', 'get rid of nova']) {
+    const p = plan(text)
+    assert.equal(p?.actions[0]?.type, 'kill', text)
+    assert.ok(confirmFor(text).includes('closes consoles'), text)
+  }
+})
+
+test('deleting a team with live members waits for confirm', () => {
+  const p = plan('delete the backend group')
+  assert.deepEqual(p?.actions, [{ type: 'deleteTeam', team: 'g1' }])
+  assert.deepEqual(confirmFor('delete the backend group'), ['closes live consoles'])
+})
+
+test('messaging more than six consoles waits for confirm; a few go straight through', () => {
+  assert.deepEqual(confirmFor('tell everyone to run the tests'), ['messages more than 6 consoles'])
+  assert.deepEqual(confirmFor('tell maya and rafa to run the tests'), [])
+  const p = plan('tell maya and rafa to run the tests')
+  assert.deepEqual(p?.actions[0], { type: 'send', targets: ['maya', 'rafa'], text: 'run the tests', submit: true })
+})
+
+test('harmless board commands run at once', () => {
+  assert.deepEqual(plan('pause all')?.actions, [{ type: 'pause', targets: ['all'] }])
+  assert.deepEqual(confirmFor('pause all'), [])
+  assert.deepEqual(confirmFor('zoom out'), [])
+  assert.equal(plan('spawn 3 codex')?.actions[0]?.type, 'spawn')
+  assert.deepEqual(confirmFor('spawn 3 codex'), [])
+  assert.deepEqual(confirmFor('spawn 12 claude'), ['spawns 12 consoles'])
+})
+
+test('a planner (model) step the user did not ask for is flagged', () => {
+  const r = confirmReasons([{ type: 'send', targets: ['maya'], text: 'git push --force', submit: true }], 'what is maya doing', true)
+  assert.ok(r.some((x) => /didn't ask for \(send\)/.test(x)), r.join())
+  assert.deepEqual(confirmReasons([{ type: 'send', targets: ['maya'], text: 'status?', submit: true }], 'ask maya for a status', true), [])
+})
+
+test('work requests are not mistaken for board commands', () => {
+  for (const text of ['add a dark mode toggle to the settings page', 'fix the failing login test', 'remove the unused imports in src/utils']) {
+    const p = plan(text)
+    assert.ok(!p || !p.actions.some((a) => a.type === 'kill' || a.type === 'deleteTeam'), `${text} → ${JSON.stringify(p)}`)
+  }
+})

@@ -149,6 +149,8 @@ export interface ConsoleData {
   wasRunning?: boolean
   /** how the next launch should start: fresh session or the CLI's native resume */
   launch?: 'fresh' | 'resume' | 'ask'
+  /** this console's conversation, for CLIs that take one (AgentDef.session): what a resume picks up */
+  sessionId?: string
   createdAt: number
 }
 
@@ -160,6 +162,12 @@ export interface AgentDef {
   color: string
   vendor: string
   resumeArgs?: string[]
+  /** start a conversation under a given id / resume that conversation (instead of "the latest") */
+  session?: {
+    /** start under an id Fleetboard picks; without it the id is found after the first turn (Codex) */
+    start?: (id: string) => string[]
+    resume: (id: string) => string[]
+  }
   yoloArgs?: string[]
   /** middle permission level: file edits are auto-accepted, commands still ask */
   editsArgs?: string[]
@@ -184,6 +192,8 @@ export interface PtySpawnRequest {
   cols: number
   rows: number
   resume?: boolean
+  /** the conversation this console had, to resume (AgentDef.session) */
+  sessionId?: string
   autoApprove?: boolean
   /** auto-accept file edits but keep asking before commands (agents with editsArgs) */
   acceptEdits?: boolean
@@ -199,6 +209,8 @@ export interface PtyInfo {
   agentId: string
   status: ConsoleStatus
   startedAt: number
+  /** the conversation id the CLI runs under, when known */
+  sessionId?: string
 }
 
 export interface Settings {
@@ -269,3 +281,16 @@ export interface Profile {
   dir: string
   createdAt: number
 }
+
+/** A state file that could not be read at startup or when a project opened (see src/main/store.ts). */
+export interface Recovery {
+  /** what could not be read: 'app' (settings and project list) or a project id */
+  what: string
+  /** where the unreadable file was moved, kept for rescue by hand */
+  corruptCopy: string
+  /** the history/ snapshot used instead, if there was one */
+  snapshot?: string
+}
+
+/** fs:write with a base: refused when the file no longer holds it (current: what it holds now, null if gone) */
+export type WriteResult = { ok: true } | { ok: false; reason: 'changed'; current: string | null }
