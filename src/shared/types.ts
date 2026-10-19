@@ -214,6 +214,8 @@ export interface Settings {
   /** cad: wheel zooms at the cursor, middle-drag pans, left-drag selects (AutoCAD). trackpad: wheel pans, drag pans */
   navigation: 'cad' | 'trackpad'
   showMinimap: boolean
+  /** Helm: the command bar reads the whole board and suggests the best route (playbook, team, message, actions) */
+  helm: boolean
   names: string[]
   customAgents: AgentDef[]
 }
@@ -230,6 +232,7 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmKill: true,
   navigation: 'cad',
   showMinimap: true,
+  helm: true,
   names: [
     'Maya', 'Rafa', 'Iris', 'Zoe', 'Leo', 'Nova', 'Kai', 'Otto', 'Ada', 'Bex', 'Cy', 'Pip', 'Dax', 'Ren', 'Juno',
     'Milo', 'Ivy', 'Eli', 'Sol', 'Tess', 'Finn', 'Lux', 'Wren', 'Ash'

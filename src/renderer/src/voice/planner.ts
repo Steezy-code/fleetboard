@@ -2,7 +2,8 @@
 //   1. a pending confirmation consumes "confirm" / "cancel"
 //   2. dictation: "@maya …", "Maya, …", "to Maya, …" → typed into those consoles (voice: no Enter; typed: Enter)
 //   3. a fast local rule parser for common board commands (offline, instant)
-//   4. otherwise the CLI planner (settings.plannerAgent via runCli) with a board snapshot → JSON actions
+//   4. Helm (settings.helm): reads the whole board, answers and/or suggests 1-3 one-click routes
+//   5. Helm off (or failed): work → the Lead; board commands → the CLI planner (JSON actions)
 // Destructive or unrequested steps wait for a spoken / clicked confirmation.
 import { activeLead, looksLikeBoardCommand, sendGoal } from '../engine/fleet'
 import { AGENTS } from '@shared/agents'
@@ -29,6 +30,7 @@ import {
   runAction
 } from './actions'
 import { setVoice, showReply, useThread, useVoice } from './thread'
+import { askHelm, dismissHelm, pickHelmOption, runHelmOption, showHelm, useHelm } from './helm/helm'
 import { speak, stopSpeaking } from './tts'
 
 export type Source = 'voice' | 'typed'
@@ -444,12 +446,8 @@ function snapshot() {
   }
 }
 
-function plannerPrompt(text: string): string {
-  return `You are the planner of Fleetboard, a visual board of AI coding-agent terminals ("consoles").
-Turn the user's spoken or typed request into board actions. Reply with ONLY a JSON object, no prose:
-{"actions":[...],"say":"<one short spoken confirmation, under 15 words>"}
-
-Action schema (use console ids or exact console names, team ids or names):
+/** The board-action schema, shared by the planner and Helm prompts. */
+export const ACTION_SCHEMA = `Action schema (use console ids or exact console names, team ids or names):
 - {"type":"spawn","agent":"<agent id>","count":N,"team":"<new or existing team name>?","role":"Frontend|Backend|Testers|Reviewers|Design|Docs|Security|General?","prompt":"<first message for each new console>?"}
 - {"type":"send","targets":["<console/team/agent/'all'>"],"text":"<message typed into the console>","submit":true}
 - {"type":"pause","targets":[...]} / {"type":"resume","targets":[...]} / {"type":"kill","targets":[...]}
@@ -459,7 +457,14 @@ Action schema (use console ids or exact console names, team ids or names):
 - {"type":"handoff","from":["<console>"],"toAgent":"<agent id>","note":"<extra instruction>?"}
 - {"type":"openPanel","name":"missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|presets|composer|orchestrator|git|accounts|skills|chat"}
 - {"type":"focus","target":"<console or team>"} / {"type":"zoom","mode":"in|out|fit"} / {"type":"newWorkspace","name":"<name>?"}
-- {"type":"say","text":"<answer>"} (for questions about the board; answer from the snapshot)
+- {"type":"say","text":"<answer>"} (for questions about the board; answer from the snapshot)`
+
+function plannerPrompt(text: string): string {
+  return `You are the planner of Fleetboard, a visual board of AI coding-agent terminals ("consoles").
+Turn the user's spoken or typed request into board actions. Reply with ONLY a JSON object, no prose:
+{"actions":[...],"say":"<one short spoken confirmation, under 15 words>"}
+
+${ACTION_SCHEMA}
 
 Rules:
 - Do only what was asked. Never add kills, deletions or messages the user did not request.
@@ -504,7 +509,7 @@ async function askPlanner(text: string): Promise<{ actions: Action[]; say: strin
 }
 
 /** Leave the thinking state without clobbering a listen that started meanwhile. */
-function doneThinking() {
+export function doneThinking() {
   setVoice(useVoice.getState().phase === 'thinking' ? { phase: 'idle', cancelThinking: null } : { cancelThinking: null })
 }
 
@@ -512,10 +517,11 @@ function doneThinking() {
 
 const thread = () => useThread.getState()
 
-function reply(text: string) {
+/** Record a line in the thread, show it in the caption (unless something else shows it) and speak it. */
+export function reply(text: string, caption = true) {
   if (!text) return
   thread().add('system', text)
-  showReply(text)
+  if (caption) showReply(text)
   speak(text)
 }
 
@@ -561,7 +567,8 @@ export function cancelPending() {
   reply('Cancelled.')
 }
 
-async function plan(actions: Action[], sayText: string, userText: string, fromPlanner: boolean) {
+/** Run board actions, or park them behind a spoken / clicked confirm when they need one. */
+export async function plan(actions: Action[], sayText: string, userText: string, fromPlanner: boolean) {
   if (!actions.length) {
     reply(sayText || "I'm not sure what to do with that.")
     return
@@ -597,6 +604,18 @@ export async function runCommand(raw: string, source: Source) {
     setVoice({ pending: null })
     thread().add('system', 'Previous plan dropped.')
   }
+  // a Helm card is up: "yes" / "the second one" picks, "no" dismisses, anything else replaces it
+  if (useHelm.getState().card) {
+    const pick = pickHelmOption(light)
+    if (pick === 'dismiss') {
+      dismissHelm()
+      stopSpeaking()
+      showReply('Okay.', 1500)
+      return
+    }
+    if (pick != null) return runHelmOption(pick)
+    dismissHelm()
+  }
   if (/^(stop|stop talking|shut up|be quiet|quiet|silence|cancel|never ?mind)$/.test(light)) {
     stopSpeaking()
     useVoice.getState().cancelThinking?.()
@@ -628,8 +647,24 @@ export async function runCommand(raw: string, source: Source) {
   const local = parseLocal(text)
   if (local) return plan(local.actions, local.say, text, false)
 
-  // 4. work for the team: anything that isn't about the board itself goes to the Lead
-  if (!looksLikeBoardCommand(text)) {
+  // 4. Helm reads the whole board and suggests the best route
+  let helmFailed = false
+  if (app.settings.helm !== false) {
+    try {
+      const res = await askHelm(text)
+      if (!res) return // cancelled with the stop button
+      showHelm(res, text, source)
+      return
+    } catch (e: any) {
+      helmFailed = true
+      thread().add('error', `Helm couldn't plan that: ${e?.message ?? e}`)
+    }
+  }
+  const board = looksLikeBoardCommand(text)
+  if (helmFailed) app.toast(`Helm couldn't plan that; sent it to the ${board ? 'planner' : 'Lead'}`, 'warn')
+
+  // 5a. work for the team: anything that isn't about the board itself goes to the Lead
+  if (!board) {
     try {
       const lead = await sendGoal(text)
       const line = lead && activeLead()?.id === lead.id ? `Sent to ${lead.name}.` : 'Started a Lead for this. It will plan, delegate and report back in your Inbox.'
@@ -643,7 +678,7 @@ export async function runCommand(raw: string, source: Source) {
     return
   }
 
-  // 5. CLI planner for board commands the local rules didn't catch
+  // 5b. CLI planner for board commands the local rules didn't catch
   try {
     const res = await askPlanner(text)
     if (!res) return

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { Check, ChevronDown, ChevronUp, GitMerge, Inbox as InboxIcon, MessageCircleQuestion, ShieldQuestion, SquareTerminal, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronUp, GitMerge, GitPullRequestArrow, Inbox as InboxIcon, MessageCircleQuestion, ShieldQuestion, SquareTerminal, Trash2, X } from 'lucide-react'
 import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { agentColor, consoleTail } from '../engine/consoles'
@@ -144,7 +144,7 @@ function AskCard({ id, from, question, options }: { id: string; from: string; qu
 function ReadyCard({ projectId }: { projectId: string }) {
   const ready = useFleet((s) => s.state?.ready)!
   const lead = useFleet((s) => (ready ? s.state?.members[ready.leadId] : undefined))
-  const [busy, setBusy] = useState<'' | 'merge' | 'discard'>('')
+  const [busy, setBusy] = useState<'' | 'merge' | 'discard' | 'pr' | 'done'>('')
   const app = useApp.getState()
   if (!ready) return null
 
@@ -154,6 +154,21 @@ function ReadyCard({ projectId }: { projectId: string }) {
     setBusy('')
     if (r.ok) app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
     else app.toast(`Merge failed: ${r.error}`, 'error')
+  }
+  const openPr = async () => {
+    if (!(await app.confirm({ title: 'Push this branch and open a draft PR?', body: `Pushes ${ready.branch} to origin and opens a draft pull request with the team's summary as its description.`, confirm: 'Open draft PR' }))) return
+    setBusy('pr')
+    const r = await invoke<{ ok: boolean; url?: string; error?: string }>('fleet:openPr', projectId)
+    setBusy('')
+    if (r.ok) {
+      app.toast('Draft PR opened', 'ok')
+      if (r.url) invoke('shell:openExternal', r.url)
+    } else app.toast(r.error ?? 'Could not open the PR', 'error')
+  }
+  const finish = async () => {
+    setBusy('done')
+    await invoke('fleet:done', projectId)
+    setBusy('')
   }
   const discard = async () => {
     if (!(await app.confirm({ title: 'Discard the team’s work?', body: `Deletes branch ${ready.branch} and closes the team’s consoles.`, confirm: 'Discard', danger: true }))) return
@@ -175,11 +190,28 @@ function ReadyCard({ projectId }: { projectId: string }) {
           {ready.branch} · {ready.commits} commit{ready.commits === 1 ? '' : 's'} · {ready.files.length} file{ready.files.length === 1 ? '' : 's'}
         </div>
       )}
-      <div className="ic-actions">
-        <button className="btn sm primary" disabled={!!busy} onClick={merge}>
-          <GitMerge size={13} /> {busy === 'merge' ? 'Merging…' : ready.branch ? 'Merge' : 'Done'}
+      {ready.prUrl && (
+        <button className="ic-pr mono" onClick={() => invoke('shell:openExternal', ready.prUrl)}>
+          <GitPullRequestArrow size={12} /> {ready.prUrl.replace(/^https:\/\/github.com\//, '')}
         </button>
-        {ready.branch && (
+      )}
+      <div className="ic-actions">
+        {/* a report-only run (no commits) or an opened PR just closes the team */}
+        {!ready.branch || ready.commits === 0 || ready.prUrl ? (
+          <button className="btn sm primary" disabled={!!busy} onClick={finish}>
+            <Check size={13} /> {busy === 'done' ? 'Closing…' : 'Done'}
+          </button>
+        ) : (
+          <button className="btn sm primary" disabled={!!busy} onClick={merge}>
+            <GitMerge size={13} /> {busy === 'merge' ? 'Merging…' : 'Merge'}
+          </button>
+        )}
+        {ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl && (
+          <button className="btn sm" disabled={!!busy} onClick={openPr}>
+            <GitPullRequestArrow size={13} /> {busy === 'pr' ? 'Opening…' : 'Open draft PR'}
+          </button>
+        )}
+        {ready.branch && ready.commits > 0 && (
           <button className="btn sm" onClick={() => app.openPanel('fleetDiff', { projectId })}>
             Show diff
           </button>

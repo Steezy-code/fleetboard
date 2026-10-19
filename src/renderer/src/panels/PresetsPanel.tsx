@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Bookmark, LayoutTemplate, Save, Trash2 } from 'lucide-react'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel } from '../engine/consoles'
-import { Modal } from '../ui/Modal'
+import { Modal, Seg } from '../ui/Modal'
+import { PlaybooksView } from '../playbooks/PlaybooksView'
 import { useInstalledAgents } from '../orchestration/fleet'
 import {
   BUILTIN_PRESETS,
@@ -58,7 +59,8 @@ function Schematic({ rects, wires }: { rects: SchemaRect[]; wires?: [number, num
 }
 
 /** Board presets: lay out a whole board in one tap, or save the current one. */
-export default function PresetsPanel() {
+export default function PresetsPanel({ playbook, inputs, tab: initialTab }: { playbook?: string; inputs?: Record<string, string>; tab?: 'playbooks' | 'layouts' } = {}) {
+  const [tab, setTab] = useState<'playbooks' | 'layouts'>(initialTab ?? 'playbooks')
   const installed = useInstalledAgents()
   const hasBoard = useApp((s) => {
     const ws = s.project?.workspaces.find((w) => w.id === s.project!.activeWorkspaceId)
@@ -112,11 +114,21 @@ export default function PresetsPanel() {
   return (
     <Modal
       title="Presets"
-      sub="Lay out a board in one tap. Consoles start fresh with agents you have installed."
+      sub={tab === 'playbooks' ? 'Work you do regularly, one click away. Each playbook starts a Lead with a proven brief.' : 'Lay out a board in one tap. Consoles start fresh with agents you have installed.'}
       icon={<LayoutTemplate size={17} />}
       width={860}
+      headerRight={
+        <Seg<'playbooks' | 'layouts'>
+          value={tab}
+          options={[
+            { value: 'playbooks', label: 'Playbooks' },
+            { value: 'layouts', label: 'Layouts' }
+          ]}
+          onChange={setTab}
+        />
+      }
       footer={
-        naming !== null ? (
+        tab === 'playbooks' ? undefined : naming !== null ? (
           <>
             <input
               className="input"
@@ -146,6 +158,9 @@ export default function PresetsPanel() {
         )
       }
     >
+      {tab === 'playbooks' && <PlaybooksView initial={playbook} initialInputs={inputs} />}
+      {tab === 'layouts' && (
+      <>
       <div className="pre-grid">
         {BUILTIN_PRESETS.map((p) => (
           <button key={p.id} className="pre-card" onClick={() => applyBuiltin(p)}>
@@ -198,6 +213,8 @@ export default function PresetsPanel() {
             ))}
           </div>
         </>
+      )}
+      </>
       )}
     </Modal>
   )

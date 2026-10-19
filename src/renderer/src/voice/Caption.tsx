@@ -1,3 +1,4 @@
+import { useApp } from '../state/store'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useVoice } from './thread'
 import { cancelPending, confirmPending } from './planner'
@@ -47,7 +48,7 @@ export function Caption() {
       {phase === 'thinking' && (
         <div className="vc-reply">
           <span className="orb sm thinking" />
-          <span className="cb-shimmer">Planning with your CLI…</span>
+          <span className="cb-shimmer">{useApp.getState().settings.helm !== false ? 'Helm is reading the board…' : 'Planning with your CLI…'}</span>
         </div>
       )}
       {pending ? (

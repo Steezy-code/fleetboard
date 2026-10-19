@@ -240,6 +240,13 @@ export default function SettingsPanel({ section }: { section?: string }) {
                   {!headless.some((a) => a.id === settings.plannerAgent) && <option value={settings.plannerAgent}>{settings.plannerAgent} (not installed)</option>}
                 </select>
               </div>
+              <div className="settings-row">
+                <div className="grow">
+                  <div>Helm</div>
+                  <div className="muted small">The command bar reads the whole board first, then answers or suggests the best route: a playbook, a team, or a message to an agent already on it.</div>
+                </div>
+                <Switch on={settings.helm !== false} onChange={(v) => set({ helm: v })} />
+              </div>
             </div>
           </section>
 

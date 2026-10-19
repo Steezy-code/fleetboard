@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronUp, Mic, Square } from 'lucide-react'
+import { ChevronUp, Mic, ShipWheel, Square } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { ROLE_TINT } from '@shared/types'
 import { activeWs, allConsoles, useApp } from '../state/store'
@@ -9,8 +9,9 @@ import { cancelPending, runCommand } from './planner'
 import { cancelListening, toggleListening } from './stt'
 import { stopSpeaking } from './tts'
 import { useThread, useVoice } from './thread'
+import { primaryIndex, runHelmOption, useHelm } from './helm/helm'
 
-// Bottom command bar: orb · input (@mentions) · ^ thread · stop · mic.
+// Bottom command bar: orb · input (@mentions) · ^ thread · stop · Helm toggle · mic.
 // Hold Space (outside inputs/terminals) or Alt+Space anywhere to talk; Enter submits typed text.
 
 export function stopEverything() {
@@ -24,6 +25,8 @@ export function CommandBar() {
   const speaking = useVoice((s) => s.speaking)
   const download = useVoice((s) => s.download)
   const chatOpen = useApp((s) => s.drawer?.name === 'chat')
+  const helm = useApp((s) => s.settings.helm !== false)
+  const helmThinking = useHelm((s) => s.thinking)
   const busy = phase !== 'idle' || speaking
   const orbClass = phase === 'listening' ? 'listening' : phase === 'thinking' || phase === 'transcribing' ? 'thinking' : speaking ? 'speaking' : ''
 
@@ -41,11 +44,11 @@ export function CommandBar() {
         ) : phase === 'transcribing' ? (
           <div className="cb-shimmer">{download?.what === 'speech' ? downloadText(download.label, download.pct) : 'Transcribing…'}</div>
         ) : phase === 'thinking' ? (
-          <div className="cb-shimmer">Thinking…</div>
+          <div className="cb-shimmer">{helmThinking ? 'Helm is reading the board…' : 'Thinking…'}</div>
         ) : null}
         {/* stays mounted so a half-typed command survives a listen */}
         <div className="cb-input" style={phase === 'idle' ? undefined : { display: 'none' }}>
-          <CommandInput placeholder="Hold space to speak · @ to direct…" />
+          <CommandInput primary placeholder={helm ? 'Ask Helm or say what you want done…' : 'Hold space to speak · @ to direct…'} />
         </div>
       </div>
       {phase === 'idle' && download && <span className="cb-sub">{downloadText(download.label, download.pct)}</span>}
@@ -61,6 +64,14 @@ export function CommandBar() {
           <Square size={13} fill="currentColor" />
         </button>
       )}
+      <button
+        className={`icon-btn helm-toggle ${helm ? 'on' : ''}`}
+        title={helm ? 'Helm: reads the board and suggests the best route (click to turn off)' : 'Helm is off: requests go straight to the Lead or the planner (click to turn on)'}
+        aria-pressed={helm}
+        onClick={() => useApp.getState().setSettings({ helm: !helm })}
+      >
+        <ShipWheel size={15} />
+      </button>
       <button
         className={`icon-btn ${phase === 'listening' ? 'mic-on' : ''}`}
         title={phase === 'listening' ? 'Stop listening' : 'Talk (hold Space)'}
@@ -151,7 +162,18 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 /** Text input that routes through runCommand; shared by the bar and the thread drawer. */
-export function CommandInput({ placeholder, autoFocus, popupAlign }: { placeholder?: string; autoFocus?: boolean; popupAlign?: 'left' | 'right' }) {
+export function CommandInput({
+  placeholder,
+  autoFocus,
+  popupAlign,
+  primary
+}: {
+  placeholder?: string
+  autoFocus?: boolean
+  popupAlign?: 'left' | 'right'
+  /** the bottom bar's input: takes text back from Helm's "Edit" */
+  primary?: boolean
+}) {
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [sel, setSel] = useState(0)
@@ -163,6 +185,23 @@ export function CommandInput({ placeholder, autoFocus, popupAlign }: { placehold
   useEffect(() => {
     if (autoFocus) input.current?.focus()
   }, [autoFocus])
+
+  // Helm "Edit": the goal / message comes back here to be changed
+  const draftN = useHelm((s) => (primary ? (s.draft?.n ?? 0) : 0))
+  useEffect(() => {
+    if (!primary || !draftN) return
+    const t = useHelm.getState().draft?.text ?? ''
+    setText(t)
+    setClosed(true)
+    histPos.current = null
+    requestAnimationFrame(() => {
+      const el = input.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(t.length, t.length)
+      setCaret(t.length)
+    })
+  }, [draftN, primary])
 
   // @query right before the caret
   const query = useMemo(() => {
@@ -196,7 +235,12 @@ export function CommandInput({ placeholder, autoFocus, popupAlign }: { placehold
 
   const submit = () => {
     const t = text.trim()
-    if (!t) return
+    if (!t) {
+      // Enter in an empty bar runs Helm's first suggestion
+      const i = primaryIndex()
+      if (i != null) runHelmOption(i)
+      return
+    }
     setText('')
     setCaret(0)
     histPos.current = null

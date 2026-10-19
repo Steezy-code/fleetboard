@@ -52,6 +52,28 @@ Everything that needs you lands in the **Inbox** (top right): the Lead's questio
 
 Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_spawn_worker`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
 
+## Helm and playbooks
+
+**Helm** (the ship-wheel toggle in the command bar, on by default) reads the whole board: every console's recent output, the team's plan, kanban cards, checklists, notes, git state. Ask it anything ("what is everyone doing?", "who needs me?") or say what you want done, and it answers or offers 1–3 one-click routes: a playbook with its inputs filled in, a goal for the Lead, a message to the agent already working on it, board actions, or a panel. Enter on an empty bar takes the first route. Instant board commands (zoom, pause, spawn…) and `@name` messages still go straight through.
+
+**Playbooks** (Presets → Playbooks) are work you do regularly, as one-click cards. Each starts its own Lead with a proven brief:
+
+| | Playbook | What it does |
+|---|---|---|
+| Daily | Ship a feature → PR | Plan, build in parallel, review, then *Open draft PR* from the Ready card |
+| | Hotfix | Reproduce, pin with a failing test, minimal fix, review |
+| | Next PLAN.md item | Proposes the next unchecked item for your OK, builds it, ticks it off |
+| | Morning sweep | Read-only health check across all your repos (built in, no agents) |
+| Upkeep | Get to green | Run every check, split failures by area, fix until all pass |
+| | Test coverage sweep | Rank untested logic by risk, a test writer per module |
+| | Docs drift check | Fix docs that no longer match the code (docs only) |
+| | Database safety pass | Review migrations/RLS and run DB checks; fixes only with your yes |
+| Occasional | PR review round | A reviewer per open PR; verdicts in your Inbox, nothing posted |
+| | Dependency refresh | Patch/minor updates verified by your checks; majors listed |
+| | UI polish pass | Live preview tile + a team refining what you point at |
+
+The **Morning sweep** (also on the home screen) checks every repo under `~/code`, `~/Github`, … without changing anything: uncommitted work and how old it is, open PRs and their review state, CI on the default branch, stale branches, upstream drift, the next PLAN.md item. *Brief me* turns it into a short morning brief.
+
 ## Navigation (AutoCAD-style by default)
 
 | Input | Action |

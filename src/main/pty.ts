@@ -87,12 +87,13 @@ export class PtyManager {
 
     let file: string
     let args: string[] = []
-    if (!agent || agent.id === 'shell') {
+    if (req.command) {
+      // a console started for one command (dev server, watcher); drop into a shell when it ends
+      file = shellPath()
+      args = ['-lc', `${req.command}; exec ${shellPath()} -l`]
+    } else if (!agent || agent.id === 'shell') {
       file = shellPath()
       args = ['-l']
-    } else if (req.command) {
-      file = shellPath()
-      args = ['-lc', req.command]
     } else {
       file = (await which(agent.bin)) ?? agent.bin
       args = [...(agent.args ?? [])]

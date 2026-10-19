@@ -56,6 +56,10 @@ export interface FleetReady {
   commits: number
   files: string[]
   at: number
+  /** the repo has an origin remote, so the branch can become a pull request */
+  hasRemote?: boolean
+  /** set once the user opened a PR from the Ready card */
+  prUrl?: string
 }
 
 export interface FleetState {

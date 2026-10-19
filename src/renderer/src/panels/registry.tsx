@@ -13,6 +13,7 @@ import SkillsPanel from './SkillsPanel'
 import SettingsPanel from './SettingsPanel'
 import GitPanel from './GitPanel'
 import ChatPanel from './ChatPanel'
+import SweepPanel from './SweepPanel'
 import CodeStudio from '../studios/CodeStudio'
 import MarkdownStudio from '../studios/MarkdownStudio'
 import DocumentsStudio from '../studios/DocumentsStudio'
@@ -37,7 +38,8 @@ export const PANELS: Record<string, ComponentType<any>> = {
   markdown: MarkdownStudio,
   documents: DocumentsStudio,
   diagrams: DiagramsStudio,
-  fleetDiff: FleetDiffPanel
+  fleetDiff: FleetDiffPanel,
+  sweep: SweepPanel
 }
 
 export const DRAWERS: Record<string, ComponentType<any>> = {

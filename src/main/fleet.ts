@@ -363,11 +363,12 @@ function pickName(s: FleetState, wanted?: string) {
   return `Worker ${used.size + 1}`
 }
 
-export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string }): Promise<FleetMember> {
+export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string }): Promise<FleetMember> {
   const s = state(opts.projectId, opts.projectPath)
   const id = uid('con')
   const agentId = opts.agentId ?? 'claude'
-  const slug = `${slugify(opts.goal)}-${id.slice(-4)}`
+  const title = (opts.title ?? opts.goal).trim()
+  const slug = `${slugify(title)}-${id.slice(-4)}`
   let cwd = opts.projectPath
   let branch: string | undefined
   const isRepo = (await git(opts.projectPath, ['rev-parse', '--verify', 'HEAD'])).ok
@@ -384,7 +385,7 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
     name: leads ? `Lead ${leads + 1}` : 'Lead',
     agentId,
     projectId: opts.projectId,
-    task: opts.goal,
+    task: title,
     cwd,
     branch,
     status: 'working',
@@ -667,7 +668,8 @@ async function callTool(callerId: string, name: string, a: any): Promise<any> {
         const base = baseCommit.get(m.id) ?? 'HEAD~1'
         const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..HEAD`])).out) || 0
         const files = (await git(m.cwd, ['diff', '--name-only', `${base}..HEAD`])).out.split('\n').filter(Boolean)
-        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, at: Date.now() } as FleetReady
+        const hasRemote = (await git(m.cwd, ['remote', 'get-url', 'origin'])).ok
+        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, at: Date.now(), hasRemote } as FleetReady
       }
       m.status = 'reported'
       changed(s)
@@ -811,6 +813,37 @@ export async function initFleet(c: MainContext) {
     await dismissTeam(s, lead, 'keep')
     return { ok: true, into: '' }
   })
+  /** Push the team's branch and open a draft PR whose description is the lead's summary. */
+  ipc.handle('fleet:openPr', async (_e, projectId: string) => {
+    const s = states.get(projectId)
+    const lead = s?.ready ? s.members[s.ready.leadId] : undefined
+    if (!s?.ready || !lead?.branch) return { ok: false, error: 'Nothing to open a PR for.' }
+    const base = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'main'
+    const push = await git(lead.cwd, ['push', '-u', 'origin', lead.branch])
+    if (!push.ok) return { ok: false, error: `Push failed: ${push.err.slice(0, 400)}` }
+    const summary = s.ready.summary.trim()
+    const title = (summary.split('\n')[0].replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
+    const body = `${summary}\n\n---\nGoal: ${lead.task ?? ''}\n\nBuilt by a Fleetboard team (${lead.name} and ${Object.values(s.members).filter((x) => x.leadId === lead.id).length} helpers). ${s.ready.commits} commits, ${s.ready.files.length} files.`
+    const env = await loginEnv()
+    const r = await new Promise<{ ok: boolean; out: string; err: string }>((resolve) =>
+      execFile('gh', ['pr', 'create', '--draft', '--base', base, '--head', lead.branch!, '--title', title, '--body', body], { cwd: lead.cwd, env: { ...env, GH_PROMPT_DISABLED: '1' }, timeout: 60_000 }, (e, out, err) =>
+        resolve({ ok: !e, out: String(out).trim(), err: String(err || e?.message || '').trim() })
+      )
+    )
+    if (!r.ok) return { ok: false, error: `gh pr create failed: ${r.err.slice(0, 400)}` }
+    const url = r.out.split('\n').find((l) => l.startsWith('http')) ?? r.out
+    s.ready.prUrl = url
+    changed(s)
+    return { ok: true, url }
+  })
+  /** Close the team. A pushed branch (PR) is kept; an empty report-only branch is deleted. */
+  ipc.handle('fleet:done', async (_e, projectId: string) => {
+    const s = states.get(projectId)
+    if (!s?.ready) return false
+    const lead = s.members[s.ready.leadId]
+    await dismissTeam(s, lead, s.ready.prUrl ? 'keep' : s.ready.commits ? 'keep' : 'force')
+    return true
+  })
   ipc.handle('fleet:discard', async (_e, projectId: string, leadId?: string) => {
     const s = states.get(projectId)
     const lead = leadId ? s?.members[leadId] : s?.ready ? s.members[s.ready.leadId] : Object.values(s?.members ?? {}).find((m) => m.role === 'lead' && m.status !== 'closed')
@@ -822,7 +855,8 @@ export async function initFleet(c: MainContext) {
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')
-  for (const m of crew) await dismiss(s, m, branch === 'merged' ? 'force' : branch) // worker branches are inside the lead's merged branch
+  // worker branches are merged into the lead's branch (or being thrown away): always delete them
+  for (const m of crew) await dismiss(s, m, 'force')
   await dismiss(s, lead, branch)
   s.ready = null
   s.tasks = []

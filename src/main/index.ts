@@ -11,6 +11,7 @@ import * as agents from './agents'
 import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
+import * as sweep from './sweep'
 import { initFleet } from './fleet'
 import { dirs } from './paths'
 
@@ -147,6 +148,7 @@ app.whenReady().then(async () => {
   await startHookServer((id, status, event) => ptys.hook(id, status, event))
   registerCore()
   for (const m of [store, fsops, cli, agents, git, usage, profiles]) m.register(ctx)
+  sweep.register(ctx)
   await initFleet(ctx)
   createWindow()
 })

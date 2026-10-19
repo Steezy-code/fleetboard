@@ -1,15 +1,17 @@
-// Voice feature entry: push-to-talk keys, caption overlay, thread persistence, console activity tracking.
+// Voice feature entry: push-to-talk keys, caption + Helm card overlays, thread persistence, console activity tracking.
 import '../styles/voice.css'
+import '../styles/helm.css'
 import { BOARD_OVERLAYS } from '../board/BoardOverlays'
 import { registerEngine } from '../engine/engines'
 import { on } from '../lib/api'
 import { useApp } from '../state/store'
 import { Caption } from '../voice/Caption'
+import { HelmCard } from '../voice/helm/HelmCard'
 import { markActive } from '../voice/actions'
 import { beginListening, cancelListening, endListening, isListening } from '../voice/stt'
 import { hydrateThread } from '../voice/thread'
 
-BOARD_OVERLAYS.push(Caption)
+BOARD_OVERLAYS.push(Caption, HelmCard)
 
 const isTyping = (t: EventTarget | null) => {
   const el = t as HTMLElement | null

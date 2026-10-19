@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { ArrowRight, FolderOpen, FolderPlus, Settings, X } from 'lucide-react'
+import { ArrowRight, FolderOpen, FolderPlus, Settings, Sunrise, X } from 'lucide-react'
 import { AGENTS } from '@shared/agents'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
@@ -51,6 +51,9 @@ export function Home() {
           <div className="row" style={{ gap: 10, marginTop: 22 }}>
             <button className="btn primary" style={{ height: 38, padding: '0 18px' }} onClick={open}>
               <FolderPlus size={15} /> Open a repo
+            </button>
+            <button className="btn home-sweep-btn" style={{ height: 38, padding: '0 16px' }} onClick={() => app.openPanel('sweep')} title="Read-only health check across all your repos">
+              <Sunrise size={15} /> Morning sweep
             </button>
             {projects[0] && (
               <button className="btn" style={{ height: 38, padding: '0 16px' }} onClick={() => app.openProject(projects[0].path)}>
