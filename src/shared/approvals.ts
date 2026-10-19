@@ -29,17 +29,24 @@ function tone(label: string, permission: boolean): ApprovalOption['tone'] {
   return 'other'
 }
 
+/** The key a CLI shows next to an option, "(y)", "(esc)", "(shift+tab)": meaningless on a button. */
+const KEY_HINT = /\s*\((?:[a-z]|esc|enter|tab|shift\+tab|ctrl\+[a-z])\)\s*$/i
+
 /** Short button text for the long option labels CLIs use. */
-function shortLabel(label: string, t: ApprovalOption['tone'], permission: boolean): string {
+function shortLabel(raw: string, t: ApprovalOption['tone'], permission: boolean): string {
+  const label = raw.replace(KEY_HINT, '')
   const l = label.toLowerCase()
-  if (permission && t === 'allow' && /^yes\.?$/.test(l)) return 'Allow once'
+  if (permission && t === 'allow' && /^yes(,? proceed)?\.?$/.test(l)) return 'Allow once'
   if (permission && t === 'deny' && /^no\.?$/.test(l)) return 'Deny'
   if (/^yes, i trust this folder$/.test(l)) return 'Trust folder'
   if (/^no, exit$/.test(l)) return 'No, close agent'
   if (/switch to accept edits/.test(l)) return 'Allow all edits this session'
   if (/always allow access to .* from this project/.test(l)) return 'Always allow (this project)'
-  const again = /don.?t ask again for:?\s*(.+)$/i.exec(label)?.[1]
-  if (again) return `Always allow ${again.replace(/ in \/.+$/, '').slice(0, 40)}`
+  const again = /don.?t ask again for:?\s*(.+)$/i.exec(label)?.[1]?.replace(/^commands that start with\s+/i, '')
+  if (again) {
+    const what = again.replace(/ in \/.+$/, '')
+    return `Always allow ${what.length > 44 ? what.slice(0, 43) + '…' : what}`
+  }
   return label.length > 64 ? label.slice(0, 61) + '…' : label
 }
 
@@ -66,6 +73,22 @@ function detailOf(p: Prompt): string | undefined {
   return block.length && block.length <= 14 ? block.join('\n') : undefined
 }
 
+/**
+ * Without rules (Codex): the dialog's own lines, from its first question to the menu, such as
+ * "Would you like to run the following command?" / "Reason: …" / "$ touch notes.txt". Not the
+ * conversation above it (lines the CLI marks as said: › • ●) and not key hints.
+ */
+function plainDetailOf(p: Prompt): string | undefined {
+  const first = p.options?.[0]?.label
+  const menuAt = first ? p.lines.findIndex((l) => l.includes(first)) : -1
+  if (menuAt < 1) return undefined
+  const above = p.lines.slice(Math.max(0, menuAt - 10), menuAt).map((l) => l.trim())
+  const start = above.findIndex((l) => /\?\s*$/.test(l) && !/^[›•●❯>]/.test(l))
+  if (start < 0) return undefined
+  const block = above.slice(start).filter((l) => l && l !== p.question?.trim() && !/^(press enter|enter to confirm|esc to cancel)/i.test(l))
+  return block.length ? block.join('\n') : undefined
+}
+
 export function approvalFor(p: Prompt | null): Approval | null {
   if (!p) return null
   if (p.kind === 'menu' && p.options?.length) {
@@ -79,7 +102,7 @@ export function approvalFor(p: Prompt | null): Approval | null {
     if (!options.length) return null
     const rank = { allow: 0, always: 1, other: 2, deny: 3 }
     if (permission) options.sort((a, b) => rank[a.tone] - rank[b.tone])
-    return { title: p.question ?? 'Choose an option', detail: detailOf(p), options }
+    return { title: p.question ?? 'Choose an option', detail: detailOf(p) ?? plainDetailOf(p), options }
   }
   if (p.kind === 'yes-no') {
     return {
