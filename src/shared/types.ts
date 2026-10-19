@@ -163,7 +163,11 @@ export interface AgentDef {
   vendor: string
   resumeArgs?: string[]
   /** start a conversation under a given id / resume that conversation (instead of "the latest") */
-  session?: { start: (id: string) => string[]; resume: (id: string) => string[] }
+  session?: {
+    /** start under an id Fleetboard picks; without it the id is found after the first turn (Codex) */
+    start?: (id: string) => string[]
+    resume: (id: string) => string[]
+  }
   yoloArgs?: string[]
   /** middle permission level: file edits are auto-accepted, commands still ask */
   editsArgs?: string[]

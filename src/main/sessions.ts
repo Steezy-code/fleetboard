@@ -45,5 +45,114 @@ export function hasTranscript(agentId: string, id: string, env: Record<string, s
       }
     }
   }
+  if (agentId === 'codex') return hasCodexSession(env, id)
   return false
+}
+
+// ---------------------------------------------------------------- Codex
+// Codex cannot be started under a given id. Its sessions are files that record the id, the folder
+// and what was said: <CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl. After a
+// console's first turn, the new session in its folder that no other console has is its own.
+
+const codexRoot = (env: Record<string, string | undefined>) => path.join(env.CODEX_HOME || path.join(env.HOME || os.homedir(), '.codex'), 'sessions')
+
+function readDir(p: string): string[] {
+  try {
+    return fs.readdirSync(p)
+  } catch {
+    return []
+  }
+}
+
+/** Rollout files under the sessions dir, in day folders from `sinceDay` (YYYY-MM-DD) on. */
+function rollouts(root: string, sinceDay = ''): string[] {
+  const out: string[] = []
+  for (const y of readDir(root).filter((d) => /^\d{4}$/.test(d)))
+    for (const m of readDir(path.join(root, y)).filter((d) => /^\d\d$/.test(d)))
+      for (const d of readDir(path.join(root, y, m)).filter((x) => /^\d\d$/.test(x))) {
+        if (`${y}-${m}-${d}` < sinceDay) continue
+        for (const f of readDir(path.join(root, y, m, d))) if (/^rollout-.+\.jsonl$/.test(f)) out.push(path.join(root, y, m, d, f))
+      }
+  return out
+}
+
+export interface CodexSession {
+  id: string
+  cwd: string
+  startedAt: number
+  /** the first thing the user said, when said */
+  firstPrompt?: string
+}
+
+const textOf = (content: unknown) =>
+  Array.isArray(content) ? content.map((c) => (typeof c?.text === 'string' ? c.text : '')).join('') : typeof content === 'string' ? content : ''
+
+/** The id, folder and first prompt of a rollout, from its first lines. */
+export function readCodexSession(file: string): CodexSession | null {
+  let head: string
+  try {
+    const fd = fs.openSync(file, 'r')
+    try {
+      const buf = Buffer.alloc(256 * 1024)
+      head = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0)).toString('utf8')
+    } finally {
+      fs.closeSync(fd)
+    }
+  } catch {
+    return null
+  }
+  let meta: CodexSession | null = null
+  for (const line of head.split('\n')) {
+    let o: any
+    try {
+      o = JSON.parse(line)
+    } catch {
+      continue
+    }
+    const p = o?.payload ?? {}
+    if (o?.type === 'session_meta' && !meta) {
+      if (!validSessionId(p.id) || typeof p.cwd !== 'string') return null
+      meta = { id: p.id, cwd: p.cwd, startedAt: Date.parse(p.timestamp ?? o.timestamp) || 0 }
+      continue
+    }
+    if (!meta) continue
+    // what the user typed: an event, or the user message itself (not the context Codex adds as one)
+    const said =
+      o?.type === 'event_msg' && p.type === 'user_message'
+        ? String(p.message ?? '')
+        : o?.type === 'response_item' && p.type === 'message' && p.role === 'user'
+          ? textOf(p.content)
+          : ''
+    if (said && !/^\s*<(environment_context|user_instructions|permissions|collaboration_mode|turn_aborted)\b/.test(said)) {
+      meta.firstPrompt = said
+      break
+    }
+  }
+  return meta
+}
+
+const squash = (t: string) => t.replace(/\s+/g, ' ').trim()
+
+/**
+ * The Codex session a console started at `since` in `cwd` is running, if it can be told for sure: a
+ * new, unclaimed session in that folder whose first prompt is on this console's screen, and only one.
+ * (Being the only new session is not enough: it may be a sibling console's, when this one's turn
+ * never reached the model.)
+ */
+export function findCodexSession(env: Record<string, string | undefined>, opts: { cwd: string; since: number; claimed: Set<string>; screen: string }): string | undefined {
+  const day = new Date(opts.since - 24 * 3600_000)
+  const sinceDay = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+  const same = (a: string, b: string) => path.resolve(a) === path.resolve(b)
+  const found = rollouts(codexRoot(env), sinceDay)
+    .map(readCodexSession)
+    .filter((s): s is CodexSession => !!s && s.startedAt >= opts.since - 5000 && same(s.cwd, opts.cwd) && !opts.claimed.has(s.id))
+  const screen = squash(opts.screen)
+  // the start of it: a long prompt wraps on screen
+  const shown = found.filter((s) => s.firstPrompt && squash(s.firstPrompt) && screen.includes(squash(s.firstPrompt).slice(0, 40)))
+  return shown.length === 1 ? shown[0].id : undefined
+}
+
+/** Whether Codex has a session file with this id. */
+export function hasCodexSession(env: Record<string, string | undefined>, id: string): boolean {
+  return validSessionId(id) && rollouts(codexRoot(env)).some((f) => f.endsWith(`-${id}.jsonl`))
 }

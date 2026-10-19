@@ -3,7 +3,7 @@ import type { WebContents } from 'electron'
 import type { ConsoleStatus, PtyInfo, PtySpawnRequest, Settings } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { loginEnv, shellPath, which } from './env'
-import { hasTranscript, newSessionId, validSessionId } from './sessions'
+import { findCodexSession, hasTranscript, newSessionId, validSessionId } from './sessions'
 import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
 import { fleetLaunch } from './fleet'
@@ -30,6 +30,10 @@ interface Session {
   bracketed: boolean
   /** the conversation the CLI runs under, when known (AgentDef.session, or Claude's SessionStart hook) */
   sessionId?: string
+  /** a CLI that picks its own id (Codex): where to look for it after a turn */
+  discover?: { since: number; cwd: string; env: Record<string, string | undefined>; tries: number; lastTry: number }
+  /** when the CLI last printed something */
+  outputAt: number
 }
 
 const TERMINAL_REPLY = /^(?:\x1b\[[?>][\d;]*c|\x1b\[\d+;\d+R|\x1b\[\d*n|\x1b\[[IO]|\x1bP[\s\S]*?\x1b\\|\x1b\][\s\S]*?(?:\x07|\x1b\\))+$/
@@ -92,10 +96,11 @@ export class PtyManager {
         } else if (req.resume && !known && agent.resumeArgs) {
           // a console saved before conversations had ids: the CLI picks (Claude's hook reports which)
           args.push(...agent.resumeArgs)
-        } else {
+        } else if (agent.session.start) {
           sessionId = req.resume && known ? known : newSessionId()
           args.push(...agent.session.start(sessionId))
         }
+        // else a new conversation whose id the CLI picks: found after its first turn
       } else if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
       if (yolo) args.push(...agent.yoloArgs!)
@@ -129,10 +134,16 @@ export class PtyManager {
       tracker: new StatusTracker(startedAt, agent?.id === 'claude' && !req.command && claudeHookArgs(req.id).length > 0),
       startedAt,
       bracketed: false,
-      sessionId
+      sessionId,
+      discover:
+        agent?.session && !agent.session.start && !sessionId && !req.command
+          ? { since: startedAt, cwd: req.cwd, env: { HOME: env.HOME, CODEX_HOME: env.CODEX_HOME }, tries: 0, lastTry: startedAt }
+          : undefined,
+      outputAt: startedAt
     }
     this.sessions.set(req.id, s)
-    if (sessionId) this.emit('pty:session', req.id, sessionId)
+    // '' forgets the conversation a console had: it was started fresh, its new id is not known yet
+    if (agent?.session && !req.command) this.emit('pty:session', req.id, sessionId ?? '')
     for (const l of this.spawnListeners) {
       try {
         l(req)
@@ -146,7 +157,8 @@ export class PtyManager {
       if (data.includes('\x1b[?2004')) s.bracketed = data.lastIndexOf('\x1b[?2004h') > data.lastIndexOf('\x1b[?2004l')
       if (s.buffer.length > MAX_BUFFER) s.buffer = s.buffer.slice(-MAX_BUFFER)
       s.screen.write(data)
-      s.tracker.output(Date.now())
+      s.outputAt = Date.now()
+      s.tracker.output(s.outputAt)
       this.emit('pty:data', req.id, data)
     })
     proc.onExit(({ exitCode }) => {
@@ -399,6 +411,22 @@ export class PtyManager {
     const prev = s.tracker.status
     const next = s.tracker.evaluate(Date.now(), detectPrompt(s.screen.view()))
     if (next !== prev) this.emit('pty:status', s.id, next)
+    // after a turn (idle, with new output since the last look): find which saved session is this console's
+    const d = s.discover
+    if (d && next === 'idle' && s.outputAt > d.lastTry && Date.now() - d.lastTry > 2000) this.discoverSession(s)
+  }
+
+  /** Which of the CLI's saved sessions is this console's (see findCodexSession). */
+  private discoverSession(s: Session) {
+    const d = s.discover!
+    d.lastTry = Date.now()
+    if (++d.tries > 100) return (s.discover = undefined)
+    const claimed = new Set([...this.sessions.values()].map((x) => x.sessionId).filter((x): x is string => !!x))
+    const found = findCodexSession(d.env, { cwd: d.cwd, since: d.since, claimed, screen: s.screen.text(20000) })
+    if (!found || this.sessions.get(s.id) !== s) return
+    s.sessionId = found
+    s.discover = undefined
+    this.emit('pty:session', s.id, found)
   }
 
   private refreshStatuses() {
