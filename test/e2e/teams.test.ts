@@ -224,3 +224,28 @@ test('a lead that stops mid-task shows in the Inbox; resumed on its tile, it is 
   assert.match(briefing[0].prompt, /Your console was restarted after it stopped/)
   assert.equal((await app!.texts('.inbox-card.stopped')).length, 0, 'the card is gone')
 })
+
+test('the fleet and hook servers refuse requests without the secret, from a browser, or to another host', async () => {
+  const { sb, projectId } = await team({ lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }] } })
+  await waitReady(projectId)
+  const hooksDir = path.join(sb.fbHome, 'hooks')
+  const mcpFile = fs.readdirSync(hooksDir).find((f) => f.startsWith('mcp-'))!
+  const url = new URL(JSON.parse(fs.readFileSync(path.join(hooksDir, mcpFile), 'utf8')).mcpServers.fleet.url)
+  assert.equal(fs.statSync(path.join(hooksDir, mcpFile)).mode & 0o077, 0, 'the MCP config is readable by the user only')
+  const [, , secret, member] = url.pathname.split('/')
+  const call = (pathname: string, headers: Record<string, string> = {}) =>
+    fetch(`http://127.0.0.1:${url.port}${pathname}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'fleet_status', arguments: {} } })
+    })
+  assert.equal((await call(url.pathname)).status, 200, 'the real URL works')
+  assert.equal((await call(`/mcp/${member}`)).status, 404, 'the old URL shape is gone')
+  assert.equal((await call(`/mcp/${'0'.repeat(secret.length)}/${member}`)).status, 403, 'wrong secret')
+  assert.equal((await call(url.pathname, { Origin: 'https://evil.example' })).status, 403, 'from a web page')
+  assert.equal((await call(url.pathname, { 'Content-Type': 'text/plain' })).status, 403, 'a no-preflight content type')
+  // the hook settings file holds no secret: it comes from each console's environment
+  const hooks = fs.readFileSync(path.join(hooksDir, 'claude-hooks.json'), 'utf8')
+  assert.ok(!hooks.includes(secret) && hooks.includes('${FB_HOOK_TOKEN}'))
+  assert.ok(app!.fakeLog((e) => e.event === 'hook' && e.hook === 'Stop').length > 0, 'hooks still arrive')
+})

@@ -1,6 +1,7 @@
 import http from 'node:http'
 import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
+import { newSecret, refuse, sameSecret } from './localserver'
 
 // Claude Code reports its own lifecycle through hooks. Each console's CLI gets a settings file
 // (passed with --settings) whose hooks POST to this local server, so the board shows the CLI's
@@ -8,6 +9,8 @@ import { dirs, writeJsonAtomic } from './paths'
 // lives in status.ts (hookStatus); this only receives them.
 
 let port = 0
+/** this run's secret; consoles get it in their environment (FB_HOOK_TOKEN), never in a file */
+const secret = newSecret()
 let listener: (id: string, event: string, payload: unknown) => void = () => {}
 
 /**
@@ -23,25 +26,28 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
   listener = onEvent
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
-      const m = /^\/hook\/([^/]+)\/([A-Za-z]+)/.exec(req.url ?? '')
+      const m = /^\/hook\/([^/]+)\/([^/]+)\/([A-Za-z]+)$/.exec(req.url ?? '')
+      if (!m || req.method !== 'POST' || !sameSecret(m[1], secret) || refuse(req, port)) {
+        req.resume()
+        return res.writeHead(403).end()
+      }
       let body = ''
       req.on('data', (d) => (body.length < MAX_BODY ? (body += d) : null))
       req.on('end', () => {
         res.writeHead(204).end()
-        if (!m || req.method !== 'POST') return
         let payload: unknown = null
         try {
           payload = JSON.parse(body)
         } catch {
           /* no payload, or cut off at MAX_BODY: the event name still counts */
         }
-        let id = m[1]
+        let id = m[2]
         try {
-          id = decodeURIComponent(m[1])
+          id = decodeURIComponent(m[2])
         } catch {
           /* malformed escape: use it as is */
         }
-        listener(id, m[2], payload)
+        listener(id, m[3], payload)
       })
     })
     server.listen(0, '127.0.0.1', () => {
@@ -57,14 +63,14 @@ const settingsFile = () => path.join(dirs.hooks, 'claude-hooks.json')
 function writeSettingsFile() {
   const cmd = (event: string) => ({
     type: 'command',
-    command: `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
+    command: `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_HOOK_TOKEN}/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
   })
   const hooks: Record<string, unknown[]> = {}
   for (const event of HOOK_EVENTS) {
     hooks[event] = [{ ...(event.endsWith('ToolUse') || event === 'PermissionRequest' ? { matcher: '*' } : {}), hooks: [cmd(event)] }]
   }
-  writeJsonAtomic(settingsFile(), { hooks })
+  writeJsonAtomic(settingsFile(), { hooks }, 0o600)
 }
 
-export const hookEnv = (_id: string): Record<string, string> => (port ? { FB_HOOK_PORT: String(port) } : {})
+export const hookEnv = (_id: string): Record<string, string> => (port ? { FB_HOOK_PORT: String(port), FB_HOOK_TOKEN: secret } : {})
 export const claudeHookArgs = (_id: string): string[] => (port ? ['--settings', settingsFile()] : [])
