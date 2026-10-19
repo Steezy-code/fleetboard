@@ -172,3 +172,55 @@ test("a worker's permission prompt reaches the Inbox and is answered there", asy
   assert.equal(app!.fakeLog((e) => e.event === 'dialog-answer' && e.name === 'Ada')[0]?.choice, 0)
   assert.equal(toolCalls('fleet_report').length, 1)
 })
+
+for (const resume of [true, false]) {
+test(`a team survives an app restart (${resume ? 'conversations resumed' : 'started fresh'}): members are re-briefed and the work finishes`, async () => {
+  const sb = makeSandbox()
+  const repo = makeRepo(sb)
+  // Ada is still busy when the app quits
+  app = await App.launch({ sandbox: sb, scenario: { lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }] }, workers: { Ada: { delayMs: 120_000 } } } })
+  let projectId = await app.openProject(repo)
+  await app.invoke('fleet:startLead', { projectId, projectPath: repo, goal: 'add a.txt' })
+  await app.waitFor(() => app!.fakeLog((e) => e.name === 'Ada' && e.event === 'prompt').length > 0 && toolCalls('fleet_wait').length > 0, { label: 'Ada working, lead waiting', timeout: 30_000 })
+  assert.equal(await app.quitLikeUser(), true, 'the app quits')
+
+  // reopen: this time Ada finishes quickly
+  app = await App.launch({ sandbox: sb, scenario: { workers: { Ada: { delayMs: 200 } } } })
+  projectId = await app.openProject(repo)
+  const banner = await app.waitFor(async () => (await app!.texts('.resume-banner')).join(''), { label: 'resume banner' })
+  assert.match(banner, /Resume all 2 conversations\?/)
+  await app.click('.resume-banner button', resume ? 'Yes' : 'No')
+
+  const ready = await waitReady(projectId, 45_000)
+  assert.deepEqual(ready.files, ['a.txt'])
+  const briefings = app.fakeLog((e) => e.event === 'prompt' && /\[Fleet\] Fleetboard was restarted/.test(e.prompt))
+  assert.deepEqual(briefings.map((e) => e.name).sort(), ['Ada', 'Lead'], 'both were briefed once')
+  assert.equal(app.fakeLog((e) => e.event === 'start' && e.name === 'Ada').at(-1).resumed, resume, 'the CLI resume flag follows the choice')
+  if (!resume) assert.match(briefings.find((e) => e.name === 'Lead').prompt, /Your goal: add a\.txt/, 'a fresh lead is told its goal')
+  assert.equal(app.fakeLog((e) => e.event === 'gave-up').length, 0)
+})
+}
+
+test('starting a team in a fresh app run sends no restart briefing', async () => {
+  const { projectId } = await team({ lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }] } })
+  await waitReady(projectId)
+  assert.equal(app!.fakeLog((e) => e.event === 'prompt' && /restarted/.test(e.prompt)).length, 0)
+})
+
+test('a lead that stops mid-task shows in the Inbox; resumed on its tile, it is briefed and finishes', async () => {
+  const { projectId } = await team({
+    lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }], crashAfterSpawn: true },
+    workers: { Ada: { delayMs: 1500 } }
+  })
+  const card = await app!.waitFor(async () => (await app!.texts('.inbox-card.stopped')).join(''), { label: 'stopped lead card', timeout: 20_000 })
+  assert.match(card, /Lead\s*stopped before finishing/)
+  // Ada reports to the stopped lead meanwhile; the report waits for it
+  await app!.waitFor(() => toolCalls('fleet_report').length > 0, { label: 'Ada reported' })
+  await app!.click('.console-exited button', 'Resume')
+  const ready = await waitReady(projectId, 30_000)
+  assert.deepEqual(ready.files, ['a.txt'], "Ada's work was merged after the lead came back")
+  const briefing = app!.fakeLog((e) => e.event === 'prompt' && e.name === 'Lead' && /was restarted/.test(e.prompt))
+  assert.equal(briefing.length, 1)
+  assert.match(briefing[0].prompt, /Your console was restarted after it stopped/)
+  assert.equal((await app!.texts('.inbox-card.stopped')).length, 0, 'the card is gone')
+})

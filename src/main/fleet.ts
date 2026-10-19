@@ -348,6 +348,8 @@ function deliverTick() {
 
 /** Ask the board to add a node for a new team console, then start its process. */
 async function startConsole(s: FleetState, m: FleetMember, extra: { acceptEdits?: boolean } = {}) {
+  // before the board can mount the node and start it: this is a first start, not a restart
+  startedThisRun.add(m.id)
   const reqId = uid('req')
   const named = await new Promise<{ name?: string }>((resolve) => {
     acks.set(reqId, resolve)
@@ -793,6 +795,44 @@ function startServer(): Promise<number> {
 
 // ---------------------------------------------------------------- renderer IPC
 
+/** Team consoles started (or restarted) by this run of the app. */
+const startedThisRun = new Set<string>()
+/** Team consoles whose process ended mid-task during this run. */
+const stoppedThisRun = new Set<string>()
+
+/**
+ * A team console started again after the app restarted, while its work was unfinished. The CLI is
+ * back (its conversation resumed, or fresh) but sitting at its prompt: its turn was cut off with the
+ * old app. Queue a briefing, typed in when it is ready, so the team picks up where it was.
+ */
+function memberStarted(req: PtySpawnRequest) {
+  if (startedThisRun.has(req.id)) return
+  startedThisRun.add(req.id)
+  const found = memberOf(req.id)
+  if (!found) return
+  const { s, m } = found
+  const lead = m.leadId ? s.members[m.leadId] : undefined
+  // a worker that died and was reported to its lead, brought back by the user: it carries on
+  if (m.role !== 'lead' && m.status === 'reported' && m.report?.startsWith('Console exited') && lead && lead.status !== 'closed') {
+    m.status = 'working'
+    m.report = undefined
+    const t = s.tasks.find((x) => x.owner === m.id)
+    if (t) t.status = 'doing'
+    post(s, { from: m.id, to: lead.id, kind: 'message', text: `${m.name}'s console was restarted; it carries on with its task and will report when done.` })
+  }
+  if (m.status !== 'working' && m.status !== 'starting') return
+  const what = stoppedThisRun.delete(m.id) ? 'Your console was restarted after it stopped.' : 'Fleetboard was restarted.'
+  const how = `${what} ${req.resume ? 'Your conversation was restored, but your last step was cut off.' : 'Your previous conversation was not restored.'}`
+  if (m.role === 'lead') {
+    const crew = Object.values(s.members).filter((x) => x.leadId === m.id && x.status !== 'closed')
+    const team = crew.length ? crew.map((x) => `${x.name} (${x.role}): ${x.status === 'working' ? 'still working' : x.status}`).join('; ') : 'nobody started yet'
+    const goal = req.resume ? '' : ` Your goal: ${m.task}`
+    post(s, { from: 'user', to: m.id, kind: 'system', text: `[Fleet] ${how}${goal} Team: ${team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.` })
+  } else {
+    post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead)}` })
+  }
+}
+
 /**
  * A member's console ended before it reported (crashed, killed, closed from the board). Tell its lead
  * so the team doesn't wait forever; the work so far stays in the member's worktree.
@@ -803,6 +843,10 @@ function memberExited(id: string, code: number | undefined, appClosing: boolean)
   if (!found) return
   const { s, m } = found
   if (m.status !== 'working' && m.status !== 'starting') return
+  // started again by hand (Restart / Resume on its tile), it gets briefed like after an app restart
+  startedThisRun.delete(id)
+  stoppedThisRun.add(id)
+  // a lead that stopped is shown to the user in the Inbox (its console status is "exited")
   const lead = m.leadId ? s.members[m.leadId] : undefined
   if (!lead || lead.status === 'closed') return
   const how = code ? ` (exit code ${code})` : ''
@@ -818,6 +862,7 @@ export async function initFleet(c: MainContext) {
   ctx = c
   loadAll()
   ctx.ptys.onExit(memberExited)
+  ctx.ptys.onSpawn(memberStarted)
   void findClaudeConfig()
   port = await startServer()
   setInterval(deliverTick, 700)

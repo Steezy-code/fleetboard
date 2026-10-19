@@ -264,6 +264,10 @@ async function leadFlow(goal) {
     const name = /^(.+?) started/.exec(r.text)?.[1]
     if (name) started.push(name)
   }
+  if (sc.crashAfterSpawn) {
+    log('crash')
+    process.exit(2)
+  }
   if (sc.ask) {
     const r = await tool('fleet_ask_user', { question: sc.ask.question, options: sc.ask.options })
     log('answer', { text: r.text })
@@ -298,6 +302,33 @@ async function leadFlow(goal) {
     }
   }
   if (sc.finish !== false) await tool('fleet_finish', { summary: fill(sc.summary ?? `Done: ${goal}`) })
+}
+
+/** After a restart: wait for the workers the briefing says are still working, merge, finish. */
+async function leadResumeFlow(briefing) {
+  const sc = scenario.lead ?? {}
+  await tool('fleet_status', {})
+  const pending = new Set([...briefing.matchAll(/([^;:.]+?) \(worker\): still working/g)].map((m) => m[1].trim()))
+  const unmerged = [...briefing.matchAll(/([^;:.]+?) \(worker\): reported/g)].map((m) => m[1].trim())
+  log('resume', { waitingFor: [...pending], unmerged })
+  for (const who of unmerged) {
+    const merged = await tool('fleet_merge', { worker: who })
+    log('merged', { worker: who, ok: !merged.isError, text: merged.text })
+  }
+  const deadline = Date.now() + (sc.waitMs ?? 120_000)
+  while (pending.size && Date.now() < deadline) {
+    const r = await tool('fleet_wait', { timeout_seconds: sc.waitSeconds ?? 20 })
+    log('wait-result', { text: r.text.slice(0, 500) })
+    for (const m of r.text.matchAll(/\[Fleet\] (.+?) reported: \((\w+)\)/g)) {
+      if (!pending.delete(m[1])) continue
+      if (m[2] === 'done') {
+        const merged = await tool('fleet_merge', { worker: m[1] })
+        log('merged', { worker: m[1], ok: !merged.isError, text: merged.text })
+      }
+    }
+  }
+  if (pending.size) log('gave-up', { waitingFor: [...pending] })
+  await tool('fleet_finish', { summary: fill(sc.summary ?? 'Done after a restart') })
 }
 
 async function workerFlow(brief) {
@@ -345,7 +376,9 @@ async function turn(prompt) {
     if (state === 'working') draw()
   }, 100)
   try {
-    if (me.role === 'lead' && !prompt.startsWith('[Fleet]')) await leadFlow(prompt)
+    if (me.role === 'lead' && /\[Fleet\] (Fleetboard|Your console) was restarted/.test(prompt)) await leadResumeFlow(prompt)
+    else if (me.role === 'lead' && /^\[Fleet\] .+ reported: \(/.test(prompt)) log('report-typed', { prompt })
+    else if (me.role === 'lead' && !prompt.startsWith('[Fleet]')) await leadFlow(prompt)
     else if (me.role === 'worker' && prompt.includes('Task from')) await workerFlow(prompt)
     else if (me.role === 'reviewer' && prompt.includes('Task from')) await reviewerFlow()
     else if (me.role === 'solo') await soloFlow(prompt)

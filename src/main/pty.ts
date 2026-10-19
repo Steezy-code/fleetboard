@@ -42,10 +42,12 @@ export const stripAnsi = (s: string) =>
     .replace(/\r/g, '')
 
 type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void
+type SpawnListener = (req: PtySpawnRequest) => void
 
 export class PtyManager {
   private sessions = new Map<string, Session>()
   private exitListeners = new Set<ExitListener>()
+  private spawnListeners = new Set<SpawnListener>()
   /** the app is quitting: consoles exit because of that, not on their own */
   private disposing = false
   private tick: NodeJS.Timeout
@@ -121,6 +123,13 @@ export class PtyManager {
       bracketed: false
     }
     this.sessions.set(req.id, s)
+    for (const l of this.spawnListeners) {
+      try {
+        l(req)
+      } catch (e) {
+        console.error('spawn listener failed', e)
+      }
+    }
 
     proc.onData((data) => {
       s.buffer += data
@@ -305,6 +314,12 @@ export class PtyManager {
 
   private refreshStatuses() {
     for (const s of this.sessions.values()) this.evaluate(s)
+  }
+
+  /** Called when a console's process has started. */
+  onSpawn(listener: SpawnListener) {
+    this.spawnListeners.add(listener)
+    return () => this.spawnListeners.delete(listener)
   }
 
   /** Called when a console's process ends, with its exit code. */
