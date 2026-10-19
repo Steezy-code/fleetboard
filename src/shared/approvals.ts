@@ -21,7 +21,7 @@ const PERMISSION = /\b(do you want|would you like|allow|approve|permission|proce
 
 function tone(label: string, permission: boolean): ApprovalOption['tone'] {
   const l = label.toLowerCase()
-  if (/^(no|deny|reject|cancel|don.?t|exit)\b/.test(l)) return 'deny'
+  if (/^(no|deny|reject|cancel|don.?t|exit|quit)\b/.test(l)) return 'deny'
   if (!permission) return 'other'
   if (/^yes\b.*\b(always|don.?t ask|for this session|for the session|from this project|accept edits)\b/.test(l)) return 'always'
   if (/^(yes|allow|approve|proceed|trust|ok)\b/.test(l)) return 'allow'
