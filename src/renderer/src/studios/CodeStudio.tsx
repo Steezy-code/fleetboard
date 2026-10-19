@@ -9,6 +9,7 @@ import { FileIcon } from '../workbench/icons'
 import { isImagePath, langFromPath, langLabel } from '../workbench/markdown'
 import { baseName, dirname, joinPath, relativeTo } from '../workbench/paths'
 import { MAX_TEXT_BYTES, type FileStat } from '../workbench/useFileText'
+import type { WriteResult } from '@shared/types'
 
 interface Doc {
   path: string
@@ -122,7 +123,22 @@ export default function CodeStudio(props: { path?: string }) {
     }
     setSaving(true)
     try {
-      await invoke('fs:write', cur.path, cur.text)
+      // only over what we loaded: an agent may have changed the file since
+      const r = await invoke<WriteResult>('fs:write', cur.path, cur.text, { base: cur.saved })
+      if (!r.ok) {
+        const disk = r.current
+        const name = cur.path.split('/').pop()
+        const app = useApp.getState()
+        if (await app.confirm({ title: `${name} changed on disk`, body: `It was ${disk === null ? 'deleted' : 'changed'} since you opened it, maybe by an agent. Replace it with your version?`, confirm: 'Replace with mine', danger: true })) {
+          await invoke<WriteResult>('fs:write', cur.path, cur.text)
+        } else {
+          if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your unsaved edits to it are lost. Otherwise you keep editing yours.', confirm: 'Load the version on disk', danger: true }))) {
+            const st = await invoke<FileStat | null>('fs:stat', cur.path)
+            setDoc((d) => (d && d.path === cur.path ? { ...d, text: disk, saved: disk, mtime: st?.mtime ?? d.mtime } : d))
+          }
+          return false
+        }
+      }
       const st = await invoke<FileStat | null>('fs:stat', cur.path)
       setDoc((d) => (d && d.path === cur.path ? { ...d, saved: cur.text!, mtime: st?.mtime ?? d.mtime } : d))
       flashSaved()

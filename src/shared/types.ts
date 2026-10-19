@@ -291,3 +291,6 @@ export interface Recovery {
   /** the history/ snapshot used instead, if there was one */
   snapshot?: string
 }
+
+/** fs:write with a base: refused when the file no longer holds it (current: what it holds now, null if gone) */
+export type WriteResult = { ok: true } | { ok: false; reason: 'changed'; current: string | null }

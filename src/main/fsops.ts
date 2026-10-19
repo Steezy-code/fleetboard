@@ -3,6 +3,7 @@ import path from 'node:path'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
 import { dirs } from './paths'
+import type { WriteResult } from '@shared/types'
 
 export interface TreeEntry {
   name: string
@@ -35,6 +36,42 @@ function tree(dir: string, depth: number, filter?: (name: string) => boolean): T
     })
 }
 
+/**
+ * Write a file the user edits. With `base` (what the editor loaded or last saved), only while the file
+ * still holds exactly that: an agent's change made meanwhile is never overwritten; the caller gets what
+ * is there now (null: the file is gone). Written to a temporary file and renamed, so a crash midway
+ * never leaves it half written; its permissions are kept.
+ */
+export function writeText(file: string, content: string, base?: string): WriteResult {
+  if (base !== undefined) {
+    let current: string | null = null
+    try {
+      current = fs.readFileSync(file, 'utf8')
+    } catch {
+      /* gone */
+    }
+    if (current !== base) return { ok: false, reason: 'changed', current }
+  }
+  // a symlinked file (dotfiles) is written where it points, not replaced by a plain file
+  let target = file
+  try {
+    target = fs.realpathSync(file)
+  } catch {
+    /* new file */
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  const mode = fs.statSync(target, { throwIfNoEntry: false })?.mode
+  const tmp = path.join(path.dirname(target), `.${path.basename(target)}.fleetboard-${process.pid}-${Date.now()}.tmp`)
+  try {
+    fs.writeFileSync(tmp, content, mode !== undefined ? { mode: mode & 0o7777 } : undefined)
+    fs.renameSync(tmp, target)
+  } catch (e) {
+    fs.rmSync(tmp, { force: true })
+    throw e
+  }
+  return { ok: true }
+}
+
 export function register(ctx: MainContext) {
   const { ipc } = ctx
   ipc.handle('dialog:openFolder', async () => {
@@ -55,10 +92,7 @@ export function register(ctx: MainContext) {
   ipc.handle('fs:list', (_e, dir: string) => tree(dir, 0))
   ipc.handle('fs:read', (_e, file: string) => fs.readFileSync(file, 'utf8'))
   ipc.handle('fs:readBase64', (_e, file: string) => fs.readFileSync(file).toString('base64'))
-  ipc.handle('fs:write', (_e, file: string, content: string) => {
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, content)
-  })
+  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string }) => writeText(file, content, opts?.base))
   ipc.handle('fs:writeBase64', (_e, file: string, b64: string) => {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, Buffer.from(b64, 'base64'))
