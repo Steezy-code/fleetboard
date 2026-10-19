@@ -234,6 +234,31 @@ export class PtyManager {
   }
 
   /**
+   * A message from the board (a command, the Orchestrator, a loop, a handoff). When the console is
+   * asking a question, typing would answer it (Enter picks the highlighted option, often "Yes"), so the
+   * message is held until the question is answered and the console is ready.
+   */
+  send(id: string, text: string, submit = true) {
+    const s = this.sessions.get(id)
+    if (!s) return
+    if (!detectPrompt(s.screen.view())) return this.paste(id, text, submit)
+    this.emit('pty:held', id)
+    if (submit) void this.deliver(id, text)
+    else void this.whenNoQuestion(id).then((ok) => ok && this.paste(id, text, false))
+  }
+
+  private async whenNoQuestion(id: string, timeoutMs = 30 * 60_000): Promise<boolean> {
+    const until = Date.now() + timeoutMs
+    while (Date.now() < until) {
+      const s = this.sessions.get(id)
+      if (!s) return false
+      if (!detectPrompt(s.screen.view()) && s.tracker.status !== 'needs-you') return true
+      await new Promise((r) => setTimeout(r, 300))
+    }
+    return false
+  }
+
+  /**
    * Type a message and press Enter, then make sure it was taken: right after startup a CLI can swallow
    * the first Enter while it settles, leaving the message in its input box. Retries a couple of times.
    */
@@ -266,7 +291,7 @@ export class PtyManager {
    * typed while it draws its startup notices), then make sure it was submitted. False if the console
    * ended or never became ready.
    */
-  async deliver(id: string, text: string, timeoutMs = 120_000): Promise<boolean> {
+  async deliver(id: string, text: string, timeoutMs = 30 * 60_000): Promise<boolean> {
     const until = Date.now() + timeoutMs
     let seen = false
     while (Date.now() < until) {

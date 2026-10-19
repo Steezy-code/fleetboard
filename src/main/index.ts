@@ -110,7 +110,7 @@ function createWindow() {
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
-  ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.paste(id, text, submit))
+  ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.send(id, String(text), submit))
   ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
   ipcMain.handle('pty:kill', (_e, id: string) => ptys.kill(id))
   ipcMain.handle('pty:pause', (_e, id: string) => ptys.pause(id))

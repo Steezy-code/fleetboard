@@ -20,6 +20,10 @@ export function wireConsoleEvents() {
     app().setLive(id, false)
     app().setStatus(id, 'exited')
   })
+  on('pty:held', (id: string) => {
+    const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'That console'
+    app().toast(`${name} is asking something, so your message waits until it's answered (see the Inbox).`, 'warn')
+  })
 }
 
 export const consoleNodes = (): BoardNode<ConsoleData>[] => (activeWs()?.nodes.filter((n) => n.type === 'console') ?? []) as BoardNode<ConsoleData>[]
