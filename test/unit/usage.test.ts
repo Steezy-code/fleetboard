@@ -11,7 +11,7 @@ process.env.HOME = home
 process.env.FLEETBOARD_HOME = path.join(home, 'fb')
 delete process.env.CLAUDE_CONFIG_DIR
 delete process.env.CODEX_HOME
-const { parseClaude, parseCodex, parseGemini, register } = await import('../../src/main/usage')
+const { parseClaude, parseCodex, parseGemini, readLog, register } = await import('../../src/main/usage')
 const { ipcMain } = await import('../support/electron-stub')
 
 const FIX = path.resolve(import.meta.dirname, '../fixtures/usage')
@@ -63,6 +63,103 @@ test('broken lines and foreign files are skipped, not fatal', () => {
   assert.equal(parseCodex(junk, 'j.jsonl').events.length, 0)
   assert.equal(parseGemini(junk, 'j.json').events.length, 0)
   assert.equal(parseGemini('{"tokens": [', 'j.json').events.length, 0)
+})
+
+// ---- growing logs: read on from where the last read stopped ----
+
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-usage-grow-'))
+const PARSE = { claude: parseClaude, codex: parseCodex, gemini: parseGemini } as const
+const FIXTURES = { claude: 'claude-session.jsonl', codex: 'codex-rollout.jsonl', gemini: 'gemini-chat.jsonl' } as const
+const stat = (agent: keyof typeof PARSE, file: string) => {
+  const st = fs.statSync(file)
+  return { agent, file, mtime: st.mtimeMs, size: st.size }
+}
+const strip = (e: any) => ({ models: e.models, sessions: e.sessions, events: e.events })
+
+for (const agent of ['claude', 'codex', 'gemini'] as const) {
+  test(`${agent}: a log read as it grows, cut at any byte, adds up to the same as reading it whole`, async () => {
+    const text = read(FIXTURES[agent])
+    const file = path.join(scratch, `${agent}-grow.jsonl`)
+    const whole = strip(PARSE[agent](text, file))
+    assert.ok(whole.events.length > 0)
+    const bytes = Buffer.from(text)
+    // every line boundary, the middle of lines, and the middle of a multi-byte character
+    const cuts = new Set<number>([1, 7])
+    for (let i = 0; i < bytes.length; i++) if (bytes[i] === 0x0a) [i, i + 1, i + 2].forEach((c) => cuts.add(c))
+    for (let i = 13; i < bytes.length; i += 97) cuts.add(i)
+    for (const cut of [...cuts].filter((c) => c < bytes.length)) {
+      fs.writeFileSync(file, bytes.subarray(0, cut))
+      const first = await readLog(stat(agent, file))
+      fs.appendFileSync(file, bytes.subarray(cut))
+      const next = await readLog(stat(agent, file), first)
+      assert.deepEqual(strip(next), whole, `cut at byte ${cut}`)
+      assert.equal(next.offset, bytes.length)
+    }
+    // and in three steps, each from the previous read
+    fs.writeFileSync(file, '')
+    let entry = await readLog(stat(agent, file))
+    for (const part of [bytes.subarray(0, 900), bytes.subarray(900, 2000), bytes.subarray(2000)]) {
+      fs.appendFileSync(file, part)
+      entry = await readLog(stat(agent, file), entry)
+    }
+    assert.deepEqual(strip(entry), whole)
+  })
+}
+
+test('a growing log is not read again from the start', async () => {
+  const file = path.join(scratch, 'only-new.jsonl')
+  const text = read('claude-session.jsonl')
+  fs.writeFileSync(file, text)
+  const first = await readLog(stat('claude', file))
+  // an early line changed in place (outside what is fingerprinted) would be seen by a full read
+  const mid = text.length - 400
+  const changed = text.slice(0, mid).replaceAll('claude-haiku-4-5-20251001', 'claude-zzzzz-4-5-20251001') + text.slice(mid)
+  assert.notEqual(changed, text)
+  fs.writeFileSync(file, changed + '\n')
+  const next = await readLog(stat('claude', file), first)
+  assert.deepEqual(strip(next), strip(first), 'only the appended (empty) line was read')
+  assert.notDeepEqual(strip(parseClaude(changed, file)), strip(first))
+})
+
+test('a log rewritten or cut shorter is read again from the start, never counted twice', async () => {
+  const file = path.join(scratch, 'rewritten.jsonl')
+  const text = read('codex-rollout.jsonl')
+  fs.writeFileSync(file, text)
+  const first = await readLog(stat('codex', file))
+  // replaced by another session's log that is longer
+  const other = read('codex-rollout.jsonl').replace(/mock-model/g, 'other-model') + '\n'
+  fs.writeFileSync(file, other)
+  assert.deepEqual(strip(await readLog(stat('codex', file), first)), strip(parseCodex(other, file)))
+  // cut shorter
+  const short = text.split('\n').slice(0, 3).join('\n') + '\n'
+  fs.writeFileSync(file, short)
+  assert.deepEqual(strip(await readLog(stat('codex', file), first)), strip(parseCodex(short, file)))
+})
+
+test('a line longer than a read chunk, and a log bigger than one, are read whole', async () => {
+  const file = path.join(scratch, 'huge.jsonl')
+  const lines = read('claude-session.jsonl').split('\n')
+  // a 20 MB tool result in the middle (no usage in it), then the rest
+  const big = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x'.repeat(20 * 1024 * 1024) }] } })
+  const text = [...lines.slice(0, 3), big, ...lines.slice(3)].join('\n')
+  fs.writeFileSync(file, text)
+  const entry = await readLog(stat('claude', file))
+  assert.deepEqual(strip(entry), strip(parseClaude(read('claude-session.jsonl'), file)))
+  fs.rmSync(file)
+})
+
+test('a read that fails midway leaves the cached entry as it was', async () => {
+  const file = path.join(scratch, 'vanishing.jsonl')
+  fs.writeFileSync(file, read('claude-session.jsonl'))
+  const first = await readLog(stat('claude', file))
+  const before = JSON.stringify(first)
+  fs.appendFileSync(file, read('claude-session.jsonl').replace(/msg_/g, 'msgB_'))
+  const grown = stat('claude', file)
+  await readLog(grown, first)
+  assert.equal(JSON.stringify(first), before, 'reading on does not change the entry it started from')
+  fs.rmSync(file)
+  await assert.rejects(readLog(grown, first))
+  assert.equal(JSON.stringify(first), before)
 })
 
 // ---- through the app: files on disk, resumed sessions, plan-limit windows ----
