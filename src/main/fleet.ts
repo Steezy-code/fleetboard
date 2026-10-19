@@ -972,22 +972,53 @@ export function answerAsk(askId: string, answer: string): boolean {
 }
 
 /** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
+/** What the user's checkout is in the middle of (a merge, a rebase…), if anything. */
+async function unfinishedOperation(cwd: string): Promise<string | null> {
+  const ops: [string, string][] = [
+    ['MERGE_HEAD', 'a merge'],
+    ['rebase-merge', 'a rebase'],
+    ['rebase-apply', 'a rebase'],
+    ['CHERRY_PICK_HEAD', 'a cherry-pick'],
+    ['REVERT_HEAD', 'a revert']
+  ]
+  for (const [name, what] of ops) {
+    const p = (await git(cwd, ['rev-parse', '--git-path', name])).out
+    if (p && fs.existsSync(path.resolve(cwd, p))) return what
+  }
+  return null
+}
+
+const merging = new Set<string>()
+
+/** Merge the Ready work into the user's checkout (whatever branch it is on now), then close the team. */
 export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string }> {
   const s = states.get(projectId)
   if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
-  const lead = s.members[s.ready.leadId]
-  if (lead?.branch) {
-    const current = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out
-    const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
-    if (!r.ok) {
-      await git(s.projectPath, ['merge', '--abort'])
-      return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
+  // the desktop and the phone can both press Merge
+  if (merging.has(projectId)) return { ok: false, error: 'Already merging.' }
+  merging.add(projectId)
+  try {
+    const lead = s.members[s.ready.leadId]
+    if (lead?.branch) {
+      const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
+      if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
+      // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
+      const busy = await unfinishedOperation(s.projectPath)
+      if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then merge again; the work stays on ${lead.branch}.` }
+      const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
+      if (!r.ok) {
+        // undo only a merge this started (a conflict); a merge git refused to start left nothing to undo
+        if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['merge', '--abort'])
+        return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
+      }
+      await dismissTeam(s, lead, 'merged')
+      return { ok: true, into: current.out }
     }
-    await dismissTeam(s, lead, 'merged')
-    return { ok: true, into: current }
+    await dismissTeam(s, lead, 'keep')
+    return { ok: true, into: '' }
+  } finally {
+    merging.delete(projectId)
   }
-  await dismissTeam(s, lead, 'keep')
-  return { ok: true, into: '' }
 }
 
 /** A project's team state, if it has one. */
