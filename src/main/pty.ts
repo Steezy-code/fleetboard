@@ -235,6 +235,21 @@ export class PtyManager {
     }
   }
 
+  /** Close a console and wait until its processes have ended (at most the SIGKILL fallback, ~2.5 s). */
+  stop(id: string): Promise<void> {
+    const s = this.sessions.get(id)
+    if (!s) return Promise.resolve()
+    const gone = new Promise<void>((resolve) => {
+      const off = this.onExit((exited) => {
+        if (exited === id && this.sessions.get(id) !== s) (off(), resolve())
+      })
+      // whatever happens, not for ever
+      setTimeout(() => (off(), resolve()), 4000).unref?.()
+    })
+    this.kill(id)
+    return gone
+  }
+
   kill(id: string) {
     const s = this.sessions.get(id)
     if (!s) return
