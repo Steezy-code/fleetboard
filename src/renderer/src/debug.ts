@@ -8,6 +8,8 @@ import { renderMarkdown, sanitizeHtml } from './workbench/markdown'
 import { renderMarkdown as renderDocMarkdown } from './studios/docs/render'
 import { handoff } from './engine/handoff'
 import { figureItems, figureToExcalidraw, figureToPngBase64, figureToSvg } from './studios/diagrams/export'
+import { NODE_DEFS } from './nodes/registry'
+import { PANELS, DRAWERS } from './panels/registry'
 
 ;(window as any).__fleetboard = {
   useApp,
@@ -20,5 +22,8 @@ import { figureItems, figureToExcalidraw, figureToPngBase64, figureToSvg } from 
   voice: { synthesize, ttsReady, warmUpTts, transcribe, warmUpStt, sttReady },
   markdown: { renderMarkdown, sanitizeHtml, renderDocMarkdown },
   handoff,
+  NODE_DEFS,
+  PANELS,
+  DRAWERS,
   exportHelpers: { markdownToHtmlDocument, figureItems, figureToSvg, figureToPngBase64, figureToExcalidraw }
 }
