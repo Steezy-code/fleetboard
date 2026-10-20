@@ -28,8 +28,9 @@ export const rectPts = (i: Box): Pt[] => [
 ]
 
 /** Points of a linear item; falls back to its box diagonal. */
-export function linePoints(i: InkItem): Pt[] {
-  if (i.points && i.points.length) return i.points as Pt[]
+/** A line's points: its own if it has any, else the two corners of its box — never none. */
+export function linePoints(i: InkItem): [Pt, ...Pt[]] {
+  if (i.points && i.points.length) return i.points as [Pt, ...Pt[]]
   return [
     [i.x, i.y],
     [i.x + i.w, i.y + i.h]
@@ -137,8 +138,12 @@ export function hitTest(ink: InkItem[], x: number, y: number, tol: number): InkI
   return null
 }
 
-/** Point halfway along a polyline. */
-export function midPoint(pts: Pt[]): Pt {
+/**
+ * Point halfway along a polyline. Takes a polyline with at least one point, because there is no
+ * honest answer for none: it used to return pts[pts.length - 1] — undefined, typed Pt — and the
+ * callers read [0] and [1] off it, which is a label drawn at NaN or a throw depending on the caller.
+ */
+export function midPoint(pts: [Pt, ...Pt[]]): Pt {
   if (pts.length === 1) return pts[0]
   const lens: number[] = []
   let total = 0
@@ -155,7 +160,8 @@ export function midPoint(pts: Pt[]): Pt {
     }
     acc -= lens[k]
   }
-  return pts[pts.length - 1]
+  // every segment walked and nothing matched: floating point, so the end of the line
+  return pts[pts.length - 1] ?? pts[0]
 }
 
 /** The area where a shape's text is laid out. */
