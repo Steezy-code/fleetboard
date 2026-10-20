@@ -190,6 +190,9 @@ export function wireFleet() {
 
   on('fleet:asked', () => useApp.getState().toast('Your lead has a question', 'info'))
   on('fleet:ready', () => useApp.getState().toast('Your team finished. Review it in the Inbox.', 'ok'))
+  // something put a member's work at risk (a commit that failed, a worktree kept back). The lead is
+  // a model, so a note in its chat reaches nobody who can act on it.
+  on('fleet:trouble', ({ message, tone }: { message: string; tone: 'warn' | 'info' }) => useApp.getState().toast(message, tone))
 }
 
 /** Is this text an instruction about the board itself rather than work for the team? */

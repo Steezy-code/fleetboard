@@ -10,6 +10,7 @@ import { emptyFleet } from '@shared/fleet'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
+import { logError } from './errors'
 import { loginEnv } from './env'
 import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
@@ -154,8 +155,78 @@ async function createWorktree(repoCwd: string, projectPath: string, projectId: s
   return dir
 }
 
-async function removeWorktree(projectPath: string, m: FleetMember, deleteBranch: 'merged' | 'force' | 'keep') {
-  if (!m.cwd.startsWith(treesDir)) return
+/** Tell the user about something that put a member's work at risk: the lead is a model, so a note
+ *  in its chat is not a report to anyone who can act on it. */
+function trouble(s: FleetState, message: string, tone: 'warn' | 'info' = 'warn') {
+  if (tone === 'warn') logError('fleet', message)
+  ctx.emit('fleet:trouble', { projectId: s.projectId, message, tone })
+}
+
+/** Is every commit on `branch` already on `into`? (`git branch -d` asks about HEAD, not the lead.) */
+export async function containedIn(projectPath: string, branch?: string, into?: string) {
+  if (!branch) return true // nothing of its own to lose
+  if (!into) return false
+  return (await git(projectPath, ['merge-base', '--is-ancestor', branch, into])).ok
+}
+
+/**
+ * Commit whatever a member never committed, so its worktree can be removed without losing work.
+ * Returns false when there is uncommitted work it could not save — then the worktree stays.
+ */
+async function keepUncommitted(s: FleetState, m: FleetMember): Promise<boolean> {
+  const add = await git(m.cwd, ADD_ALL)
+  if (!add.ok) {
+    trouble(s, `${m.name}'s changes could not be staged (${add.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
+    return false
+  }
+  if ((await git(m.cwd, ['diff', '--cached', '--quiet'])).ok) return true // nothing of its own uncommitted
+  if (!m.branch) {
+    trouble(s, `${m.name} has uncommitted changes and no branch of its own, so its folder is kept at ${m.cwd}.`)
+    return false
+  }
+  const r = await git(m.cwd, [
+    'commit',
+    '-m',
+    `Unreported work from ${m.name} (Fleetboard)\n\nCommitted so removing its worktree could not throw it away.\nTask: ${m.task?.slice(0, 500) ?? ''}`
+  ])
+  if (!r.ok) {
+    trouble(s, `${m.name} has uncommitted work that could not be committed (${r.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
+    return false
+  }
+  trouble(s, `${m.name} had work it never reported; it is kept as a commit on ${m.branch}.`, 'info')
+  return true
+}
+
+/**
+ * Whether a member's worktree is its own to remove.
+ *
+ * It must sit inside the worktrees folder — with the separator, so a sibling like `worktrees-old`
+ * cannot pass as being inside it — and no other live member may be working in the same folder. A
+ * reviewer is given its lead's cwd, so without the second test, dismissing a reviewer removed the
+ * lead's worktree.
+ */
+export function ownWorktree(
+  m: { id: string; cwd: string },
+  members: { id: string; cwd: string; status: string }[],
+  trees: string
+): boolean {
+  if (!m.cwd.startsWith(trees + path.sep)) return false
+  return !members.some((x) => x.id !== m.id && x.status !== 'closed' && x.cwd === m.cwd)
+}
+
+/**
+ * Remove a member's worktree once nothing of its own would go with it.
+ *
+ * Two ways this used to lose work. A reviewer runs in its *lead's* worktree (fleet_spawn_reviewer
+ * hands it the lead's cwd and no branch), so dismissing a reviewer removed the lead's worktree and
+ * everything the lead had not committed. And `worktree remove --force` is precisely what makes git
+ * discard uncommitted changes, while a worker's work is only ever committed by fleet_report — so a
+ * worker dismissed before it reported lost every edit it had made.
+ */
+async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merged' | 'force' | 'keep') {
+  const projectPath = s.projectPath
+  if (!ownWorktree(m, Object.values(s.members), treesDir)) return
+  if (!(await keepUncommitted(s, m))) return
   for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
     const p = path.join(m.cwd, d)
     try {
@@ -164,7 +235,8 @@ async function removeWorktree(projectPath: string, m: FleetMember, deleteBranch:
       /* not there */
     }
   }
-  await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
+  const rm = await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
+  if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
   if (m.branch && deleteBranch !== 'keep') await git(projectPath, ['branch', deleteBranch === 'force' ? '-D' : '-d', m.branch])
 }
 
@@ -698,7 +770,8 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (!lead) return fail('You have no lead.')
       let commitNote = ''
       if (m.role === 'worker' && m.branch) {
-        await git(m.cwd, ADD_ALL)
+        const add = await git(m.cwd, ADD_ALL)
+        if (!add.ok) trouble(s, `${m.name}'s changes could not be staged: ${add.err.slice(0, 160)}. They are still in ${m.cwd}.`)
         const dirty = !(await git(m.cwd, ['diff', '--cached', '--quiet'])).ok
         if (dirty) {
           // subject from the worker's own summary (what changed), body keeps the task it was given
@@ -706,6 +779,8 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
           const subject = summary.split('\n')[0].replace(/^[-*•\s]+/, '').replace(/\.$/, '').slice(0, 72) || 'Work from ' + m.name
           const c = await git(m.cwd, ['commit', '-m', `${subject}\n\n${summary.slice(0, 2000)}\n\nTask: ${m.task?.slice(0, 500) ?? ''}\nBy ${m.name} (Fleetboard team)`])
           commitNote = c.ok ? ` Committed on ${m.branch}.` : ` (commit failed: ${c.err.slice(0, 200)})`
+          // the lead is a model: without this the user never hears that the work was not saved
+          if (!c.ok) trouble(s, `${m.name}'s work could not be committed: ${c.err.slice(0, 160)}. It is still in ${m.cwd}.`)
         } else commitNote = ' No file changes.'
       }
       m.status = 'reported'
@@ -797,7 +872,7 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   // its worktree and Gemini home go once its CLI has ended: one still shutting down would write its
   // session into them again (Gemini CLI saves on SIGHUP)
   await ctx.ptys.stop(m.id)
-  await removeWorktree(s.projectPath, m, branch)
+  await removeWorktree(s, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
   changed(s)
 }
@@ -1108,8 +1183,11 @@ export const fleetState = (projectId: string): FleetState | undefined => states.
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')
-  // worker branches are merged into the lead's branch (or being thrown away): always delete them
-  for (const m of crew) await dismiss(s, m, 'force')
+  // A worker's branch is only safe to delete once the lead's branch actually contains its commits.
+  // It used to be deleted with -D either way, so a worker that reported "blocked", or whose console
+  // died before it reported, had its commits made unreachable — after the lead's own report had told
+  // the user that work existed.
+  for (const m of crew) await dismiss(s, m, (await containedIn(s.projectPath, m.branch, lead.branch)) ? 'force' : 'keep')
   await dismiss(s, lead, branch)
   s.ready = null
   s.tasks = []
