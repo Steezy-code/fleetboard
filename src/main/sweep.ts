@@ -263,14 +263,14 @@ export function listRepos(): { roots: string[]; repos: SweepCandidate[] } {
 
 // ---------- per repo ----------
 
-function parseSlug(url: string | null): string | null {
+export function parseSlug(url: string | null): string | null {
   if (!url) return null
   const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url.trim())
   return m ? `${m[1]}/${m[2]}` : null
 }
 
 /** Parse `git status --porcelain=v1 -z`. */
-function parseStatus(out: string) {
+export function parseStatus(out: string) {
   const parts = out.split('\0')
   const files: SweepFile[] = []
   let tracked = 0
@@ -304,7 +304,7 @@ function oldestMtime(root: string, files: SweepFile[]): number | null {
 
 const PLAN_FILES = ['PLAN.md', 'ROADMAP.md', 'TODO.md', 'docs/PLAN.md', 'docs/ROADMAP.md']
 
-function nextPlanItem(root: string): { file: string; item: string } | null {
+export function nextPlanItem(root: string): { file: string; item: string } | null {
   for (const file of PLAN_FILES) {
     let txt: string
     try {
@@ -339,7 +339,7 @@ function nextPlanItem(root: string): { file: string; item: string } | null {
 
 const FAILING = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
 
-function score(r: SweepRepo): void {
+export function score(r: SweepRepo): void {
   let s = 0
   const a: string[] = []
   const now = Date.now()
