@@ -102,7 +102,7 @@ const md = new Marked({
       tokenizer(src: string) {
         const m = /^\[\[([^\]|\n]+?)(?:\|([^\]\n]+))?\]\]/.exec(src)
         if (!m) return undefined
-        const target = m[1].trim()
+        const target = (m[1] ?? '').trim()
         return { type: 'wikilink', raw: m[0], target, label: (m[2] ?? target.replace(/#.*$/, '')).trim() }
       },
       renderer(token: any) {
@@ -115,7 +115,7 @@ const md = new Marked({
   ],
   renderer: {
     code({ text, lang }: Tokens.Code) {
-      const l = (lang ?? '').trim().split(/\s+/)[0].toLowerCase()
+      const l = ((lang ?? '').trim().split(/\s+/)[0] ?? '').toLowerCase()
       const language = l && hljs.getLanguage(l) ? l : ''
       const body = language ? highlightCode(text, language) : escapeHtml(text)
       return `<pre><code class="hljs${language ? ' language-' + language : ''}">${body}</code></pre>\n`
@@ -259,7 +259,7 @@ export function handleMdClick(e: React.MouseEvent<HTMLElement>, h: MdClickHandle
     return
   }
   if (isExternal(href)) return
-  const [file, anchor] = href.split('#')
+  const [file = '', anchor] = href.split('#')
   const rel = decodeURI(file)
   const abs = rel.startsWith('/') ? rel : joinPath(h.baseDir ?? '/', rel)
   if (h.onFile) h.onFile(abs, anchor)
@@ -271,13 +271,14 @@ export function extractLinks(src: string): { wiki: string[]; files: string[] } {
   const text = src.replace(/```[\s\S]*?```/g, '').replace(/`[^`\n]*`/g, '')
   const wiki: string[] = []
   const files: string[] = []
-  for (const m of text.matchAll(/\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)) wiki.push(m[1].trim())
+  for (const m of text.matchAll(/\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)) wiki.push((m[1] ?? '').trim())
   for (const m of text.matchAll(/\]\(\s*<?([^)\s>]+?\.(?:md|mdx|markdown))(?:#[^)\s>]*)?>?(?:\s+"[^"]*")?\s*\)/gi)) {
-    if (!isExternal(m[1])) {
+    const link = m[1] ?? ''
+    if (!isExternal(link)) {
       try {
-        files.push(decodeURI(m[1]))
+        files.push(decodeURI(link))
       } catch {
-        files.push(m[1])
+        files.push(link)
       }
     }
   }
@@ -287,7 +288,7 @@ export function extractLinks(src: string): { wiki: string[]; files: string[] } {
 /** First "# Heading" of a markdown string. */
 export function firstHeading(src: string): string | null {
   const m = /^\s{0,3}#\s+(.+?)\s*#*\s*$/m.exec(src.replace(/```[\s\S]*?```/g, ''))
-  return m ? m[1].replace(/[*_`]/g, '').trim() : null
+  return m?.[1] ? m[1].replace(/[*_`]/g, '').trim() : null
 }
 
 export { dirname }

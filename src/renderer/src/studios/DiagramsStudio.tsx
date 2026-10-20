@@ -36,8 +36,7 @@ export default function DiagramsStudio() {
   const lastFig = useApp((s) => {
     const ws = s.project?.workspaces.find((w) => w.id === s.project!.activeWorkspaceId)
     if (!ws) return null
-    for (let k = ws.ink.length - 1; k >= 0; k--) if (ws.ink[k].figureId) return ws.ink[k].figureId!
-    return null
+    return ws.ink.findLast((i) => i.figureId)?.figureId ?? null
   })
   const target = selectedFig ?? lastFig
   const targetTitle = useApp((s) => {

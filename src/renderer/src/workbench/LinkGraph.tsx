@@ -124,10 +124,11 @@ export function LinkGraph({ nodes, edges, current, onOpen }: Props) {
       b.ax = -b.x * CENTER
       b.ay = -b.y * CENTER
     }
-    for (let i = 0; i < B.length; i++) {
-      const a = B[i]
+    // every pair of bodies, which runs every frame: B is dense, so the one check is the flag's price
+    B.forEach((a, i) => {
       for (let j = i + 1; j < B.length; j++) {
         const b = B[j]
+        if (!b) continue
         let dx = a.x - b.x
         let dy = a.y - b.y
         let d2 = dx * dx + dy * dy
@@ -146,7 +147,7 @@ export function LinkGraph({ nodes, edges, current, onOpen }: Props) {
         b.ax -= fx
         b.ay -= fy
       }
-    }
+    })
     for (const [a, b] of s.links) {
       const dx = b.x - a.x
       const dy = b.y - a.y

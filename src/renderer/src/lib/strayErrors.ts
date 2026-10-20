@@ -25,7 +25,7 @@ export function catchStrayErrors() {
     if (Date.now() - lastTold < 10_000) return
     lastTold = Date.now()
     try {
-      useApp.getState().toast(`Something went wrong in the window: ${text.split('\n')[0].slice(0, 160)}`, 'warn')
+      useApp.getState().toast(`Something went wrong in the window: ${(text.split('\n')[0] ?? '').slice(0, 160)}`, 'warn')
     } catch {
       /* the store itself is broken: the log and the console still have it */
     }

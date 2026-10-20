@@ -96,6 +96,7 @@ export async function handoff(req: HandoffRequest): Promise<string[]> {
 
   const brief = req.brief?.trim() || (await writeBrief(req.fromIds, req.note, req.onChunk).promise)
   const first = sources[0]
+  if (!first) throw new Error('Pick who hands the work over')
   // receivers land in the first source's workspace
   if (app.project && app.project.activeWorkspaceId !== first.workspaceId) app.switchWorkspace(first.workspaceId)
   const text = message(sources, brief, req.note)
@@ -119,7 +120,8 @@ export async function handoff(req: HandoffRequest): Promise<string[]> {
   }
   const ws = activeWs()
   for (const s of sources) for (const r of receivers) if (ws?.nodes.some((n) => n.id === s.id) && ws.nodes.some((n) => n.id === r)) useApp.getState().addWire(s.id, r)
-  if (receivers.length === 1) window.setTimeout(() => useApp.getState().focusItem(receivers[0]), 80)
+  const onlyReceiver = receivers.length === 1 ? receivers[0] : undefined
+  if (onlyReceiver) window.setTimeout(() => useApp.getState().focusItem(onlyReceiver), 80)
   const names = receivers.map((id) => allConsoles().find((c) => c.id === id)?.data.name ?? id)
   useApp.getState().toast(`Handed off to ${names.join(', ')}`, 'ok')
   return receivers

@@ -80,7 +80,7 @@ export function pickPanel(): Panelist[] {
   const planner = app.settings.plannerAgent || 'claude'
   const pool = [planner, ...PREFERRED.filter((id) => id !== planner)].filter((id) => installed.has(id))
   const agents = pool.length ? pool : [planner]
-  return ORDER.map((persona, i) => ({ persona, agentId: agents[i % agents.length], state: 'thinking' as const }))
+  return ORDER.map((persona, i) => ({ persona, agentId: agents[i % agents.length] ?? planner, state: 'thinking' as const }))
 }
 
 function panelPrompt(topic: string, persona: PersonaId, project: { name: string; path: string }, context: string): string {
@@ -294,8 +294,8 @@ export async function ideaToPlan(nodeId: string, idea: Idea) {
   const lines = text.split('\n')
   const head = lines.findIndex((l) => /^## Ideas\s*$/.test(l))
   let at = head + 1
-  while (at < lines.length && !/^#{1,2}\s/.test(lines[at])) at++
-  while (at > head + 1 && !lines[at - 1].trim()) at--
+  while (at < lines.length && !/^#{1,2}\s/.test(lines[at] ?? '')) at++
+  while (at > head + 1 && !(lines[at - 1] ?? '').trim()) at--
   lines.splice(at, 0, line)
   // base: refuse if PLAN.md changed since we read it (an agent editing it right now)
   const r = await invoke<{ ok: boolean; reason?: string }>('fs:write', file, lines.join('\n').replace(/\n*$/, '\n'), original === null ? undefined : { base: original })
@@ -335,5 +335,5 @@ export function rerunBrainstorm(nodeId: string) {
 /** "brainstorm X", "let's brainstorm about X", "brainstorm ideas for X" → X */
 export function brainstormTopic(text: string): string | null {
   const m = /^(?:let'?s\s+|can we\s+|please\s+)?brainstorm(?:\s+(?:about|on|ideas\s+(?:for|about|on)|some\s+ideas\s+(?:for|about|on)|ways\s+to))?[\s:,-]+(.{3,})$/i.exec(text.trim())
-  return m ? m[1].trim().replace(/[?.!]+$/, '') : null
+  return m?.[1] ? m[1].trim().replace(/[?.!]+$/, '') : null
 }

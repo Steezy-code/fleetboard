@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { InkItem } from '@shared/types'
+import { mapWorkspaces, type InkItem } from '@shared/types'
 import { uid } from '../../lib/api'
 import { activeWs, useApp } from '../../state/store'
 
@@ -16,7 +16,7 @@ export function patchInk(patches: Record<string, Partial<InkItem>>, persist = tr
   if (!p) return
   const [firstId] = Object.keys(patches)
   if (!firstId) return
-  const workspaces = p.workspaces.map((w) =>
+  const workspaces = mapWorkspaces(p, (w) =>
     w.id !== p.activeWorkspaceId ? w : { ...w, ink: w.ink.map((i) => (patches[i.id] ? { ...i, ...patches[i.id] } : i)) }
   )
   useApp.setState({ project: { ...p, workspaces } })

@@ -53,3 +53,13 @@ test('only consoles are listed, and in workspace order', () => {
     ['c1', 'c3']
   )
 })
+
+test('the skills panel lists the same consoles, live ones only', () => {
+  // it had its own copy of the delimited string, with the same consequence: a live console named
+  // with a | lost its id, so /slug went to the wrong console or to none
+  const targets = pushTargets(project([node('c1', 'build | web', 'claude'), node('c2', 'quiet', 'codex')]), { c1: true })
+  assert.deepEqual(
+    targets.filter((t) => t.live).map((t) => [t.id, t.name, t.agentId]),
+    [['c1', 'build | web', 'claude']]
+  )
+})

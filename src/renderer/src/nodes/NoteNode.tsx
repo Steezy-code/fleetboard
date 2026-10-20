@@ -8,7 +8,7 @@ import { FloatBar } from './content/util'
 // Sticky note: a square of colored paper. Drag it anywhere; double-click to write.
 // node.data = { text, color }
 
-export const PAPERS: { name: string; color: string }[] = [
+export const PAPERS: readonly [{ name: string; color: string }, ...{ name: string; color: string }[]] = [
   { name: 'Yellow', color: '#d4a72c' },
   { name: 'Orange', color: '#e0893f' },
   { name: 'Red', color: '#d9654f' },

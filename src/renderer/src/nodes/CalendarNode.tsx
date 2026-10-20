@@ -17,7 +17,7 @@ export interface CalEvent {
   color: string
 }
 
-export const EVENT_COLORS = ['#ff4a2b', '#ff9a3c', '#f5c84c', '#3ecf8e', '#3fc8d8', '#6b8cff', '#b583f5', '#a8a29e']
+export const EVENT_COLORS: readonly [string, ...string[]] = ['#ff4a2b', '#ff9a3c', '#f5c84c', '#3ecf8e', '#3fc8d8', '#6b8cff', '#b583f5', '#a8a29e']
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 type Pop = { type: 'form'; ev: CalEvent; isNew: boolean } | { type: 'day'; date: string }

@@ -120,6 +120,7 @@ export default function KanbanNode({ node, zoom }: NodeProps) {
     const cols = [...root.querySelectorAll<HTMLElement>('[data-kcol]')]
     if (!cols.length) return null
     let best = cols[0]
+    if (!best) return null
     let bestD = Infinity
     for (const c of cols) {
       const r = c.getBoundingClientRect()
@@ -131,8 +132,8 @@ export default function KanbanNode({ node, zoom }: NodeProps) {
     }
     const cards = [...best.querySelectorAll<HTMLElement>('[data-kcard]')].filter((c) => c.dataset.kcard !== cardId)
     let index = cards.length
-    for (let i = 0; i < cards.length; i++) {
-      const r = cards[i].getBoundingClientRect()
+    for (const [i, card] of cards.entries()) {
+      const r = card.getBoundingClientRect()
       if (y < r.top + r.height / 2) {
         index = i
         break
@@ -157,8 +158,8 @@ export default function KanbanNode({ node, zoom }: NodeProps) {
       const els = [...rootRef.current!.querySelectorAll<HTMLElement>('[data-kcol]')]
       const others = els.filter((c) => c.dataset.kcol !== colId)
       let index = others.length
-      for (let i = 0; i < others.length; i++) {
-        const r = others[i].getBoundingClientRect()
+      for (const [i, other] of others.entries()) {
+        const r = other.getBoundingClientRect()
         if (ev.clientX < r.left + r.width / 2) {
           index = i
           break
@@ -167,7 +168,7 @@ export default function KanbanNode({ node, zoom }: NodeProps) {
       const col = current.find((c) => c.id === colId)!
       const rest = current.filter((c) => c.id !== colId)
       const next = [...rest.slice(0, index), col, ...rest.slice(index)]
-      if (next.some((c, i) => c.id !== current[i].id)) {
+      if (next.some((c, i) => c.id !== current[i]?.id)) {
         current = next
         setPreview(next)
       }
@@ -188,6 +189,7 @@ export default function KanbanNode({ node, zoom }: NodeProps) {
   const moveCol = (id: string, to: 'left' | 'right' | 'start' | 'end') => {
     const i = saved.findIndex((c) => c.id === id)
     const col = saved[i]
+    if (!col) return
     const rest = saved.filter((c) => c.id !== id)
     const j = to === 'start' ? 0 : to === 'end' ? rest.length : to === 'left' ? Math.max(0, i - 1) : Math.min(rest.length, i + 1)
     save([...rest.slice(0, j), col, ...rest.slice(j)])

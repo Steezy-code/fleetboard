@@ -218,7 +218,7 @@ export function CommandInput({
   const query = useMemo(() => {
     if (closed) return null
     const m = /(^|\s)@([\w.\-]*)$/.exec(text.slice(0, caret))
-    return m ? m[2] : null
+    return m?.[2] ?? null
   }, [text, caret, closed])
   const options = useMentionOptions(query)
   const open = query != null && options.length > 0
@@ -323,7 +323,8 @@ export function CommandInput({
             }
             if (e.key === 'Enter' || e.key === 'Tab') {
               e.preventDefault()
-              return accept(options[Math.min(sel, options.length - 1)])
+              const picked = options[Math.min(sel, options.length - 1)]
+              return picked ? accept(picked) : undefined
             }
             if (e.key === 'Escape') {
               e.preventDefault()
@@ -353,7 +354,7 @@ export function CommandInput({
               draft.current = text
               histPos.current = h.length - 1
             } else histPos.current = Math.max(0, histPos.current - 1)
-            setText(h[histPos.current])
+            setText(h[histPos.current] ?? '')
           } else if (e.key === 'ArrowDown' && histPos.current != null) {
             e.preventDefault()
             const h = history()
@@ -362,7 +363,7 @@ export function CommandInput({
               setText(draft.current)
             } else {
               histPos.current += 1
-              setText(h[histPos.current])
+              setText(h[histPos.current] ?? '')
             }
           }
         }}
