@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { marked } from 'marked'
+import { renderMarkdown } from '../workbench/markdown'
 import { ArrowRight, Check, RefreshCw, Send, Square } from 'lucide-react'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel } from '../engine/consoles'
@@ -35,7 +35,10 @@ export default function HandoffPanel({ from, toAgentId: initialAgent }: { from?:
   useEffect(() => () => cancelRef.current?.(), [])
 
   const others = fleet.consoles.filter((c) => !sources.includes(c.id))
-  const html = useMemo(() => (brief ? (marked.parse(brief, { async: false }) as string) : ''), [brief])
+  // the brief is an agent's streamed output: it goes through the app's one allowlist sanitizer.
+  // marked has no sanitizer of its own, and this re-renders on every chunk, so raw HTML here used
+  // to run mid-stream.
+  const html = useMemo(() => (brief ? renderMarkdown(brief) : ''), [brief])
 
   const generate = async () => {
     if (!sources.length) return
