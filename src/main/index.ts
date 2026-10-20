@@ -14,12 +14,13 @@ import * as profiles from './profiles'
 import * as sweep from './sweep'
 import * as ci from './ci'
 import * as goal from './goal'
-import { initFleet } from './fleet'
+import { initFleet, stopFleetTicks } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
+import { allowed, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
 
 let win: BrowserWindow | null = null
@@ -34,6 +35,17 @@ function webPermission(permission: string, url: string | undefined) {
   } catch {
     return false
   }
+}
+
+/**
+ * What the app's own window may have. Push-to-talk needs the microphone, and in Electron the 'media'
+ * permission covers the camera too — granting it outright handed over both. Anything that asks for
+ * video is refused; audio-only, and a request that does not say (older Electron, or a check rather
+ * than a request), still goes through, because denying those would break push-to-talk.
+ */
+export function appPermission(permission: string, mediaTypes?: string[]) {
+  if (permission === 'media') return !mediaTypes?.includes('video')
+  return permission === 'clipboard-read' || permission === 'notifications'
 }
 
 // Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
@@ -118,7 +130,7 @@ function createWindow() {
     if (details.reason === 'clean-exit' || !win || win.isDestroyed()) return
     const now = Date.now()
     crashes.push(now)
-    while (now - crashes[0] > 60_000) crashes.shift()
+    while ((crashes[0] ?? Infinity) < now - 60_000) crashes.shift()
     console.error(`window crashed (${details.reason}, exit ${details.exitCode})`)
     if (crashes.length > 3) {
       // not showErrorBox: it would hold up this process, and with it every console's output
@@ -170,12 +182,20 @@ function registerCore() {
 
   ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
+    // headless runs and goal checks are not consoles, so dispose() never saw them: a planner run or
+    // an `npm test` goal check outlived the app, spending tokens with its output going nowhere
+    cli.killRuns()
+    goal.killGoalChecks()
+    stopFleetTicks()
     await ptys.dispose()
     // the board is already saved; don't let a slow child process keep the app alive
     win?.destroy()
     win = null
     setTimeout(() => app.exit(0), 300)
   })
+  // the renderer's own stray errors, into the same log as the main process's
+  ipcMain.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
+
   // asked once by a page as it starts: was it reloaded after the window crashed?
   ipcMain.handle('app:crashRecovered', () => {
     const was = crashRecovered
@@ -193,6 +213,7 @@ function registerCore() {
 
   // Render HTML to a real paginated PDF (document studio, markdown export).
   ipcMain.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
+    if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
     const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
     await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
     const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
@@ -231,10 +252,15 @@ app.whenReady().then(async () => {
     let p = decodeURIComponent(new URL(req.url).pathname)
     // fbfile:///C:/dir/file → C:/dir/file
     if (process.platform === 'win32' && /^\/[A-Za-z]:/.test(p)) p = p.slice(1)
+    // the renderer builds these URLs out of board data, which agents write, and the scheme is
+    // registered bypassCSP — so it is the same question as fs:read, and gets the same answer
+    if (!allowed(p, 'fbfile')) return new Response('', { status: 403 })
     return net.fetch(pathToFileURL(p).toString())
   })
-  // Microphone for push-to-talk; everything else stays denied.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read' || permission === 'notifications'))
+  // Microphone for push-to-talk; the camera and everything else stays denied.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
+    cb(appPermission(permission, (details as { mediaTypes?: string[] }).mediaTypes))
+  )
   // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
   // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
   const web = session.fromPartition(WEB_PARTITION)
@@ -253,6 +279,9 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', async () => {
+  cli.killRuns()
+  goal.killGoalChecks()
+  stopFleetTicks()
   await ptys.dispose()
   app.quit()
 })

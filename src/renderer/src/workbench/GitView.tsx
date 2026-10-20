@@ -40,8 +40,8 @@ const toast = (text: string, tone?: 'info' | 'warn' | 'error' | 'ok') => useApp.
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 
 function defaultMessage(files: GitFile[]) {
-  if (files.length === 1) {
-    const f = files[0]
+  const [f] = files
+  if (files.length === 1 && f) {
     const verb = f.code === 'A' || f.code === '?' ? 'Add' : f.code === 'D' ? 'Remove' : f.code === 'R' ? 'Rename' : 'Update'
     return `${verb} ${baseName(f.path)}`
   }

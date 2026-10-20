@@ -5,6 +5,7 @@ import type { MainContext } from './context'
 import { dirs, renameRetrying } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
+import { allowed, grant, outsideMessage } from './roots'
 
 export interface TreeEntry {
   name: string
@@ -44,7 +45,7 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
       const batch = level.slice(i, i + 16)
       const lists = await Promise.all(batch.map((p) => fs.promises.readdir(p.dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[])))
       batch.forEach((p, j) => {
-        const entries = lists[j].filter((e) => !IGNORE.has(e.name)).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+        const entries = (lists[j] ?? []).filter((e) => !IGNORE.has(e.name)).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
         left -= entries.length
         for (const e of entries) {
           const full = toRendererPath(path.join(p.dir, e.name))
@@ -115,30 +116,64 @@ export function writeText(file: string, content: string, base?: string): WriteRe
 
 export function register(ctx: MainContext) {
   const { ipc } = ctx
+  // A file dropped on the board. Sent by the preload at the moment getPathForFile resolves it, which
+  // only happens for a File backed by a real file — so this cannot be used to grant an arbitrary
+  // path. Without it every image or file dragged in from outside the project would be refused.
+  ipc.on('fs:grantDropped', (_e, p: string) => grant(String(p)))
+
+  // a path the user picks is a path the user may use: the three dialogs are the only place that
+  // intent is expressed, so they are the only place the allowed set grows (see roots.ts)
   ipc.handle('dialog:openFolder', async () => {
     const r = await dialog.showOpenDialog(ctx.win()!, { properties: ['openDirectory', 'createDirectory'] })
-    return r.canceled ? null : toRendererPath(r.filePaths[0])
+    if (r.canceled || !r.filePaths[0]) return null
+    grant(r.filePaths[0])
+    return toRendererPath(r.filePaths[0])
   })
   ipc.handle('dialog:openFile', async (_e, filters?: Electron.FileFilter[]) => {
     const r = await dialog.showOpenDialog(ctx.win()!, { properties: ['openFile'], filters })
-    return r.canceled ? null : toRendererPath(r.filePaths[0])
+    if (r.canceled || !r.filePaths[0]) return null
+    grant(r.filePaths[0])
+    return toRendererPath(r.filePaths[0])
   })
   ipc.handle('dialog:saveFile', async (_e, defaultPath: string, filters?: Electron.FileFilter[]) => {
     const r = await dialog.showSaveDialog(ctx.win()!, { defaultPath, filters })
-    return r.canceled ? null : toRendererPath(r.filePath)
+    if (r.canceled || !r.filePath) return null
+    grant(r.filePath)
+    return toRendererPath(r.filePath)
   })
-  ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) => tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined))
-  ipc.handle('fs:list', (_e, dir: string) => tree(dir, 0))
-  ipc.handle('fs:read', (_e, file: string) => fs.readFileSync(file, 'utf8'))
-  ipc.handle('fs:readBase64', (_e, file: string) => fs.readFileSync(file).toString('base64'))
-  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string }) => writeText(file, content, opts?.base))
+  // Reads keep the shape they already had for a path that is not there — an empty tree, null, false —
+  // because callers rely on it (a file node on a missing path, an unreadable folder). Writes and opens
+  // say so, because silently not writing is worse than an error.
+  ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) =>
+    allowed(dir, 'fs:tree') ? tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined) : []
+  )
+  ipc.handle('fs:list', (_e, dir: string) => (allowed(dir, 'fs:list') ? tree(dir, 0) : []))
+  ipc.handle('fs:read', (_e, file: string) => {
+    // already throws for a missing file, so callers handle a throw
+    if (!allowed(file, 'fs:read')) throw new Error(outsideMessage(file))
+    return fs.readFileSync(file, 'utf8')
+  })
+  ipc.handle('fs:readBase64', (_e, file: string) => {
+    if (!allowed(file, 'fs:readBase64')) throw new Error(outsideMessage(file))
+    return fs.readFileSync(file).toString('base64')
+  })
+  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string }) => {
+    if (!allowed(file, 'fs:write')) throw new Error(outsideMessage(file))
+    return writeText(file, content, opts?.base)
+  })
   ipc.handle('fs:writeBase64', (_e, file: string, b64: string) => {
+    if (!allowed(file, 'fs:writeBase64')) throw new Error(outsideMessage(file))
+    // unlike writeText this replaces a symlink with a plain file; left as it was, noted for later
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, Buffer.from(b64, 'base64'))
   })
-  ipc.handle('fs:exists', (_e, p: string) => fs.existsSync(p))
-  ipc.handle('fs:mkdir', (_e, p: string) => fs.mkdirSync(p, { recursive: true }))
+  ipc.handle('fs:exists', (_e, p: string) => allowed(p, 'fs:exists') && fs.existsSync(p))
+  ipc.handle('fs:mkdir', (_e, p: string) => {
+    if (!allowed(p, 'fs:mkdir')) throw new Error(outsideMessage(p))
+    return fs.mkdirSync(p, { recursive: true })
+  })
   ipc.handle('fs:stat', (_e, p: string) => {
+    if (!allowed(p, 'fs:stat')) return null
     try {
       const s = fs.statSync(p)
       return { size: s.size, mtime: s.mtimeMs, dir: s.isDirectory() }
@@ -147,11 +182,16 @@ export function register(ctx: MainContext) {
     }
   })
   ipc.handle('fs:assetsDir', () => dirs.assets)
-  ipc.handle('shell:openPath', (_e, p: string) => (opensSafely(p) ? shell.openPath(p) : (shell.showItemInFolder(p), '')))
+  // openPath resolves with '' on success or an error string, so a refusal is just that string
+  ipc.handle('shell:openPath', (_e, p: string) =>
+    !allowed(p, 'shell:openPath') ? outsideMessage(p) : opensSafely(p) ? shell.openPath(p) : (shell.showItemInFolder(p), '')
+  )
   ipc.handle('shell:openExternal', (_e, url: string) => {
     if (/^(https?:\/\/|mailto:)/i.test(url)) return shell.openExternal(url)
   })
-  ipc.handle('shell:showItem', (_e, p: string) => shell.showItemInFolder(p))
+  ipc.handle('shell:showItem', (_e, p: string) => {
+    if (allowed(p, 'shell:showItem')) shell.showItemInFolder(p)
+  })
 }
 
 /**

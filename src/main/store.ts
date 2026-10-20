@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import type { Project, ProjectMeta, Recovery, Settings, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
 import type { MainContext } from './context'
+import { declareProject, mainOwnedGlobal } from './roots'
 import { dirs, writeJsonAtomic } from './paths'
 
 // State lives on disk as versioned JSON: ~/.fleetboard/app.json (settings, project index, global
@@ -122,8 +123,39 @@ export const projectIdFor = (p: string) => {
 }
 const projectFile = (id: string) => path.join(dirs.projects, `${id}.json`)
 
+/**
+ * The schema number a file on disk carries, or null when it has none or cannot be read.
+ *
+ * Nothing read it before: a board written by a newer Fleetboard loaded as though it were this
+ * version's, every field that version had added was dropped by the fill-in pass below, and the next
+ * save stamped `schema` back to SCHEMA_VERSION — a silent one-way downgrade of the user's board, in
+ * the one file the app has no other copy of.
+ */
+function schemaOf(file: string): number | null {
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'))
+    return isObj(v) && Number.isFinite(v.schema) ? Number(v.schema) : null
+  } catch {
+    return null
+  }
+}
+
+/** Written by a Fleetboard newer than this one, so this build must not touch it. */
+export const tooNew = (schema: number | null): schema is number => schema !== null && schema > SCHEMA_VERSION
+
+let current: Project | null = null
+/** The board open in the window, for features outside it: the phone Inbox, and the roots the
+ *  filesystem handlers allow (roots.ts). Set when a board is opened and on every save. */
+export const currentProject = () => current
+
 export function loadProject(id: string): Project | null {
   if (!/^[\w-]+$/.test(id)) return null
+  const onDisk = schemaOf(projectFile(id))
+  if (tooNew(onDisk)) {
+    // left alone, not set aside: the file is not damaged, this build is simply too old to read it
+    recovered({ what: id, corruptCopy: '', tooNew: onDisk })
+    return null
+  }
   const p = load(projectFile(id), id, id, validProject)
   if (!p) return null
   // an older or hand-edited file can lack parts the board expects: fill them in rather than crash
@@ -139,18 +171,32 @@ export function loadProject(id: string): Project | null {
     if (!isObj(w.camera) || ![w.camera.x, w.camera.y, w.camera.zoom].every((n) => Number.isFinite(n) && n !== null)) w.camera = { x: 0, y: 0, zoom: 1 } as Workspace['camera']
     w.extras = isObj(w.extras) ? w.extras : {}
   }
-  if (!p.workspaces.some((w) => w.id === p.activeWorkspaceId)) p.activeWorkspaceId = p.workspaces[0].id
+  // every board has a workspace: one was put there above if the file had none
+  const firstWs = p.workspaces[0]
+  if (firstWs && !p.workspaces.some((w) => w.id === p.activeWorkspaceId)) p.activeWorkspaceId = firstWs.id
   p.extras = isObj(p.extras) ? p.extras : {}
+  // the board being opened is the current one from now on, not only once it is first saved: the
+  // filesystem handlers take their project root from here (roots.ts), and the file tree reads before
+  // anything has been saved
+  current = p
   return p
 }
 
-let current: Project | null = null
-/** The board open in the window (the last one saved), for features outside it such as the phone Inbox. */
-export const currentProject = () => current
+/** A global (cross-project) value. The renderer uses store:getGlobal; this is for main's own modules. */
+export const getGlobal = <T,>(key: string): T | undefined => app.global[key] as T | undefined
+
+/** Store a global value and persist it. */
+export function setGlobal(key: string, value: unknown) {
+  app.global[key] = value
+  saveApp()
+}
 
 export function saveProject(p: Project) {
   // never let a broken renderer state replace a good board on disk
   if (!validProject(p) || !/^[\w-]+$/.test(p.id)) throw new Error('refusing to save an invalid project')
+  // and never write an older shape over a board a newer Fleetboard saved
+  const onDisk = schemaOf(projectFile(p.id))
+  if (tooNew(onDisk)) throw new Error(`This board was saved by a newer version of Fleetboard (board format ${onDisk}, this one writes ${SCHEMA_VERSION}). Update Fleetboard to open it.`)
   current = p
   p.schema = SCHEMA_VERSION
   writeJsonAtomic(projectFile(p.id), p)
@@ -179,16 +225,22 @@ export function register(ctx: MainContext) {
   ipc.handle('store:projects', () =>
     app.projects.filter((m) => fs.existsSync(m.path)).sort((a, b) => b.lastOpened - a.lastOpened)
   )
-  ipc.handle('store:projectId', (_e, p: string) => projectIdFor(p))
+  ipc.handle('store:projectId', (_e, p: string) => {
+    // the first thing openProject does, and the only point before any read where the folder being
+    // opened is named — a brand-new folder has no saved board to take it from (see roots.ts)
+    declareProject(p)
+    return projectIdFor(p)
+  })
   ipc.handle('store:loadProject', (_e, id: string) => loadProject(id))
   ipc.handle('store:saveProject', (_e, p: Project) => saveProject(p))
   ipc.handle('store:forgetProject', (_e, id: string) => {
     app.projects = app.projects.filter((m) => m.id !== id)
     saveApp()
   })
-  ipc.handle('store:getGlobal', (_e, key: string) => app.global[key])
+  ipc.handle('store:getGlobal', (_e, key: string) => getGlobal(key))
   ipc.handle('store:setGlobal', (_e, key: string, value: unknown) => {
-    app.global[key] = value
-    saveApp()
+    // a few globals are main's own (roots.ts); everything else here is the renderer's to keep
+    if (mainOwnedGlobal(key)) return
+    setGlobal(key, value)
   })
 }

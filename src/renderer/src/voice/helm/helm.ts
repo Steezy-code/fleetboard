@@ -210,7 +210,12 @@ export function coerceResult(json: any): HelmResult {
   const options = all.filter((o) => o.kind !== 'answer').slice(0, 3)
   if (!replyText && !options.length) throw new Error('no reply and no usable options')
   const a = json.auto
-  const auto = typeof a === 'number' && Number.isInteger(a) && a >= 0 && a < options.length && autoSafe(options[a]) ? a : null
+  // the model may name an option to run on its own; only an option that exists and is safe to
+  let auto: number | null = null
+  if (typeof a === 'number' && Number.isInteger(a) && a >= 0) {
+    const candidate = options[a]
+    if (candidate && autoSafe(candidate)) auto = a
+  }
   return { reply: replyText, options, auto }
 }
 
@@ -271,8 +276,10 @@ export function showHelm(res: HelmResult, request: string, source: Source) {
   if (res.auto != null) {
     useHelm.setState({ card: { ...card, ran: res.auto } })
     const o = res.options[res.auto]
-    thread().add('plan', `Oracle → ${o.label} (ran automatically)`)
-    void execOption(o, request)
+    if (o) {
+      thread().add('plan', `Oracle → ${o.label} (ran automatically)`)
+      void execOption(o, request)
+    }
   }
 }
 
@@ -294,7 +301,8 @@ export function pickHelmOption(light: string): number | 'dismiss' | null {
   if (/^(yes|yeah|yep|yup|do it|go|go ahead|ok|okay|sure|run it|do that|sounds good|confirm|that one|the first one please)( please)?$/.test(t)) return primaryIndex(card)
   const m = /^(?:(?:do|run|pick|choose|take|use|go with|try)\s+)?(?:the\s+)?(?:option\s+|number\s+)?(1|2|3|one|two|three|first|second|third|last)(?:\s+one)?(?:\s+please)?$/.exec(t)
   if (m) {
-    const i = m[1] === 'last' ? card.options.length - 1 : ORDINALS[m[1]]
+    const said = m[1] ?? ''
+    const i = said === 'last' ? card.options.length - 1 : ORDINALS[said]
     return i != null && i < card.options.length ? i : null
   }
   return null

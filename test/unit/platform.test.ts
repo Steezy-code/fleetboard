@@ -45,7 +45,10 @@ test("an npm .cmd wrapper gives the script it runs with node; anything else does
 test('cmd.exe quoting keeps spaces, quotes and trailing backslashes intact', () => {
   assert.equal(cmdQuote('plain'), 'plain')
   assert.equal(cmdQuote('two words'), '"two words"')
-  assert.equal(cmdQuote('say "hi"'), '"say \\"hi\\""')
+  // doubled, not backslash-escaped: cmd.exe counts raw quotes, so \" would end the quoted run and
+  // let whatever follows be read as shell syntax (model-written prompts reach this on Windows)
+  assert.equal(cmdQuote('say "hi"'), '"say ""hi"""')
+  assert.equal(cmdQuote('x" & calc & "y'), '"x"" & calc & ""y"', 'a quote cannot break out into a command')
   assert.equal(cmdQuote('C:\\dir with space\\'), '"C:\\dir with space\\\\"')
   assert.equal(cmdQuote(''), '""')
   assert.equal(cmdQuote('a&b'), '"a&b"')

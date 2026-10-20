@@ -83,7 +83,8 @@ export function cycleFront(dir: 1 | -1) {
   const { items } = useInbox.getState()
   if (items.length < 2) return
   const i = frontIndex()
-  setFront(items[(i + dir + items.length) % items.length].key)
+  const next = items[(i + dir + items.length) % items.length]
+  if (next) setFront(next.key)
 }
 
 export const toggleInbox = () => useInbox.setState((s) => ({ open: !s.open }))

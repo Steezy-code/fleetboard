@@ -200,6 +200,8 @@ export class App {
       SHELL: '/bin/bash',
       // Windows keeps the system PATH (PowerShell, git, taskkill live there)
       PATH: [sb.bin, path.dirname(process.execPath), ...(process.platform === 'win32' ? [process.env.PATH ?? process.env.Path ?? ''] : ['/usr/local/bin', '/usr/bin', '/bin'])].join(path.delimiter),
+      // the suite drives the built app through window.__fleetboard, which a packaged app withholds
+      FLEETBOARD_DEVTOOLS: '1',
       FAKE_CLAUDE_LOG: sb.log,
       FAKE_CLAUDE_SCENARIO: sb.scenarioFile,
       XDG_CONFIG_HOME: path.join(sb.home, '.config')

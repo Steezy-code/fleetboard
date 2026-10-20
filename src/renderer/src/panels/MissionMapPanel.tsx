@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Frame, Map as MapIcon, Pause, Play, Search, Send, Spline, Trash2 } from 'lucide-react'
+import { pairs } from '@shared/seq'
 import type { ConsoleStatus, PtyInfo } from '@shared/types'
 import { ROLE_TINT } from '@shared/types'
 import { CAN_PAUSE, invoke } from '../lib/api'
@@ -157,9 +158,10 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
     }
     // keep left nodes apart
     const sorted = [...lefts].sort((a, b) => a.y - b.y)
-    for (let i = 1; i < sorted.length; i++) sorted[i].y = Math.max(sorted[i].y, sorted[i - 1].y + COL0.h + 16)
-    if (sorted.length && sorted[0].y < TOP + COL0.h / 2) {
-      const d = TOP + COL0.h / 2 - sorted[0].y
+    for (const [above, below] of pairs(sorted)) below.y = Math.max(below.y, above.y + COL0.h + 16)
+    const highest = sorted[0]
+    if (highest && highest.y < TOP + COL0.h / 2) {
+      const d = TOP + COL0.h / 2 - highest.y
       sorted.forEach((l) => (l.y += d))
     }
     const height = Math.max(y, ...lefts.map((l) => l.y + COL0.h / 2 + 20), 200)

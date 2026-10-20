@@ -105,8 +105,9 @@ export function parseDictation(raw: string): Dictation | null {
   let rest = text
   for (;;) {
     const m = /^@([\w.\-]+)[\s,:]*/.exec(rest)
-    if (!m) break
-    mentions.push(m[1])
+    const name = m?.[1]
+    if (!m || !name) break
+    mentions.push(name)
     rest = rest.slice(m[0].length)
   }
   if (mentions.length) {
@@ -116,7 +117,8 @@ export function parseDictation(raw: string): Dictation | null {
   // spoken: "at Maya, …" / "to Maya, …" / "Maya, …" / "Maya 2: …" / "hey Maya, …"
   const m = /^(?:(?:hey|ok|okay)\s+)?(?:at|to|@)?\s*([\w][\w .'-]{0,40}?)\s*[,:]\s*(.+)$/is.exec(text)
   if (!m) return null
-  const who = m[1].replace(/\s+(\d+|one|two|three|four|five|six|seven|eight|nine)$/i, (_x, n) => ` ${NUMBER_WORDS[n.toLowerCase()] ?? n}`)
+  const [, addressed = '', body = ''] = m
+  const who = addressed.replace(/\s+(\d+|one|two|three|four|five|six|seven|eight|nine)$/i, (_x, n) => ` ${NUMBER_WORDS[n.toLowerCase()] ?? n}`)
   const names = splitList(who.toLowerCase())
   if (!names.length) return null
   // only console names, team names or everyone count as an address (not agents: "codex, …" is ambiguous)
@@ -125,7 +127,7 @@ export function parseDictation(raw: string): Dictation | null {
     const named = allConsoles().some((c) => norm(c.data.name) === norm(n)) || !!resolveTeam(n)
     if (!isAll && !named) return null
   }
-  return { targets: names, text: m[2].trim() }
+  return { targets: names, text: body.trim() }
 }
 
 // ---------------------------------------------------------------- local rules
@@ -150,8 +152,9 @@ function ruleSpawn(t: string): LocalPlan | null {
   let team: string | undefined
   const tm = /\s+(in|into|as|for|on|to)\s+(?:a\s+)?(?:new\s+)?(?:(?:team|group)\s+)?(?:(?:called|named)\s+)?(.+)$/.exec(rest)
   if (tm) {
-    const cand = tm[2].replace(/\s+(team|group)$/, '').replace(/^the\s+/, '').trim()
-    const ok = tm[1] === 'to' ? !!resolveTeam(cand) : !!cand && !/^(the board|here|this workspace|parallel)$/.test(cand)
+    const [, preposition = '', named = ''] = tm
+    const cand = named.replace(/\s+(team|group)$/, '').replace(/^the\s+/, '').trim()
+    const ok = preposition === 'to' ? !!resolveTeam(cand) : !!cand && !/^(the board|here|this workspace|parallel)$/.test(cand)
     if (ok) {
       team = cand
       rest = rest.slice(0, tm.index)
@@ -188,9 +191,10 @@ function ruleWorkspace(t: string): LocalPlan | null {
 function rulePanel(t: string): LocalPlan | null {
   const m = /^(?:open|show|show me|go to|bring up|display|launch|pull up|view)\s+(?:the |my )?(.+?)(?:\s+(?:panel|studio|drawer|window|view))?$/.exec(t)
   if (!m) return null
-  const p = panelFor(m[1])
+  const asked = m[1] ?? ''
+  const p = panelFor(asked)
   if (!p) return null
-  return { actions: [{ type: 'openPanel', name: m[1].replace(/^(the|my)\s+/, '') }], say: `Opening ${m[1]}.` }
+  return { actions: [{ type: 'openPanel', name: asked.replace(/^(the|my)\s+/, '') }], say: `Opening ${asked}.` }
 }
 
 function ruleZoom(t: string): LocalPlan | null {
@@ -204,7 +208,7 @@ function ruleZoom(t: string): LocalPlan | null {
 function ruleFocus(t: string): LocalPlan | null {
   const m = /^(?:go to|focus(?: on)?|show me|jump to|take me to|find|zoom (?:in )?(?:on|to)|look at|where is|where's)\s+(.+)$/.exec(t)
   if (!m) return null
-  const target = strip(m[1])
+  const target = strip(m[1] ?? '')
   if (!resolveTeam(target) && !resolveRef(target).length) return null
   return { actions: [{ type: 'focus', target }], say: '' }
 }
@@ -212,9 +216,10 @@ function ruleFocus(t: string): LocalPlan | null {
 function rulePauseResume(t: string): LocalPlan | null {
   const m = /^(pause|freeze|hold|suspend|resume|unpause|un-pause|continue|unfreeze|wake up)\s+(.+)$/.exec(t)
   if (!m) return null
-  const type = /^(pause|freeze|hold|suspend)$/.test(m[1]) ? 'pause' : 'resume'
-  let list = splitList(m[2].replace(/\b(agents?|consoles?|everything)\b$/, (w) => (w === 'everything' ? 'all' : '')).trim() || 'all')
-  if (list.length === 1 && /^(all|everyone|everybody|all of them|the board)$/.test(list[0])) list = ['all']
+  const [, verb = '', whom = ''] = m
+  const type = /^(pause|freeze|hold|suspend)$/.test(verb) ? 'pause' : 'resume'
+  let list = splitList(whom.replace(/\b(agents?|consoles?|everything)\b$/, (w) => (w === 'everything' ? 'all' : '')).trim() || 'all')
+  if (list.length === 1 && /^(all|everyone|everybody|all of them|the board)$/.test(list[0] ?? '')) list = ['all']
   const refs = refsOrNull(list)
   if (!refs) return null
   const ids = resolveRefs(refs).ids
@@ -227,13 +232,14 @@ function ruleTeamOps(t: string): LocalPlan | null {
     /^(?:delete|remove|kill|close|destroy|get rid of)\s+(?:the\s+)?(?:group|team)\s+(?:called|named)?\s*(.+)$/.exec(t) ??
     /^(?:delete|remove|kill|close|destroy|get rid of)\s+(?:the\s+)?(.+?)\s+(?:group|team)$/.exec(t)
   if (m) {
-    const g = resolveTeam(m[1]) ?? resolveTeam(`group ${m[1]}`)
+    const which = m[1] ?? ''
+    const g = resolveTeam(which) ?? resolveTeam(`group ${which}`)
     if (!g) return null
     return { actions: [{ type: 'deleteTeam', team: g.id }], say: `Deleting ${g.name}.` }
   }
   m = /^(?:ungroup|disband|dissolve|break up|split up)\s+(?:the\s+)?(?:(?:group|team)\s+)?(?:called\s+|named\s+)?(.+?)(?:\s+(?:group|team))?$/.exec(t)
   if (m) {
-    const g = resolveTeam(m[1])
+    const g = resolveTeam(m[1] ?? '')
     if (!g) return null
     return { actions: [{ type: 'ungroup', team: g.id }], say: `Ungrouped ${g.name}.` }
   }
@@ -288,8 +294,8 @@ function ruleWire(t: string): LocalPlan | null {
   // connect maya to rafa
   const m = /^(?:wire|connect|link|hook up|attach)\s+(.+?)\s+(?:to|with|and)\s+(.+)$/.exec(t)
   if (!m) return null
-  const a = strip(m[1])
-  const b = strip(m[2])
+  const a = strip(m[1] ?? '')
+  const b = strip(m[2] ?? '')
   const okA = resolveTeam(a) || resolveRef(a, 'workspace').length === 1
   const okB = resolveTeam(b) || resolveRef(b, 'workspace').length === 1
   if (!okA || !okB) return null
@@ -299,9 +305,9 @@ function ruleWire(t: string): LocalPlan | null {
 function ruleHandoff(t: string): LocalPlan | null {
   const m = /^(?:pass|hand|give|handoff|hand off|transfer|move|send)\s+(?:(.+?)'s\s+)?(?:this|the|that|my|it|his|her|their)?\s*(?:task|work|job|session|conversation|context|it|this|over)?\s*(?:over\s+)?(?:from\s+(.+?)\s+)?(?:to|over to)\s+(?:a\s+)?(?:new\s+)?(.+?)(?:\s+(?:agent|console))?$/.exec(t)
   if (!m) return null
-  if (/^(send)$/.test(t.split(' ')[0]) && !/\b(task|work|job|session|this|it)\b/.test(t)) return null
+  if (/^(send)$/.test(t.split(' ')[0] ?? '') && !/\b(task|work|job|session|this|it)\b/.test(t)) return null
   const owner = m[1] ?? m[2]
-  const target = strip(m[3])
+  const target = strip(m[3] ?? '')
   const from = owner ? splitList(owner) : []
   if (from.length && !refsOrNull(from)) return null
   const agent = agentFromWord(target) ?? findAgentIn(target)?.id
@@ -331,7 +337,7 @@ function ruleKill(t: string): LocalPlan | null {
 function ruleTell(t: string, original: string): LocalPlan | null {
   const m = /^(?:tell|ask|have|get|make|instruct|order|remind|let)\s+(.+)$/.exec(t)
   if (!m) return null
-  const rest = m[1]
+  const rest = m[1] ?? ''
   // longest known addressee at the start
   const candidates = [
     'everyone', 'everybody', 'all agents', 'all consoles', 'all of them', 'all of you', 'the team', 'all', 'them', 'those', 'these',
@@ -344,10 +350,10 @@ function ruleTell(t: string, original: string): LocalPlan | null {
   // "maya and rafa to …"
   const listM = /^(.+?)\s+(?:to\s+)(.+)$/.exec(rest)
   if (listM) {
-    const list = splitList(listM[1])
-    if (refsOrNull(list)) {
-      who = listM[1]
-      body = listM[2]
+    const [, listWho = '', listBody = ''] = listM
+    if (refsOrNull(splitList(listWho))) {
+      who = listWho
+      body = listBody
     }
   }
   if (!who) {
@@ -546,7 +552,7 @@ async function execute(actions: Action[], sayText: string) {
   const failures = results.filter((r) => !r.ok)
   const said = [sayText, ...sayActions].filter(Boolean).join(' ')
   const quiet = actions.every((a) => QUIET.includes(a.type))
-  const spoken = failures.length ? failures[0].line : said || (quiet ? '' : results[results.length - 1]?.line || 'Done.')
+  const spoken = failures[0]?.line ?? (said || (quiet ? '' : results[results.length - 1]?.line || 'Done.'))
   const caption = failures.length ? failures.map((r) => r.line).join(' · ') : said || results.map((r) => r.line).filter(Boolean).join(' · ')
   if (caption) showReply(caption)
   if (spoken) speak(spoken)
@@ -597,7 +603,8 @@ export function inboxPick(light: string): number | 'next' | null {
   const t = light.replace(/\b(please|the|it|that)\b/g, ' ').replace(/\s+/g, ' ').trim()
   if (/^(next|skip|next one)$/.test(t)) return 'next'
   const m = /^(?:option|number|choice|answer)? ?(one|two|three|four|first|second|third|fourth|[1-4])(?: one)?$/.exec(t)
-  if (m && SPOKEN_INDEX[m[1]] < f.actions.length) return SPOKEN_INDEX[m[1]]
+  const spokenAt = m ? SPOKEN_INDEX[m[1] ?? ''] : undefined
+  if (spokenAt !== undefined && spokenAt < f.actions.length) return spokenAt
   const byLabel = f.actions.findIndex((a) => a.label.toLowerCase().replace(/[^a-z ]/g, '').trim() === t)
   if (byLabel >= 0) return byLabel
   if (f.kind === 'approval' || f.kind === 'ready') {
@@ -644,8 +651,9 @@ export async function runCommand(raw: string, source: Source) {
     const i = inboxPick(light)
     if (i === 'next') return cycleFront(1)
     const f = frontItem()
-    if (f && i != null) {
-      showReply(`${f.actions[i].label}.`, 1500)
+    const action = f && i != null ? f.actions[i] : undefined
+    if (f && i != null && action) {
+      showReply(`${action.label}.`, 1500)
       return runInboxAction(f, i)
     }
   }

@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useApp } from './state/store'
-import type { Recovery } from '@shared/types'
+import { SCHEMA_VERSION, type Recovery } from '@shared/types'
 import { on, invoke } from './lib/api'
 import { wireConsoleEvents } from './engine/consoles'
 import { wireFleet } from './engine/fleet'
@@ -67,6 +67,15 @@ export function App() {
   // a state file that could not be read was set aside and restored from a snapshot: say so
   useEffect(() => {
     const tell = (r: Recovery) => {
+      if (r.tooNew) {
+        useApp
+          .getState()
+          .toast(
+            `This board was saved by a newer version of Fleetboard (board format ${r.tooNew}; this one reads ${SCHEMA_VERSION}). It was left untouched and an empty board opened instead. Update Fleetboard to open it.`,
+            'warn'
+          )
+        return
+      }
       const when = r.snapshot ? new Date(Number(/-(\d+)\.json$/.exec(r.snapshot)?.[1])).toLocaleString() : ''
       const what = r.what === 'app' ? 'The settings file' : "This board's file"
       const then = r.snapshot ? `restored the copy saved ${when}` : r.what === 'app' ? 'started with default settings' : 'started an empty board'

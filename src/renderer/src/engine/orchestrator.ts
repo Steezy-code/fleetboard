@@ -152,6 +152,6 @@ export function commandFrom(scope: string, text: string, defaultTargetIds: strin
   // with someone to send to, other @words are just part of the text (@types/node, @Injectable)
   if (!r.sent.length && r.unresolved.length) app.toast(`Not sent: no console or team called ${r.unresolved.map((u) => '@' + u).join(', ')}`, 'warn')
   else if (!r.sent.length) app.toast('No running console to send to', 'warn')
-  else if (r.sent.length) app.toast(`Sent to ${r.sent.length === 1 ? r.sent[0].name : `${r.sent.length} agents`}`, 'ok')
+  else if (r.sent.length) app.toast(`Sent to ${r.sent.length === 1 ? r.sent[0]?.name : `${r.sent.length} agents`}`, 'ok')
   return r
 }

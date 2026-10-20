@@ -21,7 +21,7 @@ interface DocData {
 function splitTitle(md: string): { h1: string | null; body: string } {
   const m = /^\s*#\s+(.+?)\s*#*\s*(\n|$)/.exec(md)
   if (!m) return { h1: null, body: md }
-  return { h1: m[1].replace(/[*_`]/g, '').trim(), body: md.slice(m[0].length) }
+  return { h1: (m[1] ?? '').replace(/[*_`]/g, '').trim(), body: md.slice(m[0].length) }
 }
 
 /** A document on a white paper card: DOCUMENT eyebrow, title, rendered markdown, Export PDF. */

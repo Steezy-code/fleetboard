@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { BoardNode, ConsoleData } from '@shared/types'
+import { mapWorkspaces, type BoardNode, type ConsoleData } from '@shared/types'
 import type { FleetMember, FleetState } from '@shared/fleet'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
@@ -70,7 +70,7 @@ function workspaceOf(nodeId: string) {
 function addNodeTo(wsId: string, node: BoardNode) {
   const p = useApp.getState().project
   if (!p) return
-  const workspaces = p.workspaces.map((w) => {
+  const workspaces = mapWorkspaces(p, (w) => {
     if (w.id !== wsId) return w
     const z = w.nodes.reduce((m, n) => Math.max(m, n.z), 0) + 1
     return { ...w, nodes: [...w.nodes, { ...node, z }] }
@@ -82,7 +82,7 @@ function addNodeTo(wsId: string, node: BoardNode) {
 function addWireTo(wsId: string, from: string, to: string) {
   const p = useApp.getState().project
   if (!p) return
-  const workspaces = p.workspaces.map((w) =>
+  const workspaces = mapWorkspaces(p, (w) =>
     w.id !== wsId || w.wires.some((x) => x.from === from && x.to === to) ? w : { ...w, wires: [...w.wires, { id: `wire${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, from, to }] }
   )
   useApp.setState({ project: { ...p, workspaces } })
@@ -92,7 +92,7 @@ function removeEverywhere(ids: string[]) {
   const p = useApp.getState().project
   if (!p) return
   const set = new Set(ids)
-  const workspaces = p.workspaces.map((w) => ({
+  const workspaces = mapWorkspaces(p, (w) => ({
     ...w,
     nodes: w.nodes.filter((n) => !set.has(n.id) && !(n.type === 'plan' && set.has(n.data?.leadId))),
     wires: w.wires.filter((x) => !set.has(x.from) && !set.has(x.to))
@@ -190,6 +190,9 @@ export function wireFleet() {
 
   on('fleet:asked', () => useApp.getState().toast('Your lead has a question', 'info'))
   on('fleet:ready', () => useApp.getState().toast('Your team finished. Review it in the Inbox.', 'ok'))
+  // something put a member's work at risk (a commit that failed, a worktree kept back). The lead is
+  // a model, so a note in its chat reaches nobody who can act on it.
+  on('fleet:trouble', ({ message, tone }: { message: string; tone: 'warn' | 'info' }) => useApp.getState().toast(message, tone))
 }
 
 /** Is this text an instruction about the board itself rather than work for the team? */

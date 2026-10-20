@@ -1,6 +1,8 @@
 // Tiny hand-drawn ("sloppy") path generator in the spirit of rough.js / Excalidraw.
 // Everything is seeded from the ink item's id, so a shape wobbles the same way on every render.
 
+import { pairs, pairsRound, quads, triplesRound } from '@shared/seq'
+
 export type Pt = [number, number]
 
 export function hashStr(s: string): number {
@@ -61,24 +63,30 @@ export function roughSegment(r: Rand, a: Pt, b: Pt, double = true, o = ROUGH) {
   return roughLine(r, a[0], a[1], b[0], b[1], o, false) + (double ? roughLine(r, a[0], a[1], b[0], b[1], o, true) : '')
 }
 
-/** Catmull-Rom-ish curve through points (rough.js `_curve`); first/last points are guides only. */
+/**
+ * Catmull-Rom-ish curve through points (rough.js `_curve`); first/last points are guides only.
+ * Each window of four is (the guide before, this point, the next, the guide after), which is what
+ * the index arithmetic this used to do was saying.
+ */
 function curveThroughGuided(pts: Pt[]): string {
-  if (pts.length < 3) return ''
-  let d = `M${f(pts[1][0])} ${f(pts[1][1])}`
-  for (let i = 1; i + 2 < pts.length; i++) {
-    const p = pts[i]
-    const b1: Pt = [p[0] + (pts[i + 1][0] - pts[i - 1][0]) / 6, p[1] + (pts[i + 1][1] - pts[i - 1][1]) / 6]
-    const b2: Pt = [pts[i + 1][0] + (p[0] - pts[i + 2][0]) / 6, pts[i + 1][1] + (p[1] - pts[i + 2][1]) / 6]
-    d += `C${f(b1[0])} ${f(b1[1])} ${f(b2[0])} ${f(b2[1])} ${f(pts[i + 1][0])} ${f(pts[i + 1][1])}`
+  let d = ''
+  for (const [prev, p, next, after] of quads(pts)) {
+    if (!d) d = `M${f(p[0])} ${f(p[1])}`
+    const b1: Pt = [p[0] + (next[0] - prev[0]) / 6, p[1] + (next[1] - prev[1]) / 6]
+    const b2: Pt = [next[0] + (p[0] - after[0]) / 6, next[1] + (p[1] - after[1]) / 6]
+    d += `C${f(b1[0])} ${f(b1[1])} ${f(b2[0])} ${f(b2[1])} ${f(next[0])} ${f(next[1])}`
   }
   return d
 }
 
 /** Smooth curve passing through every point. */
 export function curveThrough(pts: Pt[]): string {
-  if (pts.length < 2) return ''
-  if (pts.length === 2) return `M${f(pts[0][0])} ${f(pts[0][1])}L${f(pts[1][0])} ${f(pts[1][1])}`
-  return curveThroughGuided([pts[0], ...pts, pts[pts.length - 1]])
+  const [first, second] = pts
+  const last = pts[pts.length - 1]
+  if (!first || !second || !last) return ''
+  if (pts.length === 2) return `M${f(first[0])} ${f(first[1])}L${f(second[0])} ${f(second[1])}`
+  // the ends repeated, as the guides the curve needs either side of a real point
+  return curveThroughGuided([first, ...pts, last])
 }
 
 /** Hand-drawn smooth curve through points (multi-point arrows/lines with round edges). */
@@ -116,10 +124,7 @@ export function roughEllipse(r: Rand, cx: number, cy: number, w: number, h: numb
 
 /** Corner tangent points for a polygon with rounded corners. */
 function corners(pts: Pt[], radius: number) {
-  const n = pts.length
-  return pts.map((p, i) => {
-    const prev = pts[(i - 1 + n) % n]
-    const next = pts[(i + 1) % n]
+  return [...triplesRound(pts)].map(([prev, p, next]) => {
     const lp = Math.hypot(prev[0] - p[0], prev[1] - p[1]) || 1
     const ln = Math.hypot(next[0] - p[0], next[1] - p[1]) || 1
     const rr = Math.min(radius, lp / 2, ln / 2)
@@ -133,9 +138,11 @@ function corners(pts: Pt[], radius: number) {
 export function polygonPath(pts: Pt[], radius = 0): string {
   if (radius <= 0) return `M${pts.map((p) => `${f(p[0])} ${f(p[1])}`).join('L')}Z`
   const cs = corners(pts, radius)
-  let d = `M${f(cs[0].tout[0])} ${f(cs[0].tout[1])}`
-  for (let i = 1; i <= cs.length; i++) {
-    const c = cs[i % cs.length]
+  const [start] = cs
+  if (!start) return ''
+  let d = `M${f(start.tout[0])} ${f(start.tout[1])}`
+  // every corner after the first, then back to the first
+  for (const c of [...cs.slice(1), start]) {
     d += `L${f(c.tin[0])} ${f(c.tin[1])}Q${f(c.p[0])} ${f(c.p[1])} ${f(c.tout[0])} ${f(c.tout[1])}`
   }
   return d + 'Z'
@@ -145,16 +152,14 @@ export function polygonPath(pts: Pt[], radius = 0): string {
 export function roughPolygon(r: Rand, pts: Pt[], radius = 0, double = true): string {
   if (radius <= 0) {
     let d = ''
-    for (let i = 0; i < pts.length; i++) d += roughSegment(r, pts[i], pts[(i + 1) % pts.length], double)
+    for (const [a, b] of pairsRound(pts)) d += roughSegment(r, a, b, double)
     return d
   }
   const cs = corners(pts, radius)
   const j = (v: number, a = 1.2) => v + (r() * 2 - 1) * a
   let d = ''
   for (let pass = 0; pass < (double ? 2 : 1); pass++) {
-    for (let i = 0; i < cs.length; i++) {
-      const c = cs[i]
-      const nx = cs[(i + 1) % cs.length]
+    for (const [c, nx] of pairsRound(cs)) {
       d += roughLine(r, c.tout[0], c.tout[1], nx.tin[0], nx.tin[1], ROUGH, pass === 1)
       d += `Q${f(j(nx.p[0]))} ${f(j(nx.p[1]))} ${f(j(nx.tout[0], 0.6))} ${f(j(nx.tout[1], 0.6))}`
     }
@@ -165,7 +170,7 @@ export function roughPolygon(r: Rand, pts: Pt[], radius = 0, double = true): str
 /** Hand-drawn open polyline (straight segments). */
 export function roughPolyline(r: Rand, pts: Pt[], double = true): string {
   let d = ''
-  for (let i = 0; i + 1 < pts.length; i++) d += roughSegment(r, pts[i], pts[i + 1], double)
+  for (const [a, b] of pairs(pts)) d += roughSegment(r, a, b, double)
   return d
 }
 

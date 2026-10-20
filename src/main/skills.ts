@@ -26,18 +26,18 @@ export function parseFrontmatter(text: string): Record<string, string> {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   if (!m) return {}
   const out: Record<string, string> = {}
-  const lines = m[1].split(/\r?\n/)
+  const lines = (m[1] ?? '').split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
-    const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(lines[i])
-    if (!kv) continue
-    let v = kv[2].trim()
+    const [, key, rest = ''] = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(lines[i] ?? '') ?? []
+    if (!key) continue
+    let v = rest.trim()
     if (v === '>' || v === '|' || v === '>-' || v === '|-' || v === '') {
       // folded / literal block: gather indented lines
       const block: string[] = []
-      while (i + 1 < lines.length && /^\s+/.test(lines[i + 1])) block.push(lines[++i].trim())
+      while (/^\s+/.test(lines[i + 1] ?? '')) block.push((lines[++i] ?? '').trim())
       v = block.join(v.startsWith('|') ? '\n' : ' ')
     }
-    out[kv[1]] = v.replace(/^["']|["']$/g, '')
+    out[key] = v.replace(/^["']|["']$/g, '')
   }
   return out
 }
@@ -81,10 +81,17 @@ const slugify = (s: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 48)
 
+const rootsFor = (projectPath?: string) => [userRoot(), projectPath ? projectRoot(projectPath) : null].filter(Boolean) as string[]
+
 function insideRoots(p: string, projectPath?: string) {
   const r = path.resolve(p)
-  const roots = [userRoot(), projectPath ? projectRoot(projectPath) : null].filter(Boolean) as string[]
-  return roots.some((root) => r.startsWith(path.resolve(root) + path.sep))
+  return rootsFor(projectPath).some((root) => r.startsWith(path.resolve(root) + path.sep))
+}
+
+/** The skills folder itself, which "Open folder" may also reveal (it is created on demand). */
+function isRoot(p: string, projectPath?: string) {
+  const r = path.resolve(p)
+  return rootsFor(projectPath).some((root) => r === path.resolve(root))
 }
 
 export function registerSkills(ctx: MainContext) {
@@ -132,7 +139,9 @@ export function registerSkills(ctx: MainContext) {
     return true
   })
 
-  ipc.handle('skills:open', (_e, dir: string) => {
+  // the only handler here that had no check: it took any path and created it, recursively
+  ipc.handle('skills:open', (_e, dir: string, projectPath?: string) => {
+    if (!insideRoots(dir, projectPath) && !isRoot(dir, projectPath)) throw new Error('Not a skills folder')
     fs.mkdirSync(dir, { recursive: true })
     return shell.openPath(dir)
   })

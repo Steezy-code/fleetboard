@@ -43,8 +43,8 @@ export default function ChecklistNode({ node }: NodeProps) {
     const move = (ev: PointerEvent) => {
       const rows = [...(listRef.current?.querySelectorAll<HTMLElement>('[data-chk]') ?? [])].filter((r) => r.dataset.chk !== item.id)
       let index = rows.length
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i].getBoundingClientRect()
+      for (const [i, row] of rows.entries()) {
+        const r = row.getBoundingClientRect()
         if (ev.clientY < r.top + r.height / 2) {
           index = i
           break
@@ -52,7 +52,7 @@ export default function ChecklistNode({ node }: NodeProps) {
       }
       const rest = current.filter((i) => i.id !== item.id)
       const next = [...rest.slice(0, index), item, ...rest.slice(index)]
-      if (next.some((x, i) => x.id !== current[i].id)) {
+      if (next.some((x, i) => x.id !== current[i]?.id)) {
         current = next
         setPreview(next)
       }

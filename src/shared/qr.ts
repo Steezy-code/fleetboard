@@ -34,6 +34,50 @@ const BLOCKS: Record<Ecc, [number, number, number, number, number][]> = {
 const ALIGN: number[][] = [[], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34], [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]]
 const ECC_BITS: Record<Ecc, number> = { L: 0b01, M: 0b00 }
 
+// Every index in this file is inside its array by construction — the sizes come from the version,
+// and the version is checked once on the way in. These three say that out loud instead of each
+// read handling a case that cannot happen: if an index ever does go out of range the encoder
+// stops and says which one, rather than letting undefined become NaN and a code that scans as
+// nothing. The test checks every version, level and mask module for module, so a wrong index here
+// is a failing assertion rather than a silently wrong code.
+
+/** An element of one of the encoder's own numeric arrays. */
+const at = (a: ArrayLike<number>, i: number): number => {
+  const v = a[i]
+  if (v === undefined) throw new Error(`qr: index ${i} is outside 0..${a.length - 1}`)
+  return v
+}
+
+/** A module of a matrix, by (x, y) — so the two cannot be swapped silently as m[y][x] allows. */
+const cell = (m: boolean[][], x: number, y: number): boolean => {
+  const row = m[y]
+  if (!row) throw new Error(`qr: row ${y} is outside 0..${m.length - 1}`)
+  const v = row[x]
+  if (v === undefined) throw new Error(`qr: column ${x} is outside 0..${row.length - 1}`)
+  return v
+}
+
+const put = (m: boolean[][], x: number, y: number, on: boolean): void => {
+  const row = m[y]
+  if (!row) throw new Error(`qr: row ${y} is outside 0..${m.length - 1}`)
+  if (x < 0 || x >= row.length) throw new Error(`qr: column ${x} is outside 0..${row.length - 1}`)
+  row[x] = on
+}
+
+/** The block layout for a version and error level: [ecc per block, b1, d1, b2, d2]. */
+function blocksFor(version: number, ecc: Ecc): [number, number, number, number, number] {
+  const spec = BLOCKS[ecc][version - 1]
+  if (!spec) throw new Error(`qr: version ${version} is outside 1-10`)
+  return spec
+}
+
+/** Where a version's alignment patterns are centred. */
+function alignFor(version: number): number[] {
+  const pos = ALIGN[version - 1]
+  if (!pos) throw new Error(`qr: version ${version} is outside 1-10`)
+  return pos
+}
+
 // ---------------------------------------------------------------- Reed-Solomon over GF(256), x^8+x^4+x^3+x^2+1
 
 const EXP = new Uint8Array(512)
@@ -44,16 +88,16 @@ for (let i = 0, x = 1; i < 255; i++) {
   x <<= 1
   if (x & 0x100) x ^= 0x11d
 }
-for (let i = 255; i < 512; i++) EXP[i] = EXP[i - 255]
-const mul = (a: number, b: number) => (a && b ? EXP[LOG[a] + LOG[b]] : 0)
+for (let i = 255; i < 512; i++) EXP[i] = at(EXP, i - 255)
+const mul = (a: number, b: number) => (a && b ? at(EXP, at(LOG, a) + at(LOG, b)) : 0)
 
 function rsGenerator(degree: number): number[] {
   let g = [1]
   for (let i = 0; i < degree; i++) {
     const next = new Array(g.length + 1).fill(0)
     for (let j = 0; j < g.length; j++) {
-      next[j] ^= g[j]
-      next[j + 1] ^= mul(g[j], EXP[i])
+      next[j] = at(next, j) ^ at(g, j)
+      next[j + 1] = at(next, j + 1) ^ mul(at(g, j), at(EXP, i))
     }
     g = next
   }
@@ -66,7 +110,7 @@ function rsRemainder(data: number[], degree: number): number[] {
   for (const d of data) {
     const factor = d ^ rem.shift()!
     rem.push(0)
-    for (let i = 0; i < degree; i++) rem[i] ^= mul(gen[i + 1], factor)
+    for (let i = 0; i < degree; i++) rem[i] = at(rem, i) ^ mul(at(gen, i + 1), factor)
   }
   return rem
 }
@@ -74,7 +118,7 @@ function rsRemainder(data: number[], degree: number): number[] {
 // ---------------------------------------------------------------- data codewords
 
 function capacity(version: number, ecc: Ecc) {
-  const [, b1, d1, b2, d2] = BLOCKS[ecc][version - 1]
+  const [, b1, d1, b2, d2] = blocksFor(version, ecc)
   return b1 * d1 + b2 * d2
 }
 
@@ -97,18 +141,18 @@ function dataCodewords(bytes: Uint8Array, version: number, ecc: Ecc): number[] {
 
 /** Split into blocks, add error correction to each, interleave. */
 function codewords(data: number[], version: number, ecc: Ecc): number[] {
-  const [ec, b1, d1, b2, d2] = BLOCKS[ecc][version - 1]
+  const [ec, b1, d1, b2, d2] = blocksFor(version, ecc)
   const blocks: number[][] = []
-  let at = 0
+  let start = 0
   for (let i = 0; i < b1 + b2; i++) {
     const n = i < b1 ? d1 : d2
-    blocks.push(data.slice(at, at + n))
-    at += n
+    blocks.push(data.slice(start, start + n))
+    start += n
   }
   const ecs = blocks.map((b) => rsRemainder(b, ec))
   const out: number[] = []
-  for (let i = 0; i < Math.max(d1, d2); i++) for (const b of blocks) if (i < b.length) out.push(b[i])
-  for (let i = 0; i < ec; i++) for (const e of ecs) out.push(e[i])
+  for (let i = 0; i < Math.max(d1, d2); i++) for (const b of blocks) if (i < b.length) out.push(at(b, i))
+  for (let i = 0; i < ec; i++) for (const e of ecs) out.push(at(e, i))
   return out
 }
 
@@ -121,15 +165,16 @@ function functionPatterns(version: number): Grid {
   const dark = Array.from({ length: size }, () => new Array<boolean>(size).fill(false))
   const fixed = Array.from({ length: size }, () => new Array<boolean>(size).fill(false))
   const set = (x: number, y: number, on: boolean) => {
-    dark[y][x] = on
-    fixed[y][x] = true
+    put(dark, x, y, on)
+    put(fixed, x, y, true)
   }
   // finders with their separators
-  for (const [fx, fy] of [
+  const finders: [number, number][] = [
     [3, 3],
     [size - 4, 3],
     [3, size - 4]
-  ]) {
+  ]
+  for (const [fx, fy] of finders) {
     for (let dy = -4; dy <= 4; dy++)
       for (let dx = -4; dx <= 4; dx++) {
         const x = fx + dx
@@ -145,7 +190,7 @@ function functionPatterns(version: number): Grid {
     set(i, 6, i % 2 === 0)
   }
   // alignment
-  const pos = ALIGN[version - 1]
+  const pos = alignFor(version)
   for (const ay of pos)
     for (const ax of pos) {
       if ((ax === 6 && ay === 6) || (ax === 6 && ay === size - 7) || (ax === size - 7 && ay === 6)) continue
@@ -153,8 +198,8 @@ function functionPatterns(version: number): Grid {
     }
   // reserve format areas (filled per mask) and the dark module
   for (let i = 0; i < 9; i++) {
-    if (!fixed[8][i]) set(i, 8, false)
-    if (!fixed[i][8]) set(8, i, false)
+    if (!cell(fixed, i, 8)) set(i, 8, false)
+    if (!cell(fixed, 8, i)) set(8, i, false)
   }
   for (let i = 0; i < 8; i++) {
     set(size - 1 - i, 8, false)
@@ -187,8 +232,8 @@ function placeData(g: Grid, words: number[]) {
         const x = right - j
         const upward = ((right + 1) & 2) === 0
         const y = upward ? g.size - 1 - vert : vert
-        if (g.fixed[y][x]) continue
-        if (bit < total) g.dark[y][x] = ((words[bit >>> 3] >>> (7 - (bit & 7))) & 1) === 1
+        if (cell(g.fixed, x, y)) continue
+        if (bit < total) put(g.dark, x, y, ((at(words, bit >>> 3) >>> (7 - (bit & 7))) & 1) === 1)
         bit++
       }
     }
@@ -207,8 +252,10 @@ const MASKS: ((x: number, y: number) => boolean)[] = [
 ]
 
 function applyMask(g: Grid, mask: number): boolean[][] {
+  const flip = MASKS[mask]
+  if (!flip) throw new Error(`qr: mask ${mask} is outside 0-7`)
   const out = g.dark.map((row) => row.slice())
-  for (let y = 0; y < g.size; y++) for (let x = 0; x < g.size; x++) if (!g.fixed[y][x] && MASKS[mask](x, y)) out[y][x] = !out[y][x]
+  for (let y = 0; y < g.size; y++) for (let x = 0; x < g.size; x++) if (!cell(g.fixed, x, y) && flip(x, y)) put(out, x, y, !cell(out, x, y))
   return out
 }
 
@@ -219,14 +266,14 @@ function drawFormat(m: boolean[][], ecc: Ecc, mask: number) {
   for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537)
   const bits = ((data << 10) | rem) ^ 0x5412
   const bit = (i: number) => ((bits >>> i) & 1) === 1
-  for (let i = 0; i <= 5; i++) m[i][8] = bit(i)
-  m[7][8] = bit(6)
-  m[8][8] = bit(7)
-  m[8][7] = bit(8)
-  for (let i = 9; i < 15; i++) m[8][14 - i] = bit(i)
-  for (let i = 0; i < 8; i++) m[8][size - 1 - i] = bit(i)
-  for (let i = 8; i < 15; i++) m[size - 15 + i][8] = bit(i)
-  m[size - 8][8] = true
+  for (let i = 0; i <= 5; i++) put(m, 8, i, bit(i))
+  put(m, 8, 7, bit(6))
+  put(m, 8, 8, bit(7))
+  put(m, 7, 8, bit(8))
+  for (let i = 9; i < 15; i++) put(m, 14 - i, 8, bit(i))
+  for (let i = 0; i < 8; i++) put(m, size - 1 - i, 8, bit(i))
+  for (let i = 8; i < 15; i++) put(m, 8, size - 15 + i, bit(i))
+  put(m, 8, size - 8, true)
 }
 
 function penalty(m: boolean[][]): number {
@@ -236,9 +283,9 @@ function penalty(m: boolean[][]): number {
   for (const horizontal of [true, false]) {
     for (let a = 0; a < size; a++) {
       let run = 1
-      const at = (b: number) => (horizontal ? m[a][b] : m[b][a])
+      const mod = (b: number) => (horizontal ? cell(m, b, a) : cell(m, a, b))
       for (let b = 1; b < size; b++) {
-        if (at(b) === at(b - 1)) run++
+        if (mod(b) === mod(b - 1)) run++
         else {
           if (run >= 5) score += run - 2
           run = 1
@@ -246,7 +293,7 @@ function penalty(m: boolean[][]): number {
       }
       if (run >= 5) score += run - 2
       for (let b = 0; b + 10 < size; b++) {
-        const seq = Array.from({ length: 11 }, (_, k) => at(b + k))
+        const seq = Array.from({ length: 11 }, (_, k) => mod(b + k))
         const p1 = [true, false, true, true, true, false, true, false, false, false, false]
         const p2 = [false, false, false, false, true, false, true, true, true, false, true]
         if (seq.every((v, k) => v === p1[k]) || seq.every((v, k) => v === p2[k])) score += 40
@@ -256,8 +303,8 @@ function penalty(m: boolean[][]): number {
   // 2x2 blocks
   for (let y = 0; y + 1 < size; y++)
     for (let x = 0; x + 1 < size; x++) {
-      const c = m[y][x]
-      if (c === m[y][x + 1] && c === m[y + 1][x] && c === m[y + 1][x + 1]) score += 3
+      const c = cell(m, x, y)
+      if (c === cell(m, x + 1, y) && c === cell(m, x, y + 1) && c === cell(m, x + 1, y + 1)) score += 3
     }
   // dark balance
   let darkCount = 0
@@ -298,7 +345,10 @@ export function qrEncode(text: string, opts: { ecc?: Ecc; version?: number; mask
       bestScore = s
     }
   }
-  return best!
+  // only reachable through a forced mask outside 0-7, which the tests do not pass and the app
+  // cannot: either way a null matrix must not leave here typed as a matrix
+  if (!best) throw new Error(`qr: mask ${String(opts.mask)} is outside 0-7`)
+  return best
 }
 
 /** An SVG of the code with a 4-module quiet zone, scaled to `size` pixels. */

@@ -34,8 +34,9 @@ export default function SpawnPanel({ agentId: initial, count: initialCount }: { 
 
   const spawn = () => {
     const ids = spawnConsoles({ agentId, count, autoApprove: yolo, profileId: profileId || undefined })
+    const [first] = ids
     useApp.getState().closePanel()
-    if (ids.length) setTimeout(() => (count === 1 ? useApp.getState().focusItem(ids[0]) : useApp.getState().fitAll()), 60)
+    if (first) setTimeout(() => (count === 1 ? useApp.getState().focusItem(first) : useApp.getState().fitAll()), 60)
   }
 
   return (

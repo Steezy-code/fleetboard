@@ -18,20 +18,25 @@ src/main/                Electron main process
                          closing a console ends an agent CLI's whole process group (a shell's like a terminal)
   orphans.ts             the consoles running, on disk: the next launch ends what a run that died left running
   errors.ts              stray main-process errors: logged to ~/.fleetboard/logs/main.log, shown as a toast
+                         (the renderer's own go to the same log through app:logError: lib/strayErrors.ts)
   goal.ts                runs a loop's goal command (goal:check) in the project folder, exit code = verdict
   screen.ts              TermScreen: a headless xterm per console, what the terminal actually shows
   status.ts              detectPrompt (menus, hints, y/n on the cursor row), StatusTracker, answerKeys: pure, clock-injected
   hooks.ts               receives Claude Code hook events (per-run secret in FB_HOOK_TOKEN)
   localserver.ts         secrets and request checks shared by the local HTTP servers
   remote.ts              the phone Inbox server (off unless enabled in Settings); remote-page.ts is its page
-  fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready
+  fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready;
+                         every tool call is checked against the caller's role (toolDenial), and a worktree or
+                         branch is only removed once nothing uncommitted or unmerged would go with it
   plan.ts                links workers to the Lead's plan tasks (by id, number, title, or a clear match)
   gemini-home.ts         a Gemini CLI home per team console (GEMINI_CLI_HOME): the user's ~/.gemini linked in,
                          settings with the fleet MCP server added (Gemini reads MCP servers only from settings)
   sessions.ts            each console's own conversation: ids for Claude Code / Gemini, found for Codex;
                          resumable / taken / free / lost, as each real CLI behaves
   cli.ts                 headless one-shot runs of the user's CLI (claude -p streaming) — IPC cli:run
-  store.ts               persistence (~/.fleetboard) — IPC store:*
+  store.ts               persistence (~/.fleetboard) — IPC store:*; refuses to open or overwrite a board whose
+                         schema is newer than SCHEMA_VERSION. writeJsonAtomic (paths.ts) fsyncs before the
+                         rename, so an atomic write is a durable one
   fsops.ts               dialogs, fs:tree (level by level, within a budget; deeper folders read when opened),
                          fs:write (atomic; with a base, refuses to overwrite a change made on disk meanwhile), shell:*
   agents.ts              agents:detect
@@ -98,7 +103,11 @@ src/renderer/src/
   live screen and refuses if the question changed); never type option digits blindly.
 - **Local HTTP servers** take a per-run secret (hooks: in the URL, from the console's environment; fleet
   MCP: a bearer token, from a 0600 file for Claude and an env var for Codex, never on a command line) and
-  check requests with `refuse()` (no browser Origin, Host must be 127.0.0.1/localhost). HTML from repos or models goes through `sanitizeHtml`.
+  check requests with `refuse()` (no browser Origin, Host must be 127.0.0.1/localhost). A fleet tool call is
+  then checked against the caller's **role**: `tools/list` only decides what a member is told about.
+- **HTML from a repo, a model or a web page goes through `sanitizeHtml`** (`workbench/markdown.ts`), and a URL
+  out of it or out of the board file goes through `safeUrl`. `marked` has no sanitizer of its own, so only that
+  module and `studios/docs/render.ts` may import it — `test/unit/html-safety.test.ts` enforces both rules.
 - Verify with `npx tsc --noEmit -p tsconfig.json`, `npm test` and `npm run test:e2e` (see Testing).
 
 ## Testing
@@ -123,6 +132,12 @@ src/renderer/src/
   look). CLIs drop flags: run it after upgrading one.
 - test/e2e/leaks.test.ts opens and closes panels, consoles and workspaces over and over and checks that
   memory, DOM nodes, listeners and processes do not pile up.
+- **Invariant tests** encode rules a reviewer would otherwise have to remember. They read the source, so
+  they catch a new call site rather than a new behaviour: `html-safety.test.ts` (only the sanitizing
+  modules may import `marked`; every raw-HTML site sits in a file that names a sanitizer; no secret from
+  `Math.random`), `argv-safety.test.ts` (every `headless` definition in the AGENTS catalogue wraps its
+  prompt in `promptArg`), `fleet-roles.test.ts` (`callTool` consults `toolDenial` before the first tool
+  runs). When you add an agent, a panel that renders HTML, or a fleet tool, these are what will fail.
 - Races show up under load: run the e2e suite several files at a time (`--test-concurrency=4` instead of 1)
   now and then. That found a note opening as an empty editor, which one at a time never showed.
 - CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.

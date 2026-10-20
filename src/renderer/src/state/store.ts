@@ -13,7 +13,7 @@ import type {
   Wire,
   Workspace
 } from '@shared/types'
-import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
+import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
 import { basename, invoke, uid } from '../lib/api'
 
 /**
@@ -274,7 +274,7 @@ export const useApp = create<AppState>((set, get) => {
   const mutateWs = (fn: (ws: Workspace) => Workspace) => {
     const p = get().project
     if (!p) return
-    const workspaces = p.workspaces.map((w) => (w.id === p.activeWorkspaceId ? fn(w) : w))
+    const workspaces = mapWorkspaces(p, (w) => (w.id === p.activeWorkspaceId ? fn(w) : w))
     const project = { ...p, workspaces }
     set({ project })
     scheduleSave(project)
@@ -346,7 +346,7 @@ export const useApp = create<AppState>((set, get) => {
       }
       project = { ...project, path, lastOpened: Date.now() }
       // quit while focused: come back at the view from before focusing
-      project = { ...project, workspaces: project.workspaces.map(clearFocusReturn) }
+      project = { ...project, workspaces: mapWorkspaces(project, clearFocusReturn) }
       set({ project, selection: [], panel: null, focusedNode: null })
       scheduleSave(project)
       windowSession.set(OPEN_PROJECT, path)
@@ -373,11 +373,12 @@ export const useApp = create<AppState>((set, get) => {
       set({ selection: [], focusedNode: null })
     },
     renameWorkspace: (id, name) =>
-      mutateProject((p) => ({ ...p, workspaces: p.workspaces.map((w) => (w.id === id ? { ...w, name } : w)) })),
+      mutateProject((p) => ({ ...p, workspaces: mapWorkspaces(p, (w) => (w.id === id ? { ...w, name } : w)) })),
     closeWorkspace: (id) =>
       mutateProject((p) => {
-        const workspaces = p.workspaces.filter((w) => w.id !== id)
-        if (!workspaces.length) workspaces.push(newWorkspace('Workspace 1'))
+        const [kept, ...rest] = p.workspaces.filter((w) => w.id !== id)
+        // closing the last workspace leaves a fresh empty one, never a board with none
+        const workspaces: [Workspace, ...Workspace[]] = kept ? [kept, ...rest] : [newWorkspace('Workspace 1')]
         const activeWorkspaceId = p.activeWorkspaceId === id ? workspaces[0].id : p.activeWorkspaceId
         return { ...p, workspaces, activeWorkspaceId }
       }),
@@ -407,7 +408,7 @@ export const useApp = create<AppState>((set, get) => {
       if (!p?.workspaces.some((w) => w.nodes.some((n) => n.id === id))) return
       mutateProject((p) => ({
         ...p,
-        workspaces: p.workspaces.map((w) =>
+        workspaces: mapWorkspaces(p, (w) =>
           w.nodes.some((n) => n.id === id) ? { ...w, nodes: w.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)) } : w
         )
       }))

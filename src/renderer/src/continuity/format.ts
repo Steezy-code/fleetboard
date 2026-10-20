@@ -60,8 +60,9 @@ export function prettyModel(m: string | null | undefined): string {
   if (!m) return '—'
   const c = /^claude-(?:3-5-|3-7-|3-)?([a-z]+)-?([\d-]*)/.exec(m)
   if (c) {
-    const fam = c[1][0].toUpperCase() + c[1].slice(1)
-    const ver = c[2]
+    const [, family = '', digits = ''] = c
+    const fam = (family[0] ?? '').toUpperCase() + family.slice(1)
+    const ver = digits
       .split('-')
       .filter((x) => x && x.length < 3)
       .join('.')

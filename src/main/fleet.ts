@@ -10,6 +10,7 @@ import { emptyFleet } from '@shared/fleet'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
+import { logError } from './errors'
 import { loginEnv } from './env'
 import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
@@ -41,6 +42,8 @@ const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
 /** lead id → pending fleet_wait resolver */
+/** this module's timers, so they can be stopped (see initFleet / stopFleetTicks) */
+const ticks: NodeJS.Timeout[] = []
 const waiters = new Map<string, (events: FleetMessage[]) => void>()
 /** ask id → pending fleet_ask_user resolver */
 const askWaiters = new Map<string, (answer: string) => void>()
@@ -58,7 +61,20 @@ const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
 
-const stateFile = (projectId: string) => path.join(fleetDir, `${projectId}.json`)
+/**
+ * A project id is a hash from store.projectIdFor, and it is used as a file name and as a folder name
+ * under ~/.fleetboard/worktrees. It arrives over IPC, and store.ts checks exactly this before using
+ * one as a path (`/^[\w-]+$/`) — fleet.ts did not, so `fleet:startLead` with an id of
+ * "../../.config/autostart/x" wrote its state outside ~/.fleetboard and created folders there too.
+ */
+const assertProjectId = (projectId: string) => {
+  if (!/^[\w-]+$/.test(projectId)) throw new Error('Bad project id')
+  return projectId
+}
+
+const stateFile = (projectId: string) => path.join(fleetDir, `${assertProjectId(projectId)}.json`)
+/** exported for the test that pins the check above */
+export const stateFileFor = stateFile
 
 function loadAll() {
   for (const f of fs.readdirSync(fleetDir)) {
@@ -146,7 +162,7 @@ function linkHeavyDirs(projectPath: string, wt: string) {
 const ADD_ALL = ['add', '-A', '--', '.', ':(exclude)node_modules', ':(exclude).venv', ':(exclude)venv', ':(exclude)vendor']
 
 async function createWorktree(repoCwd: string, projectPath: string, projectId: string, dirName: string, branch: string) {
-  const dir = path.join(treesDir, projectId, dirName)
+  const dir = path.join(treesDir, assertProjectId(projectId), dirName)
   fs.mkdirSync(path.dirname(dir), { recursive: true })
   const r = await git(repoCwd, ['worktree', 'add', '-b', branch, dir, 'HEAD'])
   if (!r.ok) throw new Error(`git worktree add failed: ${r.err}`)
@@ -154,8 +170,78 @@ async function createWorktree(repoCwd: string, projectPath: string, projectId: s
   return dir
 }
 
-async function removeWorktree(projectPath: string, m: FleetMember, deleteBranch: 'merged' | 'force' | 'keep') {
-  if (!m.cwd.startsWith(treesDir)) return
+/** Tell the user about something that put a member's work at risk: the lead is a model, so a note
+ *  in its chat is not a report to anyone who can act on it. */
+function trouble(s: FleetState, message: string, tone: 'warn' | 'info' = 'warn') {
+  if (tone === 'warn') logError('fleet', message)
+  ctx.emit('fleet:trouble', { projectId: s.projectId, message, tone })
+}
+
+/** Is every commit on `branch` already on `into`? (`git branch -d` asks about HEAD, not the lead.) */
+export async function containedIn(projectPath: string, branch?: string, into?: string) {
+  if (!branch) return true // nothing of its own to lose
+  if (!into) return false
+  return (await git(projectPath, ['merge-base', '--is-ancestor', branch, into])).ok
+}
+
+/**
+ * Commit whatever a member never committed, so its worktree can be removed without losing work.
+ * Returns false when there is uncommitted work it could not save — then the worktree stays.
+ */
+async function keepUncommitted(s: FleetState, m: FleetMember): Promise<boolean> {
+  const add = await git(m.cwd, ADD_ALL)
+  if (!add.ok) {
+    trouble(s, `${m.name}'s changes could not be staged (${add.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
+    return false
+  }
+  if ((await git(m.cwd, ['diff', '--cached', '--quiet'])).ok) return true // nothing of its own uncommitted
+  if (!m.branch) {
+    trouble(s, `${m.name} has uncommitted changes and no branch of its own, so its folder is kept at ${m.cwd}.`)
+    return false
+  }
+  const r = await git(m.cwd, [
+    'commit',
+    '-m',
+    `Unreported work from ${m.name} (Fleetboard)\n\nCommitted so removing its worktree could not throw it away.\nTask: ${m.task?.slice(0, 500) ?? ''}`
+  ])
+  if (!r.ok) {
+    trouble(s, `${m.name} has uncommitted work that could not be committed (${r.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
+    return false
+  }
+  trouble(s, `${m.name} had work it never reported; it is kept as a commit on ${m.branch}.`, 'info')
+  return true
+}
+
+/**
+ * Whether a member's worktree is its own to remove.
+ *
+ * It must sit inside the worktrees folder — with the separator, so a sibling like `worktrees-old`
+ * cannot pass as being inside it — and no other live member may be working in the same folder. A
+ * reviewer is given its lead's cwd, so without the second test, dismissing a reviewer removed the
+ * lead's worktree.
+ */
+export function ownWorktree(
+  m: { id: string; cwd: string },
+  members: { id: string; cwd: string; status: string }[],
+  trees: string
+): boolean {
+  if (!m.cwd.startsWith(trees + path.sep)) return false
+  return !members.some((x) => x.id !== m.id && x.status !== 'closed' && x.cwd === m.cwd)
+}
+
+/**
+ * Remove a member's worktree once nothing of its own would go with it.
+ *
+ * Two ways this used to lose work. A reviewer runs in its *lead's* worktree (fleet_spawn_reviewer
+ * hands it the lead's cwd and no branch), so dismissing a reviewer removed the lead's worktree and
+ * everything the lead had not committed. And `worktree remove --force` is precisely what makes git
+ * discard uncommitted changes, while a worker's work is only ever committed by fleet_report — so a
+ * worker dismissed before it reported lost every edit it had made.
+ */
+async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merged' | 'force' | 'keep') {
+  const projectPath = s.projectPath
+  if (!ownWorktree(m, Object.values(s.members), treesDir)) return
+  if (!(await keepUncommitted(s, m))) return
   for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
     const p = path.join(m.cwd, d)
     try {
@@ -164,7 +250,8 @@ async function removeWorktree(projectPath: string, m: FleetMember, deleteBranch:
       /* not there */
     }
   }
-  await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
+  const rm = await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
+  if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
   if (m.branch && deleteBranch !== 'keep') await git(projectPath, ['branch', deleteBranch === 'force' ? '-D' : '-d', m.branch])
 }
 
@@ -548,6 +635,28 @@ const TOOLS: ToolDef[] = [
   }
 ]
 
+/**
+ * Which roles may call a tool, or null for a name that is not a fleet tool at all.
+ *
+ * `tools/list` only decides what a member is *told* about. A console reads its own MCP config, so it
+ * can send any tool name it likes: this is where the role is actually enforced. Without it a worker
+ * — that is, anything able to prompt-inject a worker through a file, issue, dependency or PR comment
+ * it reads — can call fleet_finish and put its own unreviewed branch on the user's Ready card, or
+ * fleet_dismiss a sibling's unmerged work.
+ */
+export function toolRoles(name: string): FleetRole[] | null {
+  return TOOLS.find((t) => t.name === name)?.roles ?? null
+}
+
+/** Why `role` may not call `name`, or null when it may. Says what the caller can use instead. */
+export function toolDenial(name: string, role: FleetRole): string | null {
+  const roles = toolRoles(name)
+  if (!roles) return `Unknown tool ${name}`
+  if (roles.includes(role)) return null
+  const mine = TOOLS.filter((t) => t.roles.includes(role)).map((t) => t.name)
+  return `${name} is for the ${roles.join(' / ')} role; you are a ${role}. Your tools: ${mine.join(', ')}.`
+}
+
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true })
 
@@ -555,6 +664,8 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
+  const denied = toolDenial(name, m.role)
+  if (denied) return fail(denied)
   const lead = m.role === 'lead' ? m : m.leadId ? s.members[m.leadId] : undefined
   const team = () => Object.values(s.members).filter((x) => x.leadId === (lead?.id ?? m.id) && x.status !== 'closed')
 
@@ -674,14 +785,17 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (!lead) return fail('You have no lead.')
       let commitNote = ''
       if (m.role === 'worker' && m.branch) {
-        await git(m.cwd, ADD_ALL)
+        const add = await git(m.cwd, ADD_ALL)
+        if (!add.ok) trouble(s, `${m.name}'s changes could not be staged: ${add.err.slice(0, 160)}. They are still in ${m.cwd}.`)
         const dirty = !(await git(m.cwd, ['diff', '--cached', '--quiet'])).ok
         if (dirty) {
           // subject from the worker's own summary (what changed), body keeps the task it was given
           const summary = String(a.summary).trim()
-          const subject = summary.split('\n')[0].replace(/^[-*•\s]+/, '').replace(/\.$/, '').slice(0, 72) || 'Work from ' + m.name
+          const subject = (summary.split('\n')[0] ?? '').replace(/^[-*•\s]+/, '').replace(/\.$/, '').slice(0, 72) || 'Work from ' + m.name
           const c = await git(m.cwd, ['commit', '-m', `${subject}\n\n${summary.slice(0, 2000)}\n\nTask: ${m.task?.slice(0, 500) ?? ''}\nBy ${m.name} (Fleetboard team)`])
           commitNote = c.ok ? ` Committed on ${m.branch}.` : ` (commit failed: ${c.err.slice(0, 200)})`
+          // the lead is a model: without this the user never hears that the work was not saved
+          if (!c.ok) trouble(s, `${m.name}'s work could not be committed: ${c.err.slice(0, 160)}. It is still in ${m.cwd}.`)
         } else commitNote = ' No file changes.'
       }
       m.status = 'reported'
@@ -773,7 +887,7 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   // its worktree and Gemini home go once its CLI has ended: one still shutting down would write its
   // session into them again (Gemini CLI saves on SIGHUP)
   await ctx.ptys.stop(m.id)
-  await removeWorktree(s.projectPath, m, branch)
+  await removeWorktree(s, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
   changed(s)
 }
@@ -814,9 +928,10 @@ function startServer(): Promise<number> {
     const server = http.createServer((req, res) => {
       const m = /^\/mcp\/([^/?]+)\/?(?:\?|$)/.exec(req.url ?? '')
       if (!m) return res.writeHead(404).end()
-      let caller = m[1]
+      const [, encoded = ''] = m
+      let caller = encoded
       try {
-        caller = decodeURIComponent(m[1])
+        caller = decodeURIComponent(encoded)
       } catch {
         /* use as is */
       }
@@ -857,7 +972,7 @@ function startServer(): Promise<number> {
         const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
         if (hangup.signal.aborted) return
         if (!out.length) return res.writeHead(202).end()
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[1] })
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': encoded })
         res.end(JSON.stringify(batch ? out : out[0]))
       })
     })
@@ -940,8 +1055,17 @@ export async function initFleet(c: MainContext) {
   ctx.ptys.onSpawn(memberStarted)
   void findClaudeConfig()
   port = await startServer()
-  setInterval(deliverTick, 700)
-  setInterval(trustTick, 900)
+  // kept and unref'd, the way pty.ts and remote.ts handle theirs. Without this they go on ticking
+  // through dispose(), typing queued messages into consoles that are being torn down, and a live
+  // timer is on its own enough to hold the process open.
+  for (const [fn, ms] of [
+    [deliverTick, 700],
+    [trustTick, 900]
+  ] as const) {
+    const t = setInterval(fn, ms)
+    t.unref?.()
+    ticks.push(t)
+  }
 
   const { ipc } = ctx
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
@@ -980,7 +1104,7 @@ export async function initFleet(c: MainContext) {
     const push = await git(lead.cwd, ['push', '-u', 'origin', lead.branch])
     if (!push.ok) return { ok: false, error: `Push failed: ${push.err.slice(0, 400)}` }
     const summary = s.ready.summary.trim()
-    const title = (summary.split('\n')[0].replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
+    const title = ((summary.split('\n')[0] ?? '').replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
     const body = `${summary}\n\n---\nGoal: ${lead.task ?? ''}\n\nBuilt by a Fleetboard team (${lead.name} and ${Object.values(s.members).filter((x) => x.leadId === lead.id).length} helpers). ${s.ready.commits} commits, ${s.ready.files.length} files.`
     const env = await loginEnv()
     const r = await new Promise<{ ok: boolean; out: string; err: string }>((resolve) =>
@@ -999,6 +1123,7 @@ export async function initFleet(c: MainContext) {
     const s = states.get(projectId)
     if (!s?.ready) return false
     const lead = s.members[s.ready.leadId]
+    if (!lead) return false
     await dismissTeam(s, lead, s.ready.prUrl ? 'keep' : s.ready.commits ? 'keep' : 'force')
     return true
   })
@@ -1057,7 +1182,8 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
   merging.add(projectId)
   try {
     const lead = s.members[s.ready.leadId]
-    if (lead?.branch) {
+    if (!lead) return { ok: false, error: 'The team has no lead to merge from.' }
+    if (lead.branch) {
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
@@ -1080,12 +1206,21 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
 }
 
 /** A project's team state, if it has one. */
+/** Stop the team timers. Called when the app quits. */
+export function stopFleetTicks() {
+  for (const t of ticks) clearInterval(t)
+  ticks.length = 0
+}
+
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')
-  // worker branches are merged into the lead's branch (or being thrown away): always delete them
-  for (const m of crew) await dismiss(s, m, 'force')
+  // A worker's branch is only safe to delete once the lead's branch actually contains its commits.
+  // It used to be deleted with -D either way, so a worker that reported "blocked", or whose console
+  // died before it reported, had its commits made unreachable — after the lead's own report had told
+  // the user that work existed.
+  for (const m of crew) await dismiss(s, m, (await containedIn(s.projectPath, m.branch, lead.branch)) ? 'force' : 'keep')
   await dismiss(s, lead, branch)
   s.ready = null
   s.tasks = []

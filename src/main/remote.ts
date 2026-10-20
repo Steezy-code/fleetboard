@@ -51,13 +51,27 @@ type Ifaces = NodeJS.Dict<os.NetworkInterfaceInfo[]>
 const v4 = (ifaces: Ifaces) =>
   Object.entries(ifaces).flatMap(([name, list]) => (list ?? []).filter((i) => i.family === 'IPv4' && !i.internal).map((i) => ({ name, address: i.address })))
 
-/** Tailscale hands out 100.64.0.0/10 (CGNAT) addresses. */
-const isTailscale = (a: string) => {
-  const [x, y] = a.split('.').map(Number)
+/**
+ * A Tailscale address, by interface name as well as range.
+ *
+ * 100.64.0.0/10 is shared address space, not Tailscale's: a CGNAT ISP, a mobile hotspot and some
+ * corporate and VM networks hand out addresses in it on a real interface. On the range alone, the
+ * Inbox bound plain HTTP to a carrier-reachable address while Settings called it
+ * "Tailscale: encrypted, reachable from your devices anywhere" and skipped the warning the Wi-Fi
+ * option shows. The interface is called tailscale0 on Linux and Tailscale on Windows.
+ *
+ * Getting this wrong the other way is safe: the Tailscale option simply reads as unavailable, and
+ * Wi-Fi still works, with the plaintext warning it has always shown.
+ */
+const TAILSCALE_IFACE = /^tailscale\d*$/i
+const isTailscale = (name: string, a: string) => {
+  if (!TAILSCALE_IFACE.test(name)) return false
+  // a NaN octet fails every comparison below, which is the answer for an address with too few
+  const [x = NaN, y = NaN] = a.split('.').map(Number)
   return x === 100 && y >= 64 && y <= 127
 }
 const isPrivate = (a: string) => {
-  const [x, y] = a.split('.').map(Number)
+  const [x = NaN, y = NaN] = a.split('.').map(Number)
   return x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
 }
 /** container and VM bridges: reachable from this machine only */
@@ -66,7 +80,7 @@ const VIRTUAL = /^(docker|br-|veth|virbr|vmnet|vboxnet|lxc|lxd|podman|cni|flanne
 /** The addresses the phone Inbox could listen on. */
 export function findAddresses(ifaces: Ifaces = os.networkInterfaces()): { tailscale?: string; lan?: string } {
   const all = v4(ifaces)
-  const tailscale = all.find((i) => isTailscale(i.address))?.address
+  const tailscale = all.find((i) => isTailscale(i.name, i.address))?.address
   const lan = all.filter((i) => isPrivate(i.address) && !VIRTUAL.test(i.name)).sort((a, b) => Number(/^(en|eth|wl)/.test(b.name)) - Number(/^(en|eth|wl)/.test(a.name)))[0]?.address
   return { tailscale, lan }
 }
@@ -94,7 +108,7 @@ export function checkRequest(req: { method?: string; headers: http.IncomingHttpH
 const failures: number[] = []
 const lockedOut = () => {
   const now = Date.now()
-  while (failures.length && now - failures[0] > 60_000) failures.shift()
+  while ((failures[0] ?? Infinity) < now - 60_000) failures.shift()
   return failures.length >= 30
 }
 

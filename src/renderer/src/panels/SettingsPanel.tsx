@@ -65,14 +65,14 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl + scroll', 'Zoom, even over a console']
 ]
 
-const PALETTE = ['#ff7a45', '#f5b740', '#3ecf8e', '#60a5fa', '#c084fc', '#ec4899', '#2dd4bf', '#a8a29e']
+const PALETTE: readonly [string, ...string[]] = ['#ff7a45', '#f5b740', '#3ecf8e', '#60a5fa', '#c084fc', '#ec4899', '#2dd4bf', '#a8a29e']
 
 /** Split a command line into bin + args (handles simple quotes). */
 function splitCommand(cmd: string): string[] {
   const out: string[] = []
   const re = /"([^"]*)"|'([^']*)'|(\S+)/g
   let m: RegExpExecArray | null
-  while ((m = re.exec(cmd))) out.push(m[1] ?? m[2] ?? m[3])
+  while ((m = re.exec(cmd))) out.push(m[1] ?? m[2] ?? m[3] ?? '')
   return out
 }
 
@@ -97,7 +97,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
     const body = bodyRef.current
     if (!body) return
     const top = body.getBoundingClientRect().top
-    let cur = SECTIONS[0].id
+    let cur = SECTIONS[0]?.id ?? ''
     for (const s of SECTIONS) {
       const el = body.querySelector(`[data-section="${s.id}"]`) as HTMLElement | null
       if (el && el.getBoundingClientRect().top - top < 80) cur = s.id
@@ -399,7 +399,7 @@ function CustomAgents() {
     const base = 'custom-' + name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
     let id = base
     for (let i = 2; [...AGENTS, ...custom].some((a) => a.id === id); i++) id = `${base}-${i}`
-    const def: AgentDef = { id, name: name.trim(), bin: parts[0], args: parts.slice(1), color: PALETTE[custom.length % PALETTE.length], vendor: 'Custom' }
+    const def: AgentDef = { id, name: name.trim(), bin: parts[0] ?? '', args: parts.slice(1), color: PALETTE[custom.length % PALETTE.length] ?? PALETTE[0], vendor: 'Custom' }
     set({ customAgents: [...custom, def] })
     setName('')
     setCommand('')

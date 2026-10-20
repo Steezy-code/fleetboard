@@ -129,9 +129,10 @@ export const InkLayer = memo(function InkLayer({ ws }: { ws: Workspace }) {
     const d = draftRef.current
     if (!d) return
     if (d.kind === 'path') {
-      const last = d.points![d.points!.length - 1]
-      if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 1.4 / zoom) return
-      setD({ ...d, points: [...d.points!, p] })
+      const drawn = d.points ?? []
+      const last = drawn[drawn.length - 1]
+      if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 1.4 / zoom) return
+      setD({ ...d, points: [...drawn, p] })
     } else if (d.kind === 'line' || d.kind === 'arrow') {
       if (e.shiftKey) p = snapAngle(st.start, p)
       const pts: Pt[] = [st.start, p]
@@ -161,7 +162,9 @@ export const InkLayer = memo(function InkLayer({ ws }: { ws: Workspace }) {
     const app = useApp.getState()
     if (d.kind === 'path') {
       let pts = d.points ?? []
-      if (pts.length === 1) pts = [pts[0], [pts[0][0] + 0.01, pts[0][1]]]
+      // a tap is one point: give it a second one so it has a direction and a box
+      const tapped = pts.length === 1 ? pts[0] : undefined
+      if (tapped) pts = [tapped, [tapped[0] + 0.01, tapped[1]]]
       app.addInk([{ ...d, points: pts, ...bboxOfPoints(pts) }])
       return
     }
@@ -223,7 +226,7 @@ export const InkLayer = memo(function InkLayer({ ws }: { ws: Workspace }) {
     const el = e.currentTarget as Element
     el.setPointerCapture(e.pointerId)
     const orig = selInk.map((i) => ({ ...i }))
-    const lockAspect = orig.length === 1 && orig[0].kind === 'label'
+    const lockAspect = orig.length === 1 && orig[0]?.kind === 'label'
     const sx0 = e.clientX
     const sy0 = e.clientY
     const mv = (ev: PointerEvent) => {
@@ -284,7 +287,8 @@ export const InkLayer = memo(function InkLayer({ ws }: { ws: Workspace }) {
 
   const union = onlyInk ? unionBox(selInk.map(itemBox)) : null
   const pad = 6 / zoom
-  const singleLine = selInk.length === 1 && onlyInk && (selInk[0].kind === 'line' || selInk[0].kind === 'arrow') ? selInk[0] : null
+  const onlySel = selInk.length === 1 ? selInk[0] : undefined
+  const singleLine = onlySel && onlyInk && (onlySel.kind === 'line' || onlySel.kind === 'arrow') ? onlySel : null
   const editItem = editing ? ws.ink.find((i) => i.id === editing) : undefined
 
   return (

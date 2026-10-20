@@ -13,6 +13,15 @@ import { IS_WIN, killTree, launch, launchOptions } from './platform'
 const runs = new Map<string, ChildProcess>()
 /** Linux refuses a single argument over 128 KiB (MAX_ARG_STRLEN); stay well under it. */
 export const MAX_ARG_PROMPT = 100_000
+/**
+ * The most of one run's output to hold. A reply is a plan, a document or a verdict — kilobytes. A
+ * CLI that streams a build log instead used to be kept whole, twice (the text and the renderer's own
+ * copy), so a runaway run pinned hundreds of megabytes in the main process. Past this the text stops
+ * growing and says so, which makes a JSON reply fail to parse rather than parse to something wrong.
+ */
+const MAX_TEXT = 4 * 1024 * 1024
+/** stderr is only ever shown as a tail. */
+const MAX_ERR = 64 * 1024
 const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)']
 
 export function register(ctx: MainContext) {
@@ -61,9 +70,15 @@ export function register(ctx: MainContext) {
       let text = ''
       let pending = ''
       let finalResult: string | null = null
+      let truncated = false
       const push = (chunk: string) => {
         if (!chunk) return
-        text += chunk
+        if (text.length + chunk.length > MAX_TEXT) {
+          if (!truncated) {
+            truncated = true
+            text += `\n[Fleetboard stopped keeping this run's output at ${Math.round(MAX_TEXT / 1_000_000)} MB.]\n`
+          }
+        } else text += chunk
         ctx.emit('cli:chunk', req.runId, chunk)
       }
       child.stdout!.setEncoding('utf8')
@@ -92,7 +107,7 @@ export function register(ctx: MainContext) {
         }
       })
       let err = ''
-      child.stderr!.on('data', (d) => (err += d.toString()))
+      child.stderr!.on('data', (d) => (err = (err + d.toString()).slice(-MAX_ERR)))
       child.on('close', (code) => {
         runs.delete(req.runId)
         const out = finalResult ?? text
@@ -107,13 +122,24 @@ export function register(ctx: MainContext) {
     })
   })
 
-  ctx.ipc.handle('cli:cancel', (_e, runId: string) => {
-    const child = runs.get(runId)
-    // Windows: the CLI may run under node or cmd.exe; end the whole tree
-    if (IS_WIN) killTree(child?.pid)
-    else child?.kill('SIGTERM')
-    runs.delete(runId)
-  })
+  ctx.ipc.handle('cli:cancel', (_e, runId: string) => kill(runId))
+}
+
+function kill(runId: string) {
+  const child = runs.get(runId)
+  // Windows: the CLI may run under node or cmd.exe; end the whole tree
+  if (IS_WIN) killTree(child?.pid)
+  else child?.kill('SIGTERM')
+  runs.delete(runId)
+}
+
+/**
+ * End every headless run. Called when the app quits: these were only ever reachable through
+ * cli:cancel, so a planner or studio run left behind kept going — and kept spending tokens — with
+ * its output going nowhere.
+ */
+export function killRuns() {
+  for (const runId of [...runs.keys()]) kill(runId)
 }
 
 function summarizeInput(input: any): string {
