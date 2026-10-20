@@ -1,4 +1,4 @@
-import type { MemoryCard } from '@shared/types'
+import type { ConsoleData, MemoryCard, Project } from '@shared/types'
 import { invoke, uid } from '../lib/api'
 import { useApp } from '../state/store'
 import { sendToConsole } from '../engine/consoles'
@@ -59,6 +59,36 @@ export function cardsToMarkdown(cards: MemoryCard[], title = 'Project memory'): 
 export function pushBlock(cards: MemoryCard[]): string {
   const items = cards.map((c, i) => `${i + 1}) [${c.category}] ${c.title}: ${c.body.replace(/\s+/g, ' ').trim()}`)
   return `Project memory (keep this in mind for the rest of the session; no reply needed): ${items.join(' ')}`
+}
+
+/** A console the user can push memory into. */
+export interface PushTarget {
+  id: string
+  name: string
+  agentId: string
+  /** a process is running in it, so it is preselected */
+  live: boolean
+  /** the workspace it sits in, to tell two consoles with the same name apart */
+  ws: string
+}
+
+/**
+ * The consoles on the board, in workspace order.
+ *
+ * Returned as objects rather than packed into one delimited string per console: a console or a
+ * workspace may be named anything, and a name holding the delimiter shifted every field after it —
+ * a console called "build | web" took its workspace name as its agent, and came out not live, so it
+ * was neither preselected nor coloured right.
+ */
+export function pushTargets(p: Project, live: Record<string, boolean>): PushTarget[] {
+  return p.workspaces.flatMap((w) =>
+    w.nodes
+      .filter((n) => n.type === 'console')
+      .map((n) => {
+        const d = n.data as ConsoleData
+        return { id: n.id, name: d.name, agentId: d.agentId, live: !!live[n.id], ws: w.name }
+      })
+  )
 }
 
 export function pushToConsoles(cards: MemoryCard[], ids: string[], submit: boolean) {
