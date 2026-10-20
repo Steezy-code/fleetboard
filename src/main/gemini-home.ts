@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
+import { linkPath } from './platform'
 
 // Gemini CLI takes MCP servers only from its settings files, so a team console gets a Gemini home of
 // its own (GEMINI_CLI_HOME): every entry of the user's ~/.gemini linked in (sign-in, trusted folders,
@@ -55,7 +56,7 @@ export function geminiTeamHome(memberId: string, server: { url: string; token: s
     const link = path.join(dot, name)
     if (fs.lstatSync(link, { throwIfNoEntry: false })) continue
     try {
-      fs.symlinkSync(path.join(real, name), link)
+      linkPath(path.join(real, name), link)
     } catch {
       /* not linked: Gemini makes its own */
     }

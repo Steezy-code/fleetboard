@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Frame, Map as MapIcon, Pause, Play, Search, Send, Spline, Trash2 } from 'lucide-react'
 import type { ConsoleStatus, PtyInfo } from '@shared/types'
 import { ROLE_TINT } from '@shared/types'
-import { invoke } from '../lib/api'
+import { CAN_PAUSE, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, pauseAll, resumeAll } from '../engine/consoles'
 import { Modal } from '../ui/Modal'
@@ -454,7 +454,7 @@ function Details({
             Go to the console <ArrowRight size={14} />
           </button>
           <div className="row">
-            {live && (
+            {live && CAN_PAUSE && (
               <button className="btn sm grow" onClick={() => invoke(status === 'paused' ? 'pty:resume' : 'pty:pause', c.id)}>
                 {status === 'paused' ? <Play size={12} /> : <Pause size={12} />}
                 {status === 'paused' ? 'Resume' : 'Pause'}
@@ -505,10 +505,12 @@ function Details({
             <Frame size={14} /> Frame the team on the board
           </button>
           <div className="row">
-            <button className="btn sm grow" disabled={!t.memberIds.length} onClick={() => (paused ? resumeAll(t.memberIds) : pauseAll(t.memberIds))}>
-              {paused ? <Play size={12} /> : <Pause size={12} />}
-              {paused ? 'Resume team' : 'Pause team'}
-            </button>
+            {CAN_PAUSE && (
+              <button className="btn sm grow" disabled={!t.memberIds.length} onClick={() => (paused ? resumeAll(t.memberIds) : pauseAll(t.memberIds))}>
+                {paused ? <Play size={12} /> : <Pause size={12} />}
+                {paused ? 'Resume team' : 'Pause team'}
+              </button>
+            )}
             <button className="btn sm grow" disabled={!t.memberIds.length} onClick={() => app.openPanel('handoff', { from: t.memberIds })}>
               <Send size={12} /> Hand off
             </button>

@@ -6,6 +6,7 @@ import { AGENTS, AGENT_ALIASES } from '@shared/agents'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { agentLabel, isLive, killConsoles, pauseAll, resumeAll, sendToConsole, spawnConsoles } from '../engine/consoles'
 import { handoff } from '../engine/handoff'
+import { CAN_PAUSE } from '../lib/api'
 
 export type Action =
   | { type: 'spawn'; agent: string; count: number; team?: string; role?: Role | string; prompt?: string }
@@ -446,6 +447,7 @@ export async function runAction(a: Action): Promise<ActionResult> {
     }
     case 'pause':
     case 'resume': {
+      if (!CAN_PAUSE) return { ok: false, line: "Windows can't pause a console. Stop it with Close, or tell it to wait." }
       const { ids } = resolveRefs(a.targets)
       if (!ids.length) return { ok: false, line: `No console matches ${a.targets.join(', ')}.` }
       await (a.type === 'pause' ? pauseAll(ids) : resumeAll(ids))

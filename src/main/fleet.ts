@@ -2,6 +2,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import os from 'node:os'
 import { execFile } from 'node:child_process'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
@@ -10,6 +11,7 @@ import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { loginEnv } from './env'
+import { linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
@@ -134,7 +136,7 @@ function linkHeavyDirs(projectPath: string, wt: string) {
     const dst = path.join(wt, d)
     if (fs.existsSync(src) && !fs.existsSync(dst)) {
       try {
-        fs.symlinkSync(src, dst)
+        linkPath(src, dst)
       } catch {
         /* best effort */
       }
@@ -299,7 +301,7 @@ function render(s: FleetState, msg: FleetMessage) {
 let claudeConfigFile = ''
 async function findClaudeConfig() {
   const env = await loginEnv()
-  claudeConfigFile = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(env.HOME || process.env.HOME || '', '.claude.json')
+  claudeConfigFile = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(env.HOME || os.homedir(), '.claude.json')
 }
 
 /** Is this folder (or a parent) trusted in the user's Claude Code config? Read-only. */

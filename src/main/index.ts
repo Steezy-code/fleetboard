@@ -17,7 +17,8 @@ import * as goal from './goal'
 import { initFleet } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
-import { themeById } from '@shared/themes'
+import { THEMES, themeById, type Theme } from '@shared/themes'
+import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
 import { endOrphans } from './orphans'
 
@@ -51,8 +52,11 @@ let crashRecovered = false
 
 // On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
 // with these flags (Vulkan backend). Without an adapter the models fall back to slower CPU wasm.
-app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,Vulkan')
-app.commandLine.appendSwitch('enable-unsafe-webgpu')
+// Windows and macOS have WebGPU on by default (D3D12 / Metal).
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer,Vulkan')
+  app.commandLine.appendSwitch('enable-unsafe-webgpu')
+} else app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer')
 app.setName('Fleetboard')
 // fbfile:///abs/path serves local files (images, PDFs) to the renderer, which runs on http in dev.
 protocol.registerSchemesAsPrivileged([{ scheme: 'fbfile', privileges: { standard: false, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true } }])
@@ -70,6 +74,9 @@ const ctx: MainContext = {
   }
 }
 
+/** Windows title-bar buttons: same height as the top bar, colored like the theme. */
+const overlayFor = (t: Theme) => ({ color: t.tokens.bg, symbolColor: t.tokens.muted, height: 46 })
+
 function createWindow() {
   win = new BrowserWindow({
     width: 1600,
@@ -78,6 +85,8 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: themeById(store.getSettings().theme).tokens.bg,
     frame: false,
+    // Windows: the system's own minimize / maximize / close (with Snap Layouts), in the theme's colors
+    ...(process.platform === 'win32' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlayFor(themeById(store.getSettings().theme)) } : {}),
     title: 'Fleetboard',
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
@@ -139,7 +148,12 @@ function createWindow() {
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ipcMain.on('app:background', (_e, color: string) => {
-    if (/^#[0-9a-f]{6}$/i.test(color)) win?.setBackgroundColor(color)
+    if (!/^#[0-9a-f]{6}$/i.test(color)) return
+    win?.setBackgroundColor(color)
+    if (process.platform === 'win32') {
+      const t = THEMES.find((x) => x.tokens.bg.toLowerCase() === color.toLowerCase())
+      if (t) win?.setTitleBarOverlay(overlayFor(t))
+    }
   })
   ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
   ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.send(id, String(text), submit))
@@ -168,7 +182,7 @@ function registerCore() {
     crashRecovered = false
     return was
   })
-  ipcMain.handle('app:paths', () => ({ root: dirs.root, home: app.getPath('home'), assets: dirs.assets }))
+  ipcMain.handle('app:paths', () => ({ root: toRendererPath(dirs.root), home: toRendererPath(app.getPath('home')), assets: toRendererPath(dirs.assets) }))
   ipcMain.handle('win:minimize', () => win?.minimize())
   ipcMain.handle('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
   ipcMain.handle('win:close', () => win?.close())
@@ -213,7 +227,12 @@ catchStrayErrors((message) => ctx.emit('app:error', message))
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
-  protocol.handle('fbfile', (req) => net.fetch(pathToFileURL(decodeURIComponent(new URL(req.url).pathname)).toString()))
+  protocol.handle('fbfile', (req) => {
+    let p = decodeURIComponent(new URL(req.url).pathname)
+    // fbfile:///C:/dir/file → C:/dir/file
+    if (process.platform === 'win32' && /^\/[A-Za-z]:/.test(p)) p = p.slice(1)
+    return net.fetch(pathToFileURL(p).toString())
+  })
   // Microphone for push-to-talk; everything else stays denied.
   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read' || permission === 'notifications'))
   // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;

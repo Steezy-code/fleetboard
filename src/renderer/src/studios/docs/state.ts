@@ -68,8 +68,8 @@ export function removeDoc(id: string) {
 
 /** Tidy "Read /abs/repo/src/x.ts" into "Read src/x.ts". */
 function prettyActivity(line: string, root: string) {
-  const r = root.replace(/\/+$/, '') + '/'
-  return line.split(r).join('').replace(/\s+/g, ' ').trim()
+  const r = root.replace(/[\\/]+$/, '')
+  return line.split(r + '/').join('').split(r + '\\').join('').replace(/\s+/g, ' ').trim()
 }
 
 export function startDoc(opts: { key: string; preset: string; agentId: string; depth: Depth; request?: string }) {

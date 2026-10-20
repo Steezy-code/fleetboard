@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smartphone, Square, X } from 'lucide-react'
-import { invoke, on } from '../lib/api'
+import { invoke, on, IS_WIN } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { UsagePill } from './UsagePill'
 
@@ -195,6 +195,8 @@ function RenameInput({ value, onDone }: { value: string; onDone: (v: string) => 
 }
 
 export function WindowControls() {
+  // Windows draws its own buttons (titleBarOverlay); this leaves room for them
+  if (IS_WIN) return <div className="win-overlay-space" />
   return (
     <div className="win-controls no-drag">
       <button className="icon-btn sm" onClick={() => invoke('win:minimize')}>

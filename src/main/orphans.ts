@@ -22,6 +22,9 @@ const recordFile = () => path.join(dirs.root, 'consoles-running.json')
 /** A token for when the process started, or null when it is not running (or cannot be told). */
 export function processStart(pid: number): string | null {
   if (!Number.isInteger(pid) || pid <= 1) return null
+  // Windows: a console's processes hang on its pseudo-console, which takes them down when the app dies,
+  // and there is no cheap way to read a start time; the record is a POSIX safety net only
+  if (process.platform === 'win32') return null
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8')
     // after the command name, which may hold spaces and parentheses: field 3, the state, and 22, starttime

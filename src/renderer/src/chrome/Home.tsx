@@ -73,7 +73,7 @@ export function Home() {
                   <FolderOpen size={17} className="pc-icon" />
                   <div className="grow" style={{ minWidth: 0 }}>
                     <div className="pc-name">{p.name}</div>
-                    <div className="pc-path mono">{p.path.replace(/^\/home\/[^/]+/, '~')}</div>
+                    <div className="pc-path mono">{p.path.replace(/^\/home\/[^/]+|^\/Users\/[^/]+|^[A-Za-z]:\/Users\/[^/]+/i, '~')}</div>
                   </div>
                   <div className="pc-meta">
                     <div>{p.consoles} console{p.consoles === 1 ? '' : 's'}</div>

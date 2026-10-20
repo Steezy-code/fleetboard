@@ -7,7 +7,7 @@ import { CodeEditor } from '../workbench/CodeEditor'
 import { FileTree, ancestors, graft, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { FileIcon } from '../workbench/icons'
 import { isImagePath, langFromPath, langLabel } from '../workbench/markdown'
-import { baseName, dirname, joinPath, relativeTo } from '../workbench/paths'
+import { baseName, dirname, joinPath, relativeTo, isInside } from '../workbench/paths'
 import { MAX_TEXT_BYTES, type FileStat } from '../workbench/useFileText'
 import type { WriteResult } from '@shared/types'
 
@@ -202,7 +202,7 @@ export default function CodeStudio(props: { path?: string }) {
     setCreating(null)
     if (!c) return
     const path = joinPath(c.dir, name)
-    if (!path.startsWith(root + '/')) return toast('Stay inside the project folder', 'warn')
+    if (!isInside(root, path) || !relativeTo(root, path)) return toast('Stay inside the project folder', 'warn')
     if (await invoke<boolean>('fs:exists', path)) return toast(`${name} already exists`, 'warn')
     try {
       if (c.kind === 'folder') {

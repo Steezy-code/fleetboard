@@ -6,6 +6,7 @@ import { createRequire } from 'node:module'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const ROOT = path.resolve(import.meta.dirname, '../..')
@@ -37,6 +38,17 @@ export interface Sandbox {
   scenarioFile: string
 }
 
+/** End the app and everything it started (its process group; the process tree on Windows). */
+export function killAppTree(pid: number | undefined) {
+  if (!pid) return
+  try {
+    if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    else process.kill(-pid, 'SIGKILL')
+  } catch {
+    /* already gone */
+  }
+}
+
 export function makeSandbox(opts: { fake?: boolean } = {}): Sandbox {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-e2e-'))
   const sb: Sandbox = {
@@ -49,7 +61,15 @@ export function makeSandbox(opts: { fake?: boolean } = {}): Sandbox {
   }
   for (const d of [sb.home, sb.fbHome, sb.bin]) fs.mkdirSync(d, { recursive: true })
   // `claude` on PATH is the fake, started with this same node
-  if (opts.fake !== false) fs.writeFileSync(path.join(sb.bin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_CLAUDE}" "$@"\n`, { mode: 0o755 })
+  if (opts.fake !== false) {
+    if (process.platform === 'win32') {
+      // the way npm installs a CLI on Windows: a .cmd wrapper around a script it runs with node
+      const pkg = path.join(sb.bin, 'node_modules', 'fake-claude')
+      fs.mkdirSync(pkg, { recursive: true })
+      fs.writeFileSync(path.join(pkg, 'cli.mjs'), `await import(${JSON.stringify(pathToFileURL(FAKE_CLAUDE).href)})\n`)
+      fs.writeFileSync(path.join(sb.bin, 'claude.cmd'), `@ECHO off\r\nSETLOCAL\r\nSET dp0=%~dp0\r\n"node"  "%dp0%\\node_modules\\fake-claude\\cli.mjs" %*\r\n`)
+    } else fs.writeFileSync(path.join(sb.bin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${FAKE_CLAUDE}" "$@"\n`, { mode: 0o755 })
+  }
   // the app reads PATH from a login shell, and /etc/profile may reset it: set it where a user would
   fs.writeFileSync(path.join(sb.home, '.bash_profile'), `export PATH="${sb.bin}:${path.dirname(process.execPath)}:$PATH"\n`)
   fs.writeFileSync(path.join(sb.home, '.gitconfig'), '[user]\n\tname = Fleetboard Test\n\temail = test@fleetboard.invalid\n[init]\n\tdefaultBranch = main\n')
@@ -171,13 +191,15 @@ export class App {
     const env: Record<string, string> = {}
     // the test runner's own variables must not reach the app's consoles (node --test inside them breaks)
     const keep = opts.realClaudeConfig ? /^(ELECTRON_RUN_AS_NODE|CLAUDECODE|NODE_TEST_CONTEXT|NODE_OPTIONS)$/ : /^(CLAUDE|ANTHROPIC|ELECTRON_RUN_AS_NODE|NODE_TEST_CONTEXT|NODE_OPTIONS)/
-    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !keep.test(k)) env[k] = v
+    // (Windows spells it Path: one PATH key only, set below)
+    for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !keep.test(k) && !(process.platform === 'win32' && k.toUpperCase() === 'PATH')) env[k] = v
     if (opts.realClaudeConfig) env.CLAUDE_CONFIG_DIR = opts.realClaudeConfig
     Object.assign(env, {
       HOME: sb.home,
       FLEETBOARD_HOME: sb.fbHome,
       SHELL: '/bin/bash',
-      PATH: `${sb.bin}:${path.dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`,
+      // Windows keeps the system PATH (PowerShell, git, taskkill live there)
+      PATH: [sb.bin, path.dirname(process.execPath), ...(process.platform === 'win32' ? [process.env.PATH ?? process.env.Path ?? ''] : ['/usr/local/bin', '/usr/bin', '/bin'])].join(path.delimiter),
       FAKE_CLAUDE_LOG: sb.log,
       FAKE_CLAUDE_SCENARIO: sb.scenarioFile,
       XDG_CONFIG_HOME: path.join(sb.home, '.config')
@@ -382,11 +404,7 @@ export class App {
       const t = setTimeout(() => resolve(false), 8000)
       this.proc.once('exit', () => (clearTimeout(t), resolve(true)))
     })
-    try {
-      process.kill(-this.proc.pid!, 'SIGKILL')
-    } catch {
-      /* already gone */
-    }
+    killAppTree(this.proc.pid)
     return exited
   }
 }

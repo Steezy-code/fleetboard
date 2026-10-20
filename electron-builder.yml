@@ -1,0 +1,34 @@
+# Installers: `npm run dist:win` on Windows (CI builds it: .github/workflows/release.yml).
+appId: com.steezy.fleetboard
+productName: Fleetboard
+copyright: Copyright © 2026 Steezy-code
+directories:
+  output: release
+  buildResources: resources
+files:
+  - out/**
+  - resources/**
+  - package.json
+  - "!**/*.map"
+# node-pty loads a native binary (and on Windows conpty.dll / OpenConsole.exe) from disk
+asarUnpack:
+  - node_modules/node-pty/**
+npmRebuild: false
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+  artifactName: Fleetboard-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Fleetboard
+  deleteAppDataOnUninstall: false
+linux:
+  target: AppImage
+  icon: resources/icon.png
+  category: Development

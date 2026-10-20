@@ -27,3 +27,26 @@ test("a console's hook token reports for that console only", async () => {
     ['con_b', 'Stop']
   ])
 })
+
+test("Windows' hook script (node) reports an event with its payload, and never fails the hook", async () => {
+  const { NODE_HOOK } = await import('../../src/main/hooks')
+  const { execFile } = await import('node:child_process')
+  // async: the hook server runs in this process and must be free to answer
+  const run = (args: string[], env: NodeJS.ProcessEnv, input: string) =>
+    new Promise<void>((resolve) => {
+      const child = execFile(process.execPath, args, { env }, () => resolve())
+      child.stdin!.end(input)
+    })
+  const got: [string, string, unknown][] = []
+  const port = await startHookServer((id, event, payload) => got.push([id, event, payload]))
+  const script = path.join(process.env.FLEETBOARD_HOME!, 'fb-hook.cjs')
+  fs.writeFileSync(script, NODE_HOOK)
+  const env = { ...process.env, ...hookEnv('con_w'), FB_CONSOLE_ID: 'con_w' }
+  await run([script, 'PreToolUse'], env, JSON.stringify({ tool_name: 'Bash' }))
+  assert.deepEqual(got, [['con_w', 'PreToolUse', { tool_name: 'Bash' }]])
+  // without the console's environment (or with a bad event name) it does nothing, quietly
+  await run([script, 'Stop'], { ...process.env, FB_HOOK_PORT: '' }, '{}')
+  await run([script, 'Bad/Event'], env, '{}')
+  assert.equal(got.length, 1)
+  void port
+})
