@@ -20,6 +20,7 @@ import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
+import { allowed, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
 
 let win: BrowserWindow | null = null
@@ -212,6 +213,7 @@ function registerCore() {
 
   // Render HTML to a real paginated PDF (document studio, markdown export).
   ipcMain.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
+    if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
     const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
     await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
     const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
@@ -250,6 +252,9 @@ app.whenReady().then(async () => {
     let p = decodeURIComponent(new URL(req.url).pathname)
     // fbfile:///C:/dir/file → C:/dir/file
     if (process.platform === 'win32' && /^\/[A-Za-z]:/.test(p)) p = p.slice(1)
+    // the renderer builds these URLs out of board data, which agents write, and the scheme is
+    // registered bypassCSP — so it is the same question as fs:read, and gets the same answer
+    if (!allowed(p, 'fbfile')) return new Response('', { status: 403 })
     return net.fetch(pathToFileURL(p).toString())
   })
   // Microphone for push-to-talk; the camera and everything else stays denied.
