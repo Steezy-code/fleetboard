@@ -104,7 +104,8 @@ export function borderPoint(n: { x: number; y: number; w: number; h: number; sha
   return [cx + dx * t + (dx / len) * gap, cy + dy * t + (dy / len) * gap]
 }
 
-function polylineMid(points: Pt[]): Pt {
+/** Point halfway along an edge's polyline. At least one point, for the reason midPoint gives. */
+function polylineMid(points: [Pt, ...Pt[]]): Pt {
   let total = 0
   for (let i = 1; i < points.length; i++) total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1])
   let acc = 0
@@ -397,7 +398,9 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
   const edges: LEdge[] = spec.edges.map((e, i) => {
     let chain = chains[i]
     if (reversed.has(i)) chain = [...chain].reverse()
-    const pts: Pt[] = chain.map(center)
+    // a chain is [from, …one dummy per rank crossed, to]: two points or more, and never one, since
+    // spec.ts drops an edge whose ends are the same node
+    const pts = chain.map(center) as [Pt, Pt, ...Pt[]]
     const a = lmap.get(e.from)!
     const b = lmap.get(e.to)!
     pts[0] = borderPoint(a, pts[1])
@@ -505,7 +508,7 @@ function radial(spec: DiagramSpec): Layout {
     const b = lmap.get(e.to)!
     const ca: Pt = [a.x + a.w / 2, a.y + a.h / 2]
     const cb: Pt = [b.x + b.w / 2, b.y + b.h / 2]
-    const pts: Pt[] = [borderPoint(a, cb, 4), borderPoint(b, ca, 4)]
+    const pts: [Pt, Pt] = [borderPoint(a, cb, 4), borderPoint(b, ca, 4)]
     return { from: e.from, to: e.to, label: (e as any).label, points: pts, directed: false, labelAt: polylineMid(pts) }
   })
   return normalize({ title: spec.title, dir: 'radial', nodes: lnodes, edges, groups: [], width: 0, height: 0 })
