@@ -14,7 +14,11 @@ const write = (f: string, c: string) => {
   fs.writeFileSync(path.join(repo, f), c)
 }
 // Windows can't have " * or a newline in a file name
-const WEIRD = ['app/[id]/page.tsx', 'docs/my notes.md', 'src/ünïcødé.ts', "it's.txt", '-dash.txt', ...(process.platform === 'win32' ? ['brace{1}.txt', 'semi;colon.txt'] : ['quote"d.txt', 'new\nline.txt', 'star*.txt'])]
+const WIN = process.platform === 'win32'
+/** a name with a glob character that also matches another file (file[1] matches file1, star* matches stars) */
+const GLOBBY = WIN ? 'file[1].txt' : 'star*.txt'
+const GLOB_MATCH = WIN ? 'file1.txt' : 'stars.txt'
+const WEIRD = ['app/[id]/page.tsx', 'docs/my notes.md', 'src/ünïcødé.ts', "it's.txt", '-dash.txt', GLOBBY, ...(WIN ? ['brace{1}.txt', 'semi;colon.txt'] : ['quote"d.txt', 'new\nline.txt'])]
 
 before(async () => {
   process.env.SHELL = '/bin/false'
@@ -42,10 +46,11 @@ test('status reads every odd file name exactly', async () => {
 test('committing selected files commits and stages exactly those, glob characters and all', async () => {
   fs.rmSync(path.join(repo, 'app/[id]/page.tsx'))
   write('app/i/page.tsx', 'not selected\n')
-  const r = await ipcMain.invoke('git:commit', repo, 'pick a few', [{ path: 'app/[id]/page.tsx' }, { path: 'star*.txt' }, { path: 'new\nline.txt' }, { path: '-dash.txt' }])
+  const pick = ['app/[id]/page.tsx', GLOBBY, ...(WIN ? [] : ['new\nline.txt']), '-dash.txt']
+  const r = await ipcMain.invoke('git:commit', repo, 'pick a few', pick.map((p) => ({ path: p })))
   assert.equal(r.ok, true, JSON.stringify(r))
   const committed = sh('show', '--name-only', '-z', '--format=', 'HEAD').split('\0').filter(Boolean).sort()
-  assert.deepEqual(committed, ['-dash.txt', 'app/[id]/page.tsx', 'new\nline.txt', 'star*.txt'])
+  assert.deepEqual(committed, [...pick].sort())
   const staged = sh('diff', '--cached', '--name-only', '-z').split('\0').filter(Boolean)
   assert.ok(!staged.includes('app/i/page.tsx'), 'nothing else was staged behind the user\'s back (app/i/page.tsx matches the glob app/[id])')
 })
@@ -58,12 +63,12 @@ test('a selected rename commits both sides', async () => {
 
 test('the diff of a file with glob characters is that file only', async () => {
   write('app/i/page.tsx', 'changed again\n')
-  write('star*.txt', 'v3\n')
-  write('stars.txt', 'other\n')
-  sh('add', 'stars.txt')
+  write(GLOBBY, 'v3\n')
+  write(GLOB_MATCH, 'other\n')
+  sh('add', GLOB_MATCH)
   sh('commit', '-qm', 'stars')
-  write('stars.txt', 'other changed\n')
-  const r = await ipcMain.invoke('git:diff', repo, 'star*.txt', {})
+  write(GLOB_MATCH, 'other changed\n')
+  const r = await ipcMain.invoke('git:diff', repo, GLOBBY, {})
   assert.equal(r.ok, true, JSON.stringify(r))
   assert.match(r.diff, /\+v3/)
   assert.doesNotMatch(r.diff, /other changed/)
