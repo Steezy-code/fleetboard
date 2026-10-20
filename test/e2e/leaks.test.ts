@@ -16,6 +16,21 @@ after(async () => {
 })
 
 const settle = (ms = 400) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * What the window and the main process are holding, after a collection that actually finishes.
+ *
+ * A detached DOM node goes in two stages: V8 collects its JS wrapper, then Blink collects the node
+ * behind it. Three collections back to back only ever do the first stage, so getDOMCounters keeps
+ * counting nodes nothing refers to any more. One at a time with a turn in between does both — and
+ * that is the difference between a number that means something and a number that reads as a leak
+ * whenever the machine is busy: run four files at a time, this said 108 nodes had piled up while the
+ * document itself had not changed by a single element.
+ *
+ * `attached` is the count the name of this test really asks about: elements in the document. It does
+ * not depend on when a collector runs, so a panel that fails to unmount, or a toast that never
+ * leaves, shows up there whatever the machine is doing.
+ */
 async function counters() {
   const page = (app as any).cdp
   const mainHeap = async () => {
@@ -23,10 +38,21 @@ async function counters() {
     await (app as any).main.send('HeapProfiler.collectGarbage')
     return app.evalMain<number>('process.memoryUsage().heapUsed')
   }
-  for (let i = 0; i < 3; i++) await page.send('HeapProfiler.collectGarbage')
+  for (let i = 0; i < 4; i++) {
+    await page.send('HeapProfiler.collectGarbage')
+    await settle(120)
+  }
   const heap = await page.send('Runtime.getHeapUsage')
   const dom = await page.send('Memory.getDOMCounters')
-  return { heap: heap.usedSize as number, nodes: dom.nodes as number, listeners: dom.jsEventListeners as number, main: await mainHeap(), ptys: (await app.invoke('pty:list')).length as number }
+  const attached = await app.eval(() => document.getElementsByTagName('*').length)
+  return {
+    heap: heap.usedSize as number,
+    nodes: dom.nodes as number,
+    attached,
+    listeners: dom.jsEventListeners as number,
+    main: await mainHeap(),
+    ptys: (await app.invoke('pty:list')).length as number
+  }
 }
 const MB = 1024 * 1024
 
@@ -36,15 +62,18 @@ async function steady(what: string, round: () => Promise<void>, rounds: number) 
   await round()
   const base = await counters()
   for (let i = 0; i < rounds; i++) await round()
-  // something still closing (a transition, a toast) is not a leak: give the window a few seconds to settle
+  // something still closing (a transition, a toast) is not a leak: give the window a few seconds to
+  // settle. Only in-flight work needs that; an uncollected node does not go away by waiting, which
+  // is what counters() is for.
   let end = await counters()
-  for (let i = 0; i < 10 && (end.nodes - base.nodes > 30 || end.listeners - base.listeners > 10); i++) {
+  for (let i = 0; i < 10 && (end.attached - base.attached > 10 || end.nodes - base.nodes > 30 || end.listeners - base.listeners > 10); i++) {
     await settle(500)
     end = await counters()
   }
   const msg = `${what}: ${JSON.stringify({ base, end })}`
   assert.ok(end.heap - base.heap < 3 * MB, `window memory grew: ${msg}`)
   assert.ok(end.main - base.main < 4 * MB, `main-process memory grew: ${msg}`)
+  assert.ok(end.attached - base.attached <= 10, `elements left in the document: ${msg}`)
   assert.ok(end.nodes - base.nodes <= 30, `DOM nodes piled up: ${msg}`)
   assert.ok(end.listeners - base.listeners <= 10, `event listeners piled up: ${msg}`)
   assert.equal(end.ptys, base.ptys, `processes left running: ${msg}`)
