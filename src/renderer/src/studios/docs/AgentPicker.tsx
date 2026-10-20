@@ -6,17 +6,23 @@ import { useApp } from '../../state/store'
 // Model picker shared by the Document and Diagram studios: the installed CLIs that can run a
 // headless one-shot prompt. Claude is always offered so the studios work before detection finishes.
 
-export function useHeadlessAgents(): AgentDef[] {
+/** The installed headless agents, Claude first when it is not among them — so never none of them. */
+export function useHeadlessAgents(): [AgentDef, ...AgentDef[]] {
   const agents = useApp((s) => s.agents)
   return useMemo(() => {
     const installed = AGENTS.filter((a) => a.headless && a.id !== 'shell' && agents.some((x) => x.id === a.id && x.path))
-    if (!installed.some((a) => a.id === 'claude')) installed.unshift(agentById('claude')!)
-    return installed
+    const [first, ...rest] = installed
+    if (!first) return [agentById('claude')!]
+    return installed.some((a) => a.id === 'claude') ? [first, ...rest] : [agentById('claude')!, first, ...rest]
   }, [agents])
 }
 
-/** The agent to use: the requested one if it is available, else the planner agent, else Claude. */
-export function resolveAgent(requested: string | null, list: AgentDef[], planner: string): AgentDef {
+/**
+ * The agent to use: the requested one if it is available, else the planner agent, else the first.
+ * The list is one that is never empty, which is what makes that last fallback an agent and not
+ * undefined — it is Claude, put there by useHeadlessAgents.
+ */
+export function resolveAgent(requested: string | null, list: [AgentDef, ...AgentDef[]], planner: string): AgentDef {
   return list.find((a) => a.id === requested) ?? list.find((a) => a.id === planner) ?? list[0]
 }
 
