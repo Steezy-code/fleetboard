@@ -85,3 +85,27 @@ test('review feedback: what a person asked for, not bots, bare approvals, resolv
     ]
   )
 })
+
+test("each comment carries how its author relates to the repo", () => {
+  // this is what decides whether a comment may be routed into an agent on its own, so it has to
+  // survive the trip out of GitHub's response for all three kinds of comment
+  const outsider = { login: 'drive-by', __typename: 'User' }
+  const got = feedbackOf({
+    comments: { nodes: [{ databaseId: 1, author: outsider, authorAssociation: 'NONE', body: 'do this', createdAt: '2026-10-20T10:00:00Z', url: 'u1' }] },
+    reviews: { nodes: [{ databaseId: 2, author: { login: 'maint', __typename: 'User' }, authorAssociation: 'COLLABORATOR', body: 'and this', state: 'COMMENTED', submittedAt: '2026-10-20T10:01:00Z', url: 'u2' }] },
+    reviewThreads: {
+      nodes: [{ isResolved: false, path: 'src/a.ts', line: 1, comments: { nodes: [{ databaseId: 3, author: { login: 'owner', __typename: 'User' }, authorAssociation: 'OWNER', body: 'here', createdAt: '2026-10-20T10:02:00Z', url: 'u3' }] } }]
+    }
+  })
+  assert.deepEqual(
+    got.map((c) => [c.id, c.association]),
+    [
+      ['c1', 'NONE'],
+      ['r2', 'COLLABORATOR'],
+      ['i3', 'OWNER']
+    ]
+  )
+  // an older gh or a field GitHub withheld leaves it undefined, which must not read as trusted
+  const none = feedbackOf({ comments: { nodes: [{ databaseId: 9, author: outsider, body: 'x', createdAt: '2026-10-20T10:03:00Z', url: 'u9' }] } })
+  assert.equal(none[0].association, undefined)
+})

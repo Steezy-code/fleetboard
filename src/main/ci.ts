@@ -185,6 +185,13 @@ export interface PrComment {
   url: string
   /** a review's verdict: CHANGES_REQUESTED, COMMENTED, APPROVED */
   state?: string
+  /**
+   * How GitHub says the author relates to the repository: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR,
+   * FIRST_TIME_CONTRIBUTOR, FIRST_TIMER, MANNEQUIN or NONE. Comments are routed straight into an
+   * agent working in the user's checkout, so on a public repo this decides whose words get to do
+   * that (see trustedAuthor in renderer/src/workbench/prFeedback.ts).
+   */
+  association?: string
   path?: string
   line?: number | null
 }
@@ -202,9 +209,9 @@ export type PrFeedbackResult = { ok: true; at: number; viewer: string; prs: PrFe
 
 const FEEDBACK_QUERY = `query($owner:String!,$name:String!){ viewer{login} repository(owner:$owner,name:$name){ pullRequests(states:OPEN, first:20, orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{
   number title headRefName url author{login}
-  comments(last:30){nodes{databaseId author{login __typename} body createdAt url}}
-  reviews(last:30){nodes{databaseId author{login __typename} body state submittedAt url}}
-  reviewThreads(last:50){nodes{isResolved isOutdated path line comments(first:20){nodes{databaseId author{login __typename} body createdAt url}}}}
+  comments(last:30){nodes{databaseId author{login __typename} authorAssociation body createdAt url}}
+  reviews(last:30){nodes{databaseId author{login __typename} authorAssociation body state submittedAt url}}
+  reviewThreads(last:50){nodes{isResolved isOutdated path line comments(first:20){nodes{databaseId author{login __typename} authorAssociation body createdAt url}}}}
 } } } }`
 
 /**
@@ -221,14 +228,14 @@ export function feedbackOf(pr: any): PrComment[] {
     return true
   }
   for (const c of pr.comments?.nodes ?? [])
-    if (keep(c.body, c.author, false)) out.push({ id: `c${c.databaseId}`, kind: 'comment', author: c.author?.login ?? 'someone', body: c.body.trim(), createdAt: c.createdAt, url: c.url })
+    if (keep(c.body, c.author, false)) out.push({ id: `c${c.databaseId}`, kind: 'comment', author: c.author?.login ?? 'someone', body: c.body.trim(), createdAt: c.createdAt, url: c.url, association: c.authorAssociation })
   for (const r of pr.reviews?.nodes ?? [])
-    if (keep(r.body, r.author, true)) out.push({ id: `r${r.databaseId}`, kind: 'review', author: r.author?.login ?? 'someone', body: r.body.trim(), createdAt: r.submittedAt, url: r.url, state: r.state })
+    if (keep(r.body, r.author, true)) out.push({ id: `r${r.databaseId}`, kind: 'review', author: r.author?.login ?? 'someone', body: r.body.trim(), createdAt: r.submittedAt, url: r.url, state: r.state, association: r.authorAssociation })
   for (const t of pr.reviewThreads?.nodes ?? []) {
     if (t.isResolved) continue
     for (const c of t.comments?.nodes ?? [])
       if (keep(c.body, c.author, true))
-        out.push({ id: `i${c.databaseId}`, kind: 'inline', author: c.author?.login ?? 'someone', body: c.body.trim(), createdAt: c.createdAt, url: c.url, path: t.path, line: t.line ?? null })
+        out.push({ id: `i${c.databaseId}`, kind: 'inline', author: c.author?.login ?? 'someone', body: c.body.trim(), createdAt: c.createdAt, url: c.url, path: t.path, line: t.line ?? null, association: c.authorAssociation })
   }
   return out.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
 }
