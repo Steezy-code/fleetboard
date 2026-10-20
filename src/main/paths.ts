@@ -20,7 +20,25 @@ export function writeJsonAtomic(file: string, value: unknown, mode?: number) {
   const tmp = `${file}.${process.pid}.tmp`
   fs.writeFileSync(tmp, JSON.stringify(value, null, 2), mode === undefined ? undefined : { mode })
   if (mode !== undefined) fs.chmodSync(tmp, mode)
-  fs.renameSync(tmp, file)
+  renameRetrying(tmp, file)
+}
+
+/**
+ * Windows refuses a rename for a moment while something holds the target open (antivirus, the search
+ * indexer, a backup tool): try a few times before giving up.
+ */
+export function renameRetrying(from: string, to: string) {
+  for (let i = 0; ; i++) {
+    try {
+      return fs.renameSync(from, to)
+    } catch (e: any) {
+      if (process.platform !== 'win32' || i >= 8 || !['EPERM', 'EBUSY', 'EACCES'].includes(e?.code)) throw e
+      const until = Date.now() + 15 * (i + 1)
+      while (Date.now() < until) {
+        /* a short synchronous wait: these writes are synchronous by design */
+      }
+    }
+  }
 }
 
 export function readJson<T>(file: string, fallback: T): T {

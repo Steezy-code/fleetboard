@@ -353,7 +353,7 @@ export function Board() {
     const files = [...e.dataTransfer.files]
     let offset = 0
     for (const f of files) {
-      const path = window.fb.pathForFile(f)
+      const path = window.fb.pathForFile(f).replace(/\\/g, '/')
       if (f.type.startsWith('image/')) {
         const img = await loadImageSize(path)
         const scale = Math.min(1, 640 / img.w)

@@ -1,0 +1,52 @@
+name: Release
+
+# Push a tag like v0.2.0 (or v0.2.0-win.1 for a pre-release) and the Windows installer is built on
+# Windows and attached to a GitHub Release of that name.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build and release (it must exist)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Version from the tag
+        shell: bash
+        run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
+
+      - name: Build the installer
+        run: |
+          npx electron-vite build
+          npx electron-builder --win --x64 --publish never
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" $pre --title "Fleetboard $TAG" --notes "Windows installer: download **Fleetboard-Setup-${TAG#v}.exe** below and run it (it installs for your user only; Windows SmartScreen may warn because the installer isn't code-signed: More info → Run anyway). Then install and sign in to your agent CLIs (Claude Code, Codex, Gemini…) in Windows."
+          gh release upload "$TAG" release/*.exe --clobber

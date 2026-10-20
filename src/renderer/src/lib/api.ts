@@ -10,6 +10,9 @@ declare global {
 export const fb = window.fb
 export const invoke = <T = any>(channel: string, ...args: unknown[]) => fb.invoke(channel, ...args) as Promise<T>
 export const on = fb.on
+/** Windows can't pause a process (no SIGSTOP): Pause controls are hidden there. */
+export const IS_WIN = fb.platform === 'win32'
+export const CAN_PAUSE = !IS_WIN
 
 let counter = 0
 export const uid = (prefix = '') => `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}${Math.random().toString(36).slice(2, 6)}`
@@ -59,8 +62,11 @@ export function extractJson<T = any>(text: string): T | null {
   return null
 }
 
-export const basename = (p: string) => p.replace(/\/+$/, '').split('/').pop() || p
-export const relPath = (root: string, p: string) => (p.startsWith(root) ? p.slice(root.length).replace(/^\/+/, '') : p)
+export const basename = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
+export const relPath = (root: string, p: string) => (p.startsWith(root) ? p.slice(root.length).replace(/^[\\/]+/, '') : p)
 
-/** URL the renderer can load for a local file (images, PDFs, video). */
-export const fileUrl = (path: string) => `fbfile://${encodeURI(path).replace(/#/g, '%23').replace(/\?/g, '%3F')}`
+/** URL the renderer can load for a local file (images, PDFs, video). Windows paths become fbfile:///C:/… */
+export const fileUrl = (path: string) => {
+  const p = path.replace(/\\/g, '/')
+  return `fbfile://${encodeURI(p.startsWith('/') ? p : `/${p}`).replace(/#/g, '%23').replace(/\?/g, '%3F')}`
+}

@@ -2,8 +2,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
-import { dirs } from './paths'
+import { dirs, renameRetrying } from './paths'
 import type { WriteResult } from '@shared/types'
+import { toRendererPath } from './platform'
 
 export interface TreeEntry {
   name: string
@@ -46,7 +47,7 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
         const entries = lists[j].filter((e) => !IGNORE.has(e.name)).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
         left -= entries.length
         for (const e of entries) {
-          const full = path.join(p.dir, e.name)
+          const full = toRendererPath(path.join(p.dir, e.name))
           if (e.isDirectory()) {
             const node: TreeEntry = { name: e.name, path: full, dir: true }
             if (p.depth > 0) {
@@ -104,7 +105,7 @@ export function writeText(file: string, content: string, base?: string): WriteRe
   const tmp = path.join(path.dirname(target), `.${path.basename(target)}.fleetboard-${process.pid}-${Date.now()}.tmp`)
   try {
     fs.writeFileSync(tmp, content, mode !== undefined ? { mode: mode & 0o7777 } : undefined)
-    fs.renameSync(tmp, target)
+    renameRetrying(tmp, target)
   } catch (e) {
     fs.rmSync(tmp, { force: true })
     throw e
@@ -116,15 +117,15 @@ export function register(ctx: MainContext) {
   const { ipc } = ctx
   ipc.handle('dialog:openFolder', async () => {
     const r = await dialog.showOpenDialog(ctx.win()!, { properties: ['openDirectory', 'createDirectory'] })
-    return r.canceled ? null : r.filePaths[0]
+    return r.canceled ? null : toRendererPath(r.filePaths[0])
   })
   ipc.handle('dialog:openFile', async (_e, filters?: Electron.FileFilter[]) => {
     const r = await dialog.showOpenDialog(ctx.win()!, { properties: ['openFile'], filters })
-    return r.canceled ? null : r.filePaths[0]
+    return r.canceled ? null : toRendererPath(r.filePaths[0])
   })
   ipc.handle('dialog:saveFile', async (_e, defaultPath: string, filters?: Electron.FileFilter[]) => {
     const r = await dialog.showSaveDialog(ctx.win()!, { defaultPath, filters })
-    return r.canceled ? null : r.filePath
+    return r.canceled ? null : toRendererPath(r.filePath)
   })
   ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) => tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined))
   ipc.handle('fs:list', (_e, dir: string) => tree(dir, 0))
@@ -157,7 +158,7 @@ export function register(ctx: MainContext) {
  * Files the desktop would run rather than show (scripts, binaries, launchers): a link in a README
  * must not start a program. Those are revealed in the file manager instead.
  */
-const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|ps1|vbs|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|x86_64)$/i
+const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|ps1|vbs|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|x86_64|hta|scr|cpl|wsf|wsh|msc|reg|psm1|appx|msix)$/i
 export function opensSafely(p: string): boolean {
   try {
     const st = fs.statSync(p)

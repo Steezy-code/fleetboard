@@ -1,8 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import fs from 'node:fs'
 import os from 'node:os'
-import path from 'node:path'
+import { IS_WIN, defaultShell, findExecutable, normalizePathKey } from './platform'
 
 const run = promisify(execFile)
 
@@ -11,12 +10,13 @@ let cached: Record<string, string> | null = null
 /**
  * The environment of the user's login shell. A desktop launcher often starts the app without the PATH
  * that mise / nvm / ~/.local/bin add, so agents would not be found. We read it once from `$SHELL -lic`.
+ * (Windows has no login shell: apps get the user's full environment already.)
  */
 export async function loginEnv(): Promise<Record<string, string>> {
   if (cached) return cached
   const shell = process.env.SHELL || '/bin/bash'
-  const base = { ...process.env } as Record<string, string>
-  try {
+  const base = normalizePathKey({ ...process.env } as Record<string, string>)
+  if (!IS_WIN) try {
     const { stdout } = await run(shell, ['-lic', 'env -0'], { timeout: 6000, maxBuffer: 4 * 1024 * 1024 })
     for (const entry of stdout.split('\0')) {
       const i = entry.indexOf('=')
@@ -39,27 +39,12 @@ export async function loginEnv(): Promise<Record<string, string>> {
   return base
 }
 
-export const shellPath = () => process.env.SHELL || '/bin/bash'
+export const shellPath = () => defaultShell(cached ?? process.env)
 export const home = () => os.homedir()
 
 /** `which` against the login PATH. */
 /** Where an executable is, searched on the login PATH like a shell does (no `which` program needed). */
 export async function which(bin: string): Promise<string | null> {
   if (bin === '$SHELL') return shellPath()
-  const runnable = (p: string) => {
-    try {
-      fs.accessSync(p, fs.constants.X_OK)
-      return fs.statSync(p).isFile()
-    } catch {
-      return false
-    }
-  }
-  if (bin.includes('/')) return runnable(bin) ? path.resolve(bin) : null
-  const env = await loginEnv()
-  for (const dir of (env.PATH ?? '').split(path.delimiter)) {
-    if (!dir) continue
-    const p = path.join(dir, bin)
-    if (runnable(p)) return p
-  }
-  return null
+  return findExecutable(bin, await loginEnv())
 }

@@ -34,7 +34,7 @@ let briefCache: { at: number; text: string } | null = null
 const STALE_MS = 3 * 60_000
 const FAILING = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
 
-const tilde = (p: string) => (homeDir && (p === homeDir || p.startsWith(homeDir + '/')) ? '~' + p.slice(homeDir.length) : p.replace(/^\/home\/[^/]+/, '~'))
+const tilde = (p: string) => (homeDir && (p === homeDir || p.startsWith(homeDir + '/')) ? '~' + p.slice(homeDir.length) : p.replace(/^\/home\/[^/]+|^\/Users\/[^/]+|^[A-Za-z]:\/Users\/[^/]+/i, '~'))
 const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?([AP]M)$/i, (_m, x: string) => x.toLowerCase())
 const agoText = (t: number) => {
   const s = Math.max(0, (Date.now() - t) / 1000)

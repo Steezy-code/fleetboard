@@ -5,6 +5,7 @@ import type { MainContext } from './context'
 import { loginEnv, which } from './env'
 import { profileEnv } from './profiles'
 import { stripAnsi } from './pty'
+import { IS_WIN, killTree, launch, launchOptions } from './platform'
 
 // Headless one-shot runs of the user's own CLIs. Powers the planner, studios, memory scans,
 // handoff summaries and loop goal checks, on the subscription the CLI is already logged into.
@@ -45,7 +46,8 @@ export function register(ctx: MainContext) {
     return new Promise<{ code: number; text: string }>((resolve) => {
       let child: ChildProcess
       try {
-        child = spawn(bin, args, { cwd: req.cwd, env, stdio: [isClaude ? 'pipe' : 'ignore', 'pipe', 'pipe'] })
+        const l = launch(bin, args, env)
+        child = spawn(l.file, l.args, { cwd: req.cwd, env, stdio: [isClaude ? 'pipe' : 'ignore', 'pipe', 'pipe'], ...launchOptions(l) })
       } catch (e) {
         ctx.emit('cli:done', req.runId, 1)
         return resolve({ code: 1, text: String(e) })
@@ -106,7 +108,10 @@ export function register(ctx: MainContext) {
   })
 
   ctx.ipc.handle('cli:cancel', (_e, runId: string) => {
-    runs.get(runId)?.kill('SIGTERM')
+    const child = runs.get(runId)
+    // Windows: the CLI may run under node or cmd.exe; end the whole tree
+    if (IS_WIN) killTree(child?.pid)
+    else child?.kill('SIGTERM')
     runs.delete(runId)
   })
 }

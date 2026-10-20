@@ -5,7 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Copy, Pause, Play, RotateCcw } from 'lucide-react'
 import type { BoardNode, ConsoleData } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { invoke } from '../lib/api'
+import { CAN_PAUSE, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
@@ -242,7 +242,7 @@ export function ConsoleActions({ node }: NodeProps<ConsoleData>) {
   const live = useApp((s) => !!s.live[node.id])
   return (
     <>
-      {live && (
+      {live && CAN_PAUSE && (
         <button
           className="icon-btn sm"
           title={status === 'paused' ? 'Resume' : 'Pause'}

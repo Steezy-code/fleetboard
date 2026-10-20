@@ -1169,3 +1169,9 @@
   background: none;
   color: var(--danger);
 }
+
+/* Windows: room for the system's title-bar buttons (titleBarOverlay, ~138px) */
+.win-overlay-space {
+  width: 140px;
+  flex: none;
+}

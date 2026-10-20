@@ -11,6 +11,7 @@ import { TermScreen, type ScreenView } from './screen'
 import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
 import { RunRecord } from './orphans'
+import { CAN_PAUSE, IS_WIN, killTree, killTreeSync, launch, shellArgs, shellCommandArgs } from './platform'
 
 /** Pause between keystrokes of an answer: TUIs read one key per input event. */
 const KEY_GAP_MS = 70
@@ -44,13 +45,8 @@ interface Session {
 
 export { stripAnsi } from '@shared/ansi'
 
-const killGroup = (pid: number) => {
-  try {
-    process.kill(-pid, 'SIGKILL')
-  } catch {
-    /* the group is gone */
-  }
-}
+/** Everything the console started: its process group (POSIX), its process tree (Windows). */
+const killGroup = (pid: number) => killTree(pid, 'SIGKILL')
 
 type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void
 type SpawnListener = (req: PtySpawnRequest) => void
@@ -97,10 +93,10 @@ export class PtyManager {
     if (req.command) {
       // a console started for one command (dev server, watcher); drop into a shell when it ends
       file = shellPath()
-      args = ['-lc', `${req.command}; exec ${shellPath()} -l`]
+      args = shellCommandArgs(file, req.command)
     } else if (!agent || agent.id === 'shell') {
       file = shellPath()
-      args = ['-l']
+      args = shellArgs(file)
     } else {
       const found = await which(agent.bin)
       // say what is wrong and how to fix it, rather than "execvp(3) failed: No such file or directory"
@@ -139,7 +135,9 @@ export class PtyManager {
       if (req.extraArgs?.length) args.push(...req.extraArgs)
     }
 
-    const proc = pty.spawn(file, args, {
+    // Windows: an npm wrapper (claude.cmd) runs its script with node instead
+    const start = launch(file, args, env)
+    const proc = pty.spawn(start.file, start.args, {
       name: 'xterm-256color',
       cols: Math.max(20, req.cols | 0),
       rows: Math.max(5, req.rows | 0),
@@ -254,6 +252,11 @@ export class PtyManager {
     const s = this.sessions.get(id)
     if (!s) return
     if (s.tracker.paused) this.signal(s, 'SIGCONT')
+    if (IS_WIN) {
+      // no hangup to send: end the console's process tree
+      killGroup(s.proc.pid)
+      return
+    }
     // like closing a terminal: the whole group hangs up
     this.signal(s, 'SIGHUP')
     // then whatever ignored that: an agent CLI's group whether or not the CLI has ended (Gemini CLI; a
@@ -264,6 +267,7 @@ export class PtyManager {
   }
 
   private signal(s: Session, sig: NodeJS.Signals) {
+    if (IS_WIN) return // no signals; kill() ends the tree instead
     try {
       process.kill(-s.proc.pid, sig) // whole process group: the CLI and its children
     } catch {
@@ -277,7 +281,7 @@ export class PtyManager {
 
   pause(id: string) {
     const s = this.sessions.get(id)
-    if (!s || s.tracker.paused) return
+    if (!s || s.tracker.paused || !CAN_PAUSE) return
     this.signal(s, 'SIGSTOP')
     s.tracker.paused = true
     this.evaluate(s)
@@ -494,6 +498,11 @@ export class PtyManager {
     this.disposing = true
     clearInterval(this.tick)
     const live = [...this.sessions.values()]
+    if (IS_WIN) {
+      // the window is going: end every console's tree before it does
+      for (const s of live) killTreeSync(s.proc.pid)
+      return
+    }
     for (const s of live) {
       if (s.tracker.paused) this.signal(s, 'SIGCONT')
       this.signal(s, 'SIGHUP')

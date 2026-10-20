@@ -10,10 +10,12 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "postinstall": "electron-rebuild -f -w node-pty",
+    "postinstall": "node scripts/postinstall.mjs",
     "app": "bin/fleetboard --rebuild",
-    "test": "node --enable-source-maps --import ./test/support/register.mjs --test 'test/unit/**/*.test.ts'",
-    "test:e2e": "electron-vite build && xvfb-run -a -s '-screen 0 1600x1000x24' node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1 'test/e2e/**/*.test.ts'"
+    "test": "node scripts/test-unit.mjs",
+    "test:e2e": "electron-vite build && xvfb-run -a -s '-screen 0 1600x1000x24' node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1 'test/e2e/**/*.test.ts'",
+    "dist:win": "electron-vite build && electron-builder --win --x64 --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux AppImage --publish never"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",
@@ -22,6 +24,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^6.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -44,5 +47,9 @@
     "nanoid": "^6.0.2",
     "node-pty": "^1.1.0",
     "zustand": "^5.0.15"
-  }
+  },
+  "author": {
+    "name": "Steezy-code"
+  },
+  "homepage": "https://github.com/Steezy-code/fleetboard"
 }

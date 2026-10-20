@@ -1,5 +1,6 @@
 import { Lightbulb, Map as MapIcon, Minus, Plus, Scan } from 'lucide-react'
 import { useHelm } from '../voice/helm/helm'
+import { CAN_PAUSE } from '../lib/api'
 import { zoomToSelection } from '../board/Board'
 import { useApp, activeWs } from '../state/store'
 import { consoleNodes, pauseAll, resumeAll, spawnConsoles } from '../engine/consoles'
@@ -65,12 +66,16 @@ export function BottomBar() {
         <button className="chip" onClick={() => app.openPanel('presets')}>
           Presets
         </button>
-        <button className="chip" onClick={() => pauseAll()} disabled={!consoleNodes().length}>
-          Pause all
-        </button>
-        <button className="chip" onClick={() => resumeAll()}>
-          Resume all
-        </button>
+        {CAN_PAUSE && (
+          <>
+            <button className="chip" onClick={() => pauseAll()} disabled={!consoleNodes().length}>
+              Pause all
+            </button>
+            <button className="chip" onClick={() => resumeAll()}>
+              Resume all
+            </button>
+          </>
+        )}
         <button className="chip" onClick={() => app.openPanel('memory')}>
           Memory
         </button>

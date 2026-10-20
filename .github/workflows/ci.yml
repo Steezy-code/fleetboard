@@ -51,3 +51,49 @@ jobs:
           name: e2e-screenshots
           path: ${{ runner.temp }}/e2e-shots
           if-no-files-found: ignore
+
+  windows:
+    # the platform layer for real: PowerShell consoles, .cmd agents, process trees, the installer
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (node-pty uses its prebuilt Windows binary)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npx electron-vite build
+
+      - name: Windows end-to-end
+        run: node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1 test/e2e/windows.test.ts test/e2e/smoke.test.ts
+        env:
+          E2E_SHOTS: ${{ runner.temp }}/e2e-shots
+
+      - name: Screenshots of the end-to-end runs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots-windows
+          path: ${{ runner.temp }}/e2e-shots
+          if-no-files-found: ignore
+
+      - name: Installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleetboard-windows-installer
+          path: release/*.exe
+          if-no-files-found: error

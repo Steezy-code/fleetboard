@@ -11,6 +11,9 @@ src/shared/agents.ts     AGENTS catalog (bin, resumeArgs, yoloArgs, configEnv, h
 src/main/                Electron main process
   index.ts               window, core IPC (pty:*, pdf:fromHtml, png:capture, win:*), registers modules
   context.ts             MainContext passed to each module's register(ctx)
+  platform.ts            Linux/Windows differences in one place: console shell (PowerShell on Windows),
+                         PATHEXT lookup, npm .cmd wrappers run as node <script>, kill a process tree,
+                         junctions instead of symlinks, forward-slash paths for the renderer.
   pty.ts                 PtyManager: real PTYs (node-pty), raw buffer, answer(), onSpawn/onExit listeners;
                          closing a console ends an agent CLI's whole process group (a shell's like a terminal)
   orphans.ts             the consoles running, on disk: the next launch ends what a run that died left running

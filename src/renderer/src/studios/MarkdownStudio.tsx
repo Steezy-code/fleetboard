@@ -7,7 +7,7 @@ import { FileTree, ancestors, graft, flattenFiles, type Creating, type TreeEntry
 import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
 import { extractLinks, firstHeading, handleMdClick, isMarkdownPath, renderMarkdown } from '../workbench/markdown'
 import { exportMarkdownPdf } from '../workbench/pdf'
-import { baseName, dirname, joinPath, relativeTo, stripExt } from '../workbench/paths'
+import { baseName, dirname, joinPath, relativeTo, stripExt, isInside } from '../workbench/paths'
 import type { FileStat } from '../workbench/useFileText'
 import type { WriteResult } from '@shared/types'
 
@@ -253,7 +253,7 @@ export default function MarkdownStudio(props: { path?: string }) {
     if (!clean) return
     const file = /\.(md|mdx)$/i.test(clean) ? clean : clean + '.md'
     const path = joinPath(target, file)
-    if (!path.startsWith(root + '/')) return toast('Stay inside the project folder', 'warn')
+    if (!isInside(root, path) || !relativeTo(root, path)) return toast('Stay inside the project folder', 'warn')
     if (await invoke<boolean>('fs:exists', path)) return open(path)
     try {
       await invoke('fs:write', path, `# ${stripExt(baseName(file))}\n\n`)

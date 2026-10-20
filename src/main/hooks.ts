@@ -1,8 +1,10 @@
 import crypto from 'node:crypto'
 import http from 'node:http'
+import fs from 'node:fs'
 import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
 import { newSecret, refuse, sameSecret } from './localserver'
+import { IS_WIN, findExecutable } from './platform'
 
 // Claude Code reports its own lifecycle through hooks. Each console's CLI gets a settings file
 // (passed with --settings) whose hooks POST to this local server, so the board shows the CLI's
@@ -65,11 +67,57 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
 
 const settingsFile = () => path.join(dirs.hooks, 'claude-hooks.json')
 
-function writeSettingsFile() {
-  const cmd = (event: string) => ({
-    type: 'command',
-    command: `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_HOOK_TOKEN}/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
+/** Windows: the hook as a tiny node script (or PowerShell without node). Reads the console's FB_* env itself. */
+export const NODE_HOOK = `// Fleetboard: forwards a Claude Code hook event (stdin) to the board. Always exits 0.
+const http = require('http')
+const event = process.argv[2]
+const { FB_HOOK_PORT: port, FB_HOOK_TOKEN: token, FB_CONSOLE_ID: id } = process.env
+if (!port || !token || !id || !/^[A-Za-z]+$/.test(event || '')) process.exit(0)
+let body = ''
+let sent = false
+const send = () => {
+  if (sent) return
+  sent = true
+  const req = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook/' + token + '/' + encodeURIComponent(id) + '/' + event, timeout: 2000 }, (res) => {
+    res.resume()
+    res.on('end', () => process.exit(0))
   })
+  req.on('error', () => process.exit(0))
+  req.on('timeout', () => (req.destroy(), process.exit(0)))
+  req.end(body)
+}
+process.stdin.on('data', (d) => (body += d))
+process.stdin.on('end', send)
+setTimeout(send, 1500)
+setTimeout(() => process.exit(0), 3000)
+`
+const PS_HOOK = `param([string]$e)
+$p = $env:FB_HOOK_PORT; $t = $env:FB_HOOK_TOKEN; $id = $env:FB_CONSOLE_ID
+if (-not $p -or -not $t -or -not $id -or $e -notmatch '^[A-Za-z]+$') { exit 0 }
+$body = [Console]::In.ReadToEnd()
+try { Invoke-WebRequest -UseBasicParsing -Method Post -Uri "http://127.0.0.1:$p/hook/$t/$([uri]::EscapeDataString($id))/$e" -Body $body -TimeoutSec 2 | Out-Null } catch {}
+exit 0
+`
+
+/**
+ * The hook command line. POSIX: curl. Windows: a script, written so the line works whether Claude Code
+ * runs hooks through Git Bash or cmd.exe (forward slashes, no variables on the line).
+ */
+function hookCommand(event: string): string {
+  if (!IS_WIN) return `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_HOOK_TOKEN}/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
+  const slash = (p: string) => p.replace(/\\/g, '/')
+  const node = findExecutable('node', process.env)
+  if (node) return `"${slash(node)}" "${slash(path.join(dirs.hooks, 'fb-hook.cjs'))}" ${event}`
+  return `powershell -NoProfile -ExecutionPolicy Bypass -File "${slash(path.join(dirs.hooks, 'fb-hook.ps1'))}" ${event}`
+}
+
+function writeSettingsFile() {
+  if (IS_WIN) {
+    fs.mkdirSync(dirs.hooks, { recursive: true })
+    fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.cjs'), NODE_HOOK)
+    fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.ps1'), PS_HOOK)
+  }
+  const cmd = (event: string) => ({ type: 'command', command: hookCommand(event) })
   const hooks: Record<string, unknown[]> = {}
   for (const event of HOOK_EVENTS) {
     hooks[event] = [{ ...(event.endsWith('ToolUse') || event === 'PermissionRequest' ? { matcher: '*' } : {}), hooks: [cmd(event)] }]

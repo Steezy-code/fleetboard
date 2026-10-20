@@ -3,13 +3,15 @@ import type { AgentAvailability } from '@shared/types'
 import { AGENTS } from '@shared/agents'
 import type { MainContext } from './context'
 import { loginEnv, which } from './env'
+import { launch, launchOptions } from './platform'
 
 let cache: AgentAvailability[] | null = null
 
 async function version(bin: string): Promise<string | undefined> {
   const env = await loginEnv()
   return new Promise((resolve) => {
-    execFile(bin, ['--version'], { env, timeout: 4000 }, (err, out) => {
+    const l = launch(bin, ['--version'], env)
+    execFile(l.file, l.args, { env, timeout: 4000, ...launchOptions(l) }, (err, out) => {
       if (err) return resolve(undefined)
       resolve(String(out).trim().split('\n')[0].slice(0, 60))
     })

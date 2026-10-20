@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { loginEnv, which } from './env'
+import { toRendererPath } from './platform'
 import { dirs, readJson } from './paths'
 
 // Morning sweep: a fast, read-only health report across all of the user's repos.
@@ -142,7 +143,7 @@ const firstLine = (s: string) =>
     .replace(/^(fatal|error): /i, '')
     .slice(0, 240)
 
-const expandHome = (p: string) => (p === '~' ? os.homedir() : p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p)
+const expandHome = (p: string) => (p === '~' ? os.homedir() : /^~[\\/]/.test(p) ? path.join(os.homedir(), p.slice(2)) : p)
 
 // ---------- candidates ----------
 
@@ -410,7 +411,7 @@ async function inspect(c: SweepCandidate, opts: { fetch: boolean; gh: string | n
   const g = (args: string[], timeout?: number) => exec('git', args, cwd, genv, timeout)
   const r: SweepRepo = {
     name: c.name,
-    path: c.path,
+    path: toRendererPath(c.path),
     known: c.known,
     branch: '',
     detached: false,

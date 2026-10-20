@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import type { MainContext } from './context'
-import { loginEnv, shellPath } from './env'
+import { loginEnv } from './env'
+import { IS_WIN, killTree, launchOptions, oneShot } from './platform'
 import { stripAnsi } from '@shared/ansi'
 
 // A loop's "stop when this command passes" check: run the command the user wrote in the project, in
@@ -28,16 +29,13 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
       const keep = (d: Buffer) => {
         out = (out + d.toString()).slice(-TAIL * 4)
       }
-      // its own process group, so a timeout ends whatever it started too
-      const child = spawn(shellPath(), ['-lc', command], { cwd, env: { ...env, CI: '1' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      // its own process group (POSIX), so a timeout ends whatever it started too; Windows ends the tree
+      const l = oneShot(command, env)
+      const child = spawn(l.file, l.args, { cwd, env: { ...env, CI: '1' }, detached: !IS_WIN, stdio: ['ignore', 'pipe', 'pipe'], ...launchOptions(l) })
       let timedOut = false
       const timer = setTimeout(() => {
         timedOut = true
-        try {
-          process.kill(-child.pid!, 'SIGKILL')
-        } catch {
-          /* gone */
-        }
+        killTree(child.pid)
       }, timeoutMs)
       child.stdout.on('data', keep)
       child.stderr.on('data', keep)

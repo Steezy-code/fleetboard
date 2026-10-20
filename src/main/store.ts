@@ -115,7 +115,11 @@ function saveApp() {
 }
 
 export const getSettings = () => app.settings
-export const projectIdFor = (p: string) => crypto.createHash('sha1').update(path.resolve(p)).digest('hex').slice(0, 12)
+/** Same folder, same id: on Windows C:\\Repo, c:/repo and C:/Repo are one folder. */
+export const projectIdFor = (p: string) => {
+  const abs = path.resolve(p)
+  return crypto.createHash('sha1').update(process.platform === 'win32' ? abs.toLowerCase() : abs).digest('hex').slice(0, 12)
+}
 const projectFile = (id: string) => path.join(dirs.projects, `${id}.json`)
 
 export function loadProject(id: string): Project | null {

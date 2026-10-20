@@ -2,12 +2,12 @@
 
 A visual board of real terminals for your AI coding agents. Put Claude Code, Codex, Gemini and 30 other agent CLIs on one board, then pan, zoom, group, loop and talk to them. Everything runs on your machine with the subscriptions you already have.
 
-This is a personal rebuild of [Symvibe](https://www.symvibe.com/)'s feature set for Linux. See [docs/RESEARCH.md](docs/RESEARCH.md) for the teardown and the feature ledger, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organized.
+This is a personal rebuild of [Symvibe](https://www.symvibe.com/)'s feature set for Linux and Windows. See [docs/RESEARCH.md](docs/RESEARCH.md) for the teardown and the feature ledger, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organized.
 
 ## Run it
 
 ```bash
-npm install --ignore-scripts && npx electron-rebuild -f -w node-pty
+npm install        # builds node-pty for Electron (Windows uses node-pty's prebuilt binary)
 ```
 
 ```bash
@@ -30,6 +30,21 @@ npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted
 #   FLEETBOARD_REAL_CODEX=$(which codex)      test/e2e/real/codex-*.test.ts   (local mock model, no account)
 #   FLEETBOARD_REAL_GEMINI=$(which gemini)    test/e2e/real/gemini-sessions.test.ts
 ```
+
+## Windows
+
+Grab **Fleetboard-Setup-<version>.exe** from the [Releases](https://github.com/Steezy-code/fleetboard/releases) page (you need to be signed in to GitHub: the repo is private) and run it. It installs for your user only, with Start-menu and desktop shortcuts. The installer isn't code-signed, so SmartScreen may warn: **More info → Run anyway**.
+
+Then install your agent CLIs in Windows as usual (Claude Code, Codex, Gemini…) and sign in to each once in a terminal. Fleetboard finds them on your PATH, including ones npm installed as `.cmd` wrappers. Git for Windows and the GitHub CLI (`gh`) are needed for teams, the git card and the CI watcher.
+
+What's different on Windows:
+- Shell consoles are PowerShell (PowerShell 7 when installed, else Windows PowerShell).
+- **Pause** isn't available: Windows can't freeze a process the way Linux does. Closing a console ends everything it started.
+- The window uses the system's own minimize / maximize / close buttons, with Snap Layouts.
+- Claude Code's status hooks run through a small script (with Node when it's installed, else PowerShell).
+- Teams link dependencies into their worktrees with junctions, which need no admin rights.
+
+Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1` for a pre-release) and `.github/workflows/release.yml` builds the installer and attaches it to a GitHub Release. `npm run dist:win` builds one on a Windows machine.
 
 ## What's on the board
 
