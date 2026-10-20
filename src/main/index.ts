@@ -59,6 +59,13 @@ app.on('web-contents-created', (_e, contents) => {
   })
 })
 let quitConfirmed = false
+/**
+ * Cleared by app:quitAck. A page that answers the save-and-quit request gets as long as it needs
+ * (the save, and the dialog if the save failed); one that cannot answer at all must not leave the
+ * window unclosable.
+ */
+let quitWatchdog: ReturnType<typeof setTimeout> | undefined
+const QUIT_ACK_MS = 2000
 /** the window was reloaded after its page crashed; the new page says so once */
 let crashRecovered = false
 
@@ -149,9 +156,20 @@ function createWindow() {
     win = null
   })
   win.on('close', (e) => {
-    if (quitConfirmed || ptys.size === 0) return
+    if (quitConfirmed) return
     e.preventDefault()
-    ctx.emit('app:confirmQuit', ptys.size)
+    if (ptys.size) return ctx.emit('app:confirmQuit', ptys.size)
+    // No console to stop, so nothing to confirm — but the board's save is debounced (350 ms, pushed
+    // back by every keystroke), and this was the only path that did not flush it: closing the window
+    // after typing into a note threw away everything since the last pause, and note, text, checklist
+    // and kanban content lives nowhere but the board file. The page saves, then quits.
+    ctx.emit('app:saveAndQuit')
+    clearTimeout(quitWatchdog)
+    quitWatchdog = setTimeout(() => {
+      logError('quit', new Error('the window did not answer the save-and-quit request; closing it anyway'))
+      quitConfirmed = true
+      win?.close()
+    }, QUIT_ACK_MS)
   })
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(path.join(__dirname, '../renderer/index.html'))
@@ -193,6 +211,9 @@ function registerCore() {
     win = null
     setTimeout(() => app.exit(0), 300)
   })
+  // "I got the save-and-quit request and I am working on it": stops the watchdog above from
+  // closing the window while the save, or the dialog a failed save opens, is still going.
+  ipcMain.on('app:quitAck', () => clearTimeout(quitWatchdog))
   // the renderer's own stray errors, into the same log as the main process's
   ipcMain.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
 
