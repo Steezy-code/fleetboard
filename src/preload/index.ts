@@ -12,7 +12,15 @@ const api = {
     }
   },
   pathForFile: (file: File) => webUtils.getPathForFile(file),
-  platform: process.platform
+  platform: process.platform,
+  /**
+   * Whether this run may expose window.__fleetboard (see renderer/src/debug.ts).
+   *
+   * ELECTRON_RENDERER_URL is set only by `electron-vite dev`, and is what index.ts already uses to
+   * tell dev from packaged. The end-to-end tests drive the *built* app through those handles, so
+   * they set FLEETBOARD_DEVTOOLS; a packaged app has neither.
+   */
+  devtools: !!process.env.ELECTRON_RENDERER_URL || process.env.FLEETBOARD_DEVTOOLS === '1'
 }
 
 contextBridge.exposeInMainWorld('fb', api)
