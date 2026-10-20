@@ -4,6 +4,7 @@ import crypto from 'node:crypto'
 import type { Project, ProjectMeta, Recovery, Settings, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
 import type { MainContext } from './context'
+import { declareProject, mainOwnedGlobal } from './roots'
 import { dirs, writeJsonAtomic } from './paths'
 
 // State lives on disk as versioned JSON: ~/.fleetboard/app.json (settings, project index, global
@@ -142,6 +143,11 @@ function schemaOf(file: string): number | null {
 /** Written by a Fleetboard newer than this one, so this build must not touch it. */
 export const tooNew = (schema: number | null): schema is number => schema !== null && schema > SCHEMA_VERSION
 
+let current: Project | null = null
+/** The board open in the window, for features outside it: the phone Inbox, and the roots the
+ *  filesystem handlers allow (roots.ts). Set when a board is opened and on every save. */
+export const currentProject = () => current
+
 export function loadProject(id: string): Project | null {
   if (!/^[\w-]+$/.test(id)) return null
   const onDisk = schemaOf(projectFile(id))
@@ -167,12 +173,21 @@ export function loadProject(id: string): Project | null {
   }
   if (!p.workspaces.some((w) => w.id === p.activeWorkspaceId)) p.activeWorkspaceId = p.workspaces[0].id
   p.extras = isObj(p.extras) ? p.extras : {}
+  // the board being opened is the current one from now on, not only once it is first saved: the
+  // filesystem handlers take their project root from here (roots.ts), and the file tree reads before
+  // anything has been saved
+  current = p
   return p
 }
 
-let current: Project | null = null
-/** The board open in the window (the last one saved), for features outside it such as the phone Inbox. */
-export const currentProject = () => current
+/** A global (cross-project) value. The renderer uses store:getGlobal; this is for main's own modules. */
+export const getGlobal = <T,>(key: string): T | undefined => app.global[key] as T | undefined
+
+/** Store a global value and persist it. */
+export function setGlobal(key: string, value: unknown) {
+  app.global[key] = value
+  saveApp()
+}
 
 export function saveProject(p: Project) {
   // never let a broken renderer state replace a good board on disk
@@ -208,16 +223,22 @@ export function register(ctx: MainContext) {
   ipc.handle('store:projects', () =>
     app.projects.filter((m) => fs.existsSync(m.path)).sort((a, b) => b.lastOpened - a.lastOpened)
   )
-  ipc.handle('store:projectId', (_e, p: string) => projectIdFor(p))
+  ipc.handle('store:projectId', (_e, p: string) => {
+    // the first thing openProject does, and the only point before any read where the folder being
+    // opened is named — a brand-new folder has no saved board to take it from (see roots.ts)
+    declareProject(p)
+    return projectIdFor(p)
+  })
   ipc.handle('store:loadProject', (_e, id: string) => loadProject(id))
   ipc.handle('store:saveProject', (_e, p: Project) => saveProject(p))
   ipc.handle('store:forgetProject', (_e, id: string) => {
     app.projects = app.projects.filter((m) => m.id !== id)
     saveApp()
   })
-  ipc.handle('store:getGlobal', (_e, key: string) => app.global[key])
+  ipc.handle('store:getGlobal', (_e, key: string) => getGlobal(key))
   ipc.handle('store:setGlobal', (_e, key: string, value: unknown) => {
-    app.global[key] = value
-    saveApp()
+    // a few globals are main's own (roots.ts); everything else here is the renderer's to keep
+    if (mainOwnedGlobal(key)) return
+    setGlobal(key, value)
   })
 }
