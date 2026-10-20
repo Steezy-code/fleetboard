@@ -122,8 +122,34 @@ export const projectIdFor = (p: string) => {
 }
 const projectFile = (id: string) => path.join(dirs.projects, `${id}.json`)
 
+/**
+ * The schema number a file on disk carries, or null when it has none or cannot be read.
+ *
+ * Nothing read it before: a board written by a newer Fleetboard loaded as though it were this
+ * version's, every field that version had added was dropped by the fill-in pass below, and the next
+ * save stamped `schema` back to SCHEMA_VERSION — a silent one-way downgrade of the user's board, in
+ * the one file the app has no other copy of.
+ */
+function schemaOf(file: string): number | null {
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'))
+    return isObj(v) && Number.isFinite(v.schema) ? Number(v.schema) : null
+  } catch {
+    return null
+  }
+}
+
+/** Written by a Fleetboard newer than this one, so this build must not touch it. */
+export const tooNew = (schema: number | null): schema is number => schema !== null && schema > SCHEMA_VERSION
+
 export function loadProject(id: string): Project | null {
   if (!/^[\w-]+$/.test(id)) return null
+  const onDisk = schemaOf(projectFile(id))
+  if (tooNew(onDisk)) {
+    // left alone, not set aside: the file is not damaged, this build is simply too old to read it
+    recovered({ what: id, corruptCopy: '', tooNew: onDisk })
+    return null
+  }
   const p = load(projectFile(id), id, id, validProject)
   if (!p) return null
   // an older or hand-edited file can lack parts the board expects: fill them in rather than crash
@@ -151,6 +177,9 @@ export const currentProject = () => current
 export function saveProject(p: Project) {
   // never let a broken renderer state replace a good board on disk
   if (!validProject(p) || !/^[\w-]+$/.test(p.id)) throw new Error('refusing to save an invalid project')
+  // and never write an older shape over a board a newer Fleetboard saved
+  const onDisk = schemaOf(projectFile(p.id))
+  if (tooNew(onDisk)) throw new Error(`This board was saved by a newer version of Fleetboard (board format ${onDisk}, this one writes ${SCHEMA_VERSION}). Update Fleetboard to open it.`)
   current = p
   p.schema = SCHEMA_VERSION
   writeJsonAtomic(projectFile(p.id), p)

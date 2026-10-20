@@ -297,6 +297,12 @@ export interface Recovery {
   corruptCopy: string
   /** the history/ snapshot used instead, if there was one */
   snapshot?: string
+  /**
+   * The file was written by a newer Fleetboard (this is its schema number), so it was left exactly
+   * as it was rather than opened and re-saved in an older shape. corruptCopy is empty here: nothing
+   * was moved and nothing was damaged.
+   */
+  tooNew?: number
 }
 
 /** fs:write with a base: refused when the file no longer holds it (current: what it holds now, null if gone) */

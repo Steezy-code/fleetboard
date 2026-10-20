@@ -1,0 +1,35 @@
+# Dependency updates, raised as PRs so the app's own checks decide whether they are safe.
+# Grouped so one PR carries a whole upgrade rather than ten that each need CI.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Electron and the build chain move together: a split upgrade usually fails to build
+      electron-toolchain:
+        patterns: ['electron', 'electron-vite', 'electron-builder', '@electron/*', 'vite', '@vitejs/*', 'typescript']
+      # the on-device speech and voice models and their runtime
+      ml-runtime:
+        patterns: ['@huggingface/transformers', 'kokoro-js', 'onnxruntime-node']
+      types:
+        patterns: ['@types/*']
+    # these need a human: the terminal and the renderer are where a bad bump breaks everything
+    ignore:
+      - dependency-name: node-pty
+        update-types: ['version-update:semver-major']
+      - dependency-name: react
+        update-types: ['version-update:semver-major']
+      - dependency-name: react-dom
+        update-types: ['version-update:semver-major']
+
+  # keeps the pinned action SHAs below current, which is what makes pinning maintainable
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3

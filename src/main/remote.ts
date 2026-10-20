@@ -51,8 +51,21 @@ type Ifaces = NodeJS.Dict<os.NetworkInterfaceInfo[]>
 const v4 = (ifaces: Ifaces) =>
   Object.entries(ifaces).flatMap(([name, list]) => (list ?? []).filter((i) => i.family === 'IPv4' && !i.internal).map((i) => ({ name, address: i.address })))
 
-/** Tailscale hands out 100.64.0.0/10 (CGNAT) addresses. */
-const isTailscale = (a: string) => {
+/**
+ * A Tailscale address, by interface name as well as range.
+ *
+ * 100.64.0.0/10 is shared address space, not Tailscale's: a CGNAT ISP, a mobile hotspot and some
+ * corporate and VM networks hand out addresses in it on a real interface. On the range alone, the
+ * Inbox bound plain HTTP to a carrier-reachable address while Settings called it
+ * "Tailscale: encrypted, reachable from your devices anywhere" and skipped the warning the Wi-Fi
+ * option shows. The interface is called tailscale0 on Linux and Tailscale on Windows.
+ *
+ * Getting this wrong the other way is safe: the Tailscale option simply reads as unavailable, and
+ * Wi-Fi still works, with the plaintext warning it has always shown.
+ */
+const TAILSCALE_IFACE = /^tailscale\d*$/i
+const isTailscale = (name: string, a: string) => {
+  if (!TAILSCALE_IFACE.test(name)) return false
   const [x, y] = a.split('.').map(Number)
   return x === 100 && y >= 64 && y <= 127
 }
@@ -66,7 +79,7 @@ const VIRTUAL = /^(docker|br-|veth|virbr|vmnet|vboxnet|lxc|lxd|podman|cni|flanne
 /** The addresses the phone Inbox could listen on. */
 export function findAddresses(ifaces: Ifaces = os.networkInterfaces()): { tailscale?: string; lan?: string } {
   const all = v4(ifaces)
-  const tailscale = all.find((i) => isTailscale(i.address))?.address
+  const tailscale = all.find((i) => isTailscale(i.name, i.address))?.address
   const lan = all.filter((i) => isPrivate(i.address) && !VIRTUAL.test(i.name)).sort((a, b) => Number(/^(en|eth|wl)/.test(b.name)) - Number(/^(en|eth|wl)/.test(a.name)))[0]?.address
   return { tailscale, lan }
 }
