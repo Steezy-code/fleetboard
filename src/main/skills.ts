@@ -81,10 +81,17 @@ const slugify = (s: string) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 48)
 
+const rootsFor = (projectPath?: string) => [userRoot(), projectPath ? projectRoot(projectPath) : null].filter(Boolean) as string[]
+
 function insideRoots(p: string, projectPath?: string) {
   const r = path.resolve(p)
-  const roots = [userRoot(), projectPath ? projectRoot(projectPath) : null].filter(Boolean) as string[]
-  return roots.some((root) => r.startsWith(path.resolve(root) + path.sep))
+  return rootsFor(projectPath).some((root) => r.startsWith(path.resolve(root) + path.sep))
+}
+
+/** The skills folder itself, which "Open folder" may also reveal (it is created on demand). */
+function isRoot(p: string, projectPath?: string) {
+  const r = path.resolve(p)
+  return rootsFor(projectPath).some((root) => r === path.resolve(root))
 }
 
 export function registerSkills(ctx: MainContext) {
@@ -132,7 +139,9 @@ export function registerSkills(ctx: MainContext) {
     return true
   })
 
-  ipc.handle('skills:open', (_e, dir: string) => {
+  // the only handler here that had no check: it took any path and created it, recursively
+  ipc.handle('skills:open', (_e, dir: string, projectPath?: string) => {
+    if (!insideRoots(dir, projectPath) && !isRoot(dir, projectPath)) throw new Error('Not a skills folder')
     fs.mkdirSync(dir, { recursive: true })
     return shell.openPath(dir)
   })
