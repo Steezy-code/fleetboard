@@ -367,7 +367,10 @@ async function checkout(cwd: string, branch: string, create = false): Promise<Gi
   if (!validCwd(cwd)) return fail('Folder not found')
   const name = (branch ?? '').trim()
   if (!name || name.startsWith('-')) return fail('Bad branch name')
-  const r = create ? await git(cwd, ['checkout', '-b', name]) : await git(cwd, ['checkout', name])
+  // "--": without it git reads a name that happens to match a path as a pathspec, so a checkout of
+  // "." or "src" quietly threw away the uncommitted work there instead of switching branch. Real
+  // branches and a bare commit id (a detached HEAD, as remote branches use) are unaffected.
+  const r = create ? await git(cwd, ['checkout', '-b', name, '--']) : await git(cwd, ['checkout', name, '--'])
   if (r.code !== 0) return fail(cleanErr(r, 'git checkout failed'))
   return { ok: true }
 }
