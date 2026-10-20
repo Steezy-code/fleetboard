@@ -59,7 +59,7 @@ Type (or say) what you want in the command bar, for example *"add a Split PDF co
 
 Everything that needs you lands in the **Inbox**, docked on top of the command bar: every agent's permission prompt (with what it was just doing, the command, and a plain note like "Runs your tests"), the Lead's questions (each option with its trade-off, and the one the Lead would pick), the Ready card (what changed, files with lines added and removed, what the Lead verified), and notices like red CI or review comments. The front item shows in full; **Show all** (Ctrl+I) lists the rest.
 
-From the bar: **1**–**9** pick a button, **Enter** on an empty bar runs the highlighted one, **Tab** / **Shift+Tab** step through the items. When a question or a Ready card is in front, a tag shows who you're talking to and what you type goes to that agent; with a permission prompt in front, typing still goes to Helm, so a stray sentence never approves anything. Saying "allow", "deny", "merge" or "option two" answers the front item by voice. Keys wait a moment after a new card appears, so a keystroke meant for something else can't answer it. In focus mode the tray floats in the corner.
+From the bar: **1**–**9** pick a button, **Enter** on an empty bar runs the highlighted one, **Tab** / **Shift+Tab** step through the items. When a question or a Ready card is in front, a tag shows who you're talking to and what you type goes to that agent; with a permission prompt in front, typing still goes to Oracle, so a stray sentence never approves anything. Saying "allow", "deny", "merge" or "option two" answers the front item by voice. Keys wait a moment after a new card appears, so a keystroke meant for something else can't answer it. In focus mode the tray floats in the corner.
 
 Your own uncommitted work is never touched: the team works from your last commit in separate worktrees. (That needs a git repository with a commit; in a folder without one, Fleetboard asks before the team works in your files directly.)
 
@@ -73,9 +73,9 @@ Agents wait while you're away from the desk. **Settings → Phone Inbox** serves
 - **Tailscale** (recommended): listens on this computer's Tailscale address only; the connection is encrypted and works from anywhere on your tailnet. **Wi-Fi**: your local network address, plain HTTP (anyone who can see that network's traffic could copy the link). **This PC**: 127.0.0.1, to try it. It follows the address: when Tailscale connects after the app started, or Wi-Fi hands out a new one, it moves there (the QR code in Settings updates).
 - The link carries a long secret in its `#fragment` (never sent in URLs, logs or referrers). **New link** revokes the old one at once. Answers are checked against the live screen first, so a stale phone never types into a console whose question was already answered.
 
-## Helm and playbooks
+## Oracle and playbooks
 
-**Helm** (the ship-wheel toggle in the command bar, on by default) reads the whole board: every console's recent output, the team's plan, kanban cards, checklists, notes, git state. Ask it anything ("what is everyone doing?", "who needs me?") or say what you want done, and it answers or offers 1–3 one-click routes: a playbook with its inputs filled in, a goal for the Lead, a message to the agent already working on it, board actions, or a panel. Enter on an empty bar takes the first route. Instant board commands (zoom, pause, spawn…) and `@name` messages still go straight through.
+**Oracle** (the sparkles toggle in the command bar, on by default) reads the whole board: every console's recent output, the team's plan, kanban cards, checklists, notes, git state. Ask it anything ("what is everyone doing?", "who needs me?") or say what you want done, and it answers or offers 1–3 one-click routes: a playbook with its inputs filled in, a goal for the Lead, a message to the agent already working on it, board actions, or a panel. Enter on an empty bar takes the first route. Instant board commands (zoom, pause, spawn…) and `@name` messages still go straight through.
 
 **Playbooks** (Presets → Playbooks) are work you do regularly, as one-click cards. Each starts its own Lead with a proven brief:
 
@@ -95,6 +95,12 @@ Agents wait while you're away from the desk. **Settings → Phone Inbox** serves
 
 The **Morning sweep** (also on the home screen) checks every repo under `~/code`, `~/Github`, … without changing anything: uncommitted work and how old it is, open PRs and their review state, CI on the default branch, stale branches, upstream drift, the next PLAN.md item. *Brief me* turns it into a short morning brief.
 
+### Brainstorm
+
+Type or say **"brainstorm …"** (or click **Brainstorm** above the bar) and a panel of three agents thinks about it in parallel: a **pragmatist** (best value for the effort, shippable this week), a **wild card** (the bold 10x version) and a **critic** (what's weak or missing today, turned into fixes). Each reads your project, read-only, from its own angle. When you have several CLIs installed the seats go to different ones (Claude Code, Codex, Gemini…), so you get different models' takes; if one can't run (not signed in, folder not trusted), the planner's CLI takes its seat and the card says why. Oracle then merges duplicates and ranks the ideas.
+
+It all lands on the board as one **Brainstorm** card: the panel's live progress, then the ideas best first, each with effort, impact and which panelists had it. Every idea has **Give to team** (a Lead starts on it), **Add to PLAN.md** (under an Ideas heading) and **Go deeper** (a new brainstorm on just that idea, next to this one). **Run again** asks a fresh panel. Oracle also offers a brainstorm on its own for open questions like "what could this become?".
+
 ## CI and review watcher
 
 With the GitHub CLI signed in (`gh auth login`), the badge next to the branch name shows the open repo's GitHub Actions: **CI passing**, **running** or **failing**, plus how many open PRs are red. It checks every minute (every 20s while something is running) and tells you when a run turns red or goes green again, with a desktop notification when Fleetboard isn't in front.
@@ -103,7 +109,7 @@ Click the badge for the CI drawer: the latest run of each workflow on your branc
 
 Review comments are watched too (every two minutes): PR comments, review summaries and inline comments on unresolved threads. When new ones land on a PR an agent made (a team's branch, or one Fleetboard already sent an agent to), they go straight to that agent: its Lead or console if it's still running, otherwise a new *PR #N fixer* console in that branch. The agent is told to address each point, push, and reply on the PR starting with 🤖, so its replies are never sent back to it. Comments on other PRs only notify you; the drawer has **Send to …** and **Mark handled** for those. A CI failure on a PR with an agent on it goes to that agent as well. Bots' plain comments (deploy previews, coverage), bare approvals and resolved threads are left out.
 
-Helm sees all of this. Ask "what needs me?" or "what should I work on?" and it weighs open questions, red CI, unsent review comments and PRs waiting on you (plus the last morning sweep of your other repos), then offers one-click **Fix CI** / **Send the comments** options.
+Oracle sees all of this. Ask "what needs me?" or "what should I work on?" and it weighs open questions, red CI, unsent review comments and PRs waiting on you (plus the last morning sweep of your other repos), then offers one-click **Fix CI** / **Send the comments** options.
 
 ## Themes
 

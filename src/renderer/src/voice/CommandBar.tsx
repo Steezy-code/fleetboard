@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronUp, CornerDownRight, Mic, ShipWheel, Square } from 'lucide-react'
+import { ChevronUp, CornerDownRight, Mic, Sparkles, Square } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import { ROLE_TINT } from '@shared/types'
 import { activeWs, allConsoles, useApp } from '../state/store'
@@ -50,7 +50,7 @@ export function CommandBar() {
         ) : phase === 'transcribing' ? (
           <div className="cb-shimmer">{download?.what === 'speech' ? downloadText(download.label, download.pct) : 'Transcribing…'}</div>
         ) : phase === 'thinking' ? (
-          <div className="cb-shimmer">{helmThinking ? 'Helm is reading the board…' : 'Thinking…'}</div>
+          <div className="cb-shimmer">{helmThinking ? 'Oracle is reading the board…' : 'Thinking…'}</div>
         ) : null}
         {/* stays mounted so a half-typed command survives a listen */}
         <div className="cb-input" style={phase === 'idle' ? undefined : { display: 'none' }}>
@@ -59,7 +59,7 @@ export function CommandBar() {
               <CornerDownRight size={12} /> {replyTo}
             </span>
           )}
-          <CommandInput primary placeholder={replyTo ? `Answer ${replyTo} in your own words…` : helm ? 'Ask Helm or say what you want done…' : 'Hold space to speak · @ to direct…'} />
+          <CommandInput primary placeholder={replyTo ? `Answer ${replyTo} in your own words…` : helm ? 'Ask Oracle, or say "brainstorm …"' : 'Hold space to speak · @ to direct…'} />
         </div>
       </div>
       {phase === 'idle' && download && <span className="cb-sub">{downloadText(download.label, download.pct)}</span>}
@@ -77,11 +77,11 @@ export function CommandBar() {
       )}
       <button
         className={`icon-btn helm-toggle ${helm ? 'on' : ''}`}
-        title={helm ? 'Helm: reads the board and suggests the best route (click to turn off)' : 'Helm is off: requests go straight to the Lead or the planner (click to turn on)'}
+        title={helm ? 'Oracle: reads the board, answers, suggests the best route and brainstorms (click to turn off)' : 'Oracle is off: requests go straight to the Lead or the planner (click to turn on)'}
         aria-pressed={helm}
         onClick={() => useApp.getState().setSettings({ helm: !helm })}
       >
-        <ShipWheel size={15} />
+        <Sparkles size={15} />
       </button>
       <button
         className={`icon-btn ${phase === 'listening' ? 'mic-on' : ''}`}

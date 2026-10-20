@@ -17,6 +17,7 @@ export type NodeType =
   | 'doc'
   | 'orchestrator'
   | 'plan'
+  | 'brainstorm'
 
 export interface BoardNode<D = any> {
   id: string
