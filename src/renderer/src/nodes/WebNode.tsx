@@ -57,7 +57,14 @@ export function normalizeUrl(input: string): string {
   if (!s) return ''
   if (/^\d{2,5}$/.test(s)) return `http://localhost:${s}`
   if (/^:\d{2,5}(\/.*)?$/.test(s)) return `http://localhost${s}`
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s) || /^(about|data|file|chrome):/i.test(s)) return s
+  // An explicit list, not "any scheme://". The old test passed anything shaped like a scheme, so a
+  // tile URL of vscode://, slack:// or similar went to the webview as written — and an
+  // external-protocol navigation is handed to the operating system's handler for it. The URL is also
+  // persisted in the board file and re-mounted as src on every load, so it is not only what someone
+  // types. chrome: is gone with it: Chromium's own pages have no business in a dev-server tile.
+  // Anything else falls through to the search below, which is what already happened to input that
+  // did not look like a URL.
+  if (/^(https?|file|about|data|blob):/i.test(s)) return s
   if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/.*)?$/i.test(s)) return `http://${s}`
   if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?(\/.*)?$/.test(s)) return `http://${s}`
   if (!/\s/.test(s) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(s)) return `https://${s}`
