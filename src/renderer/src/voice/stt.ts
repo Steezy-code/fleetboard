@@ -133,7 +133,7 @@ function onPcm(buf: Float32Array) {
   const data = actx && actx.sampleRate !== RATE ? resample(buf, actx.sampleRate, RATE) : buf
   chunks.push(data)
   let sum = 0
-  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i]
+  for (const v of buf) sum += v * v
   const rms = Math.sqrt(sum / (buf.length || 1))
   peak = Math.max(peak, Math.min(1, rms * 9))
   const now = performance.now()
@@ -151,7 +151,10 @@ function resample(buf: Float32Array, from: number, to: number): Float32Array {
     const x = i * ratio
     const i0 = Math.floor(x)
     const i1 = Math.min(buf.length - 1, i0 + 1)
-    out[i] = buf[i0] + (buf[i1] - buf[i0]) * (x - i0)
+    // a sample past the end of the buffer is silence
+    const s0 = buf[i0] ?? 0
+    const s1 = buf[i1] ?? s0
+    out[i] = s0 + (s1 - s0) * (x - i0)
   }
   return out
 }
@@ -222,7 +225,7 @@ function joined(): Float32Array {
 
 function rmsOf(a: Float32Array) {
   let s = 0
-  for (let i = 0; i < a.length; i++) s += a[i] * a[i]
+  for (const v of a) s += v * v
   return Math.sqrt(s / (a.length || 1))
 }
 

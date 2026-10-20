@@ -20,6 +20,20 @@ export interface GoalCheck {
 
 const TAIL = 4000
 
+/**
+ * Goal checks in flight. They are spawned detached (their own process group, so a timeout ends
+ * whatever they started) with a 15-minute timeout, and nothing knew about them at quit: `npm test`
+ * started a minute before the user quit carried on as its own session leader with the app gone, and
+ * the next launch's orphan reaper had no record of it either.
+ */
+const running = new Set<ReturnType<typeof spawn>>()
+
+/** End every goal check. Called when the app quits. */
+export function killGoalChecks() {
+  for (const child of running) killTree(child.pid)
+  running.clear()
+}
+
 export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_000): Promise<GoalCheck> {
   return new Promise((resolve) => {
     if (!command.trim()) return resolve({ code: null, tail: '', error: 'no command' })
@@ -32,6 +46,7 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
       // its own process group (POSIX), so a timeout ends whatever it started too; Windows ends the tree
       const l = oneShot(command, env)
       const child = spawn(l.file, l.args, { cwd, env: { ...env, CI: '1' }, detached: !IS_WIN, stdio: ['ignore', 'pipe', 'pipe'], ...launchOptions(l) })
+      running.add(child)
       let timedOut = false
       const timer = setTimeout(() => {
         timedOut = true
@@ -41,10 +56,12 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
       child.stderr.on('data', keep)
       child.on('error', (e) => {
         clearTimeout(timer)
+        running.delete(child)
         resolve({ code: null, tail: '', error: e.message })
       })
       child.on('close', (code) => {
         clearTimeout(timer)
+        running.delete(child)
         resolve({ code: timedOut ? null : code, tail: stripAnsi(out).slice(-TAIL), ...(timedOut ? { timedOut } : {}) })
       })
     })

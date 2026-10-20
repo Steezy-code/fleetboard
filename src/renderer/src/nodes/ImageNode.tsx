@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import type { NodeProps } from './types'
 import { basename, fileUrl } from '../lib/api'
+import { safeUrl } from '../workbench/markdown'
 import { useApp } from '../state/store'
 import { startNodeDrag } from '../board/NodeFrame'
 
@@ -10,7 +11,11 @@ import { startNodeDrag } from '../board/NodeFrame'
 // node.data = { path?: string, src?: string (data/http URL), ratio?: number }
 
 export default function ImageNode({ node, selected }: NodeProps) {
-  const src: string | undefined = node.data.src ?? (node.data.path ? fileUrl(node.data.path) : undefined)
+  // node.data.src is persisted in the board file, which an agent can write, and goes straight into
+  // <img src>. The same check the markdown sanitizer uses: a local file through fbfile, a raster data
+  // URL or http(s) — not file://, not a javascript: URL, and not an SVG data URL, which can script.
+  const raw: string | undefined = node.data.src ?? (node.data.path ? fileUrl(node.data.path) : undefined)
+  const src = raw ? (safeUrl(raw, 'src') ?? undefined) : undefined
   const ratio: number | undefined = node.data.ratio
   const [failed, setFailed] = useState(false)
   const last = useRef({ w: node.w, h: node.h })

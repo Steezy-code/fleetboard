@@ -71,7 +71,8 @@ export function Minimap() {
         ))}
         {ws.nodes.map((n) => {
           const isConsole = n.type === 'console'
-          const fill = isConsole ? STATUS_FILL[statuses[n.id]] ?? 'var(--line-3)' : 'var(--line-2)'
+          const st = statuses[n.id]
+          const fill = isConsole ? (st ? STATUS_FILL[st] : undefined) ?? 'var(--line-3)' : 'var(--line-2)'
           return (
             <rect
               key={n.id}

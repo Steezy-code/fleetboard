@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { marked } from 'marked'
+import { renderMarkdown } from '../workbench/markdown'
 import {
   ArrowDown,
   ArrowUp,
@@ -194,7 +194,9 @@ export default function SweepPanel() {
   }
 
   const s = stats(res)
-  const briefHtml = useMemo(() => (brief ? (marked.parse(brief, { async: false }) as string) : ''), [brief])
+  // the brief is an agent's streamed output: through the app's one allowlist sanitizer (marked
+  // has none of its own)
+  const briefHtml = useMemo(() => (brief ? renderMarkdown(brief) : ''), [brief])
   const age = res ? Date.now() - res.at : 0
 
   const act = async (fn: () => Promise<unknown> | unknown, closeAfter = true) => {

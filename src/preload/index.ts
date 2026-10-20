@@ -11,8 +11,27 @@ const api = {
       ipcRenderer.removeListener(channel, listener)
     }
   },
-  pathForFile: (file: File) => webUtils.getPathForFile(file),
-  platform: process.platform
+  /**
+   * The real path of a file dropped on the board (or chosen in a file input), and a note to the main
+   * process that the user chose it — otherwise the filesystem handlers would refuse everything
+   * dragged in from outside the project. This is not something the renderer can forge: Electron
+   * returns an empty string for a File built in JS rather than backed by a file on disk, so only a
+   * genuine drop or pick produces a path here.
+   */
+  pathForFile: (file: File) => {
+    const p = webUtils.getPathForFile(file)
+    if (p) ipcRenderer.send('fs:grantDropped', p)
+    return p
+  },
+  platform: process.platform,
+  /**
+   * Whether this run may expose window.__fleetboard (see renderer/src/debug.ts).
+   *
+   * ELECTRON_RENDERER_URL is set only by `electron-vite dev`, and is what index.ts already uses to
+   * tell dev from packaged. The end-to-end tests drive the *built* app through those handles, so
+   * they set FLEETBOARD_DEVTOOLS; a packaged app has neither.
+   */
+  devtools: !!process.env.ELECTRON_RENDERER_URL || process.env.FLEETBOARD_DEVTOOLS === '1'
 }
 
 contextBridge.exposeInMainWorld('fb', api)

@@ -9,6 +9,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# the default for a token is whatever the repository settings say, which may include write. Nothing
+# here needs more than reading the code.
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-24.04
@@ -33,8 +38,24 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # the same sources again with noUncheckedIndexedAccess, over the directories that have been
+      # through it (tsconfig.strict.json's include list says which)
+      - name: Typecheck (noUncheckedIndexedAccess, migrated directories)
+        run: npm run typecheck:strict
+
       - name: Unit tests
         run: npm test
+
+      # after the tests on purpose: this one talks to the registry, and a hiccup there must not hide
+      # whether the code is sound. A known-vulnerable dependency should fail the build rather than
+      # wait to be noticed; moderate and below are reported without failing, since several of those
+      # advisories are denial-of-service in a build tool this app does not ship.
+      - name: Dependency audit
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Dependency audit (full, advisory only)
+        if: always()
+        run: npm audit || true
 
       - name: Display server for the end-to-end tests
         run: sudo apt-get update -q && sudo apt-get install -yq xvfb

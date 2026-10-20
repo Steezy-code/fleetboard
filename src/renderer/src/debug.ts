@@ -1,4 +1,9 @@
 // Handles for automation and debugging from DevTools: window.__fleetboard.
+//
+// Not exposed in a packaged app. They are a ready-made toolkit — spawnConsoles, killConsoles,
+// sendToConsole, handoff, sendGoal, fixCi — and script that gets into the window should have to
+// build its own rather than find them waiting. The end-to-end tests drive the built app through
+// them, so the gate is dev mode or the flag the test harness sets, not dev mode alone.
 import { useApp, activeWs, allConsoles } from './state/store'
 import { spawnConsoles, sendToConsole, consoleTail, resolveTargets, killConsoles } from './engine/consoles'
 import { synthesize, ttsReady, warmUpTts } from './voice/tts'
@@ -16,23 +21,25 @@ import { figureItems, figureToExcalidraw, figureToPngBase64, figureToSvg } from 
 import { NODE_DEFS } from './nodes/registry'
 import { PANELS, DRAWERS } from './panels/registry'
 
-;(window as any).__fleetboard = {
-  useApp,
-  activeWs,
-  allConsoles,
-  spawnConsoles,
-  killConsoles,
-  sendToConsole,
-  consoleTail,
-  resolveTargets,
-  voice: { synthesize, ttsReady, warmUpTts, transcribe, warmUpStt, sttReady },
-  markdown: { renderMarkdown, sanitizeHtml, renderDocMarkdown },
-  handoff,
-  sendGoal,
-  NODE_DEFS,
-  PANELS,
-  DRAWERS,
-  ci: { useCi, applyCiStatus, ciItems, fixCi, useFeedback, applyFeedback, routeFeedback },
-  helm: { boardContext, askHelm, coerceResult },
-  exportHelpers: { markdownToHtmlDocument, figureItems, figureToSvg, figureToPngBase64, figureToExcalidraw }
+if ((window as any).fb?.devtools === true) {
+  ;(window as any).__fleetboard = {
+    useApp,
+    activeWs,
+    allConsoles,
+    spawnConsoles,
+    killConsoles,
+    sendToConsole,
+    consoleTail,
+    resolveTargets,
+    voice: { synthesize, ttsReady, warmUpTts, transcribe, warmUpStt, sttReady },
+    markdown: { renderMarkdown, sanitizeHtml, renderDocMarkdown },
+    handoff,
+    sendGoal,
+    NODE_DEFS,
+    PANELS,
+    DRAWERS,
+    ci: { useCi, applyCiStatus, ciItems, fixCi, useFeedback, applyFeedback, routeFeedback },
+    helm: { boardContext, askHelm, coerceResult },
+    exportHelpers: { markdownToHtmlDocument, figureItems, figureToSvg, figureToPngBase64, figureToExcalidraw }
+  }
 }

@@ -30,7 +30,7 @@ export function catchStrayErrors(tell: (message: string) => void) {
     // one notice at a time is enough; the log has every one
     if (Date.now() - lastTold > 10_000) {
       lastTold = Date.now()
-      tell(text.split('\n')[0].slice(0, 160))
+      tell((text.split('\n')[0] ?? '').slice(0, 160))
     }
   }
   process.on('uncaughtException', report('uncaught exception'))

@@ -30,3 +30,40 @@ test('stray errors in the main process are logged and reported; consoles keep wo
     await app.close()
   }
 })
+
+test("stray errors in the window are logged and reported too, and the board keeps working", async () => {
+  // React's boundaries only see a crash during render: a rejected promise in a handler, or a worker
+  // that fails, reached nobody — no toast, no log, nothing to explain why something went quiet.
+  const sb = makeSandbox()
+  const repo = makeRepo(sb)
+  const app = await App.launch({ sandbox: sb, scenario: { solo: [{ match: '.', reply: 'ok' }] } })
+  try {
+    await app.openProject(repo)
+
+    await app.eval(() => {
+      // neither of these is a render error, so no boundary sees them
+      window.setTimeout(() => {
+        throw new Error('boom in the window')
+      }, 0)
+      void Promise.reject(new Error('a window promise no one awaited'))
+    })
+
+    const toast = await app.waitFor(async () => (await app.texts('.toast')).find((t) => /went wrong in the window/.test(t)), { label: 'toast' })
+    assert.match(toast, /boom in the window|a window promise no one awaited/)
+
+    const log = path.join(sb.fbHome, 'logs', 'main.log')
+    await app.waitFor(
+      () =>
+        fs.existsSync(log) &&
+        /renderer: .*boom in the window/s.test(fs.readFileSync(log, 'utf8')) &&
+        /renderer: .*a window promise no one awaited/s.test(fs.readFileSync(log, 'utf8')),
+      { label: 'both in the log, marked as the renderer\'s' }
+    )
+
+    // the board is still there and still works
+    const id = await app.eval(() => (window as any).__fleetboard.spawnConsoles({ agentId: 'claude' })[0] as string)
+    await app.waitStatus(id, 'idle')
+  } finally {
+    await app.close()
+  }
+})

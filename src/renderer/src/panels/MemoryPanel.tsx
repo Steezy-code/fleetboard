@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { ArrowLeft, Brain, Check, Circle, FileText, Loader2, Pencil, Plus, ScanSearch, Send, Square, Trash2 } from 'lucide-react'
-import type { ConsoleData, MemoryCard } from '@shared/types'
+import type { MemoryCard } from '@shared/types'
 import { extractJson, runCli } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor } from '../engine/consoles'
@@ -13,10 +12,12 @@ import {
   loadGlobalCards,
   newCard,
   normalizeCategory,
+  pushTargets,
   pushToConsoles,
   saveGlobalCards,
   scanPrompt,
-  setRepoCards
+  setRepoCards,
+  type PushTarget
 } from '../continuity/memory'
 
 type Tab = 'repo' | 'global'
@@ -326,8 +327,11 @@ function ScanView({ existing, onCancel, onAdd }: { existing: MemoryCard[]; onCan
     run.promise
       .then(({ code, text }) => {
         done = true
-        const raw = extractJson<any[]>(text)
-        const arr = Array.isArray(raw) ? raw : Array.isArray((raw as any)?.facts) ? (raw as any).facts : null
+        // the model wrote this, so every field is unknown until it has been through String()/normalize
+        type ProposedFact = { category?: unknown; title?: unknown; body?: unknown }
+        const raw = extractJson<unknown>(text)
+        const facts = (raw as { facts?: unknown } | null)?.facts
+        const arr: ProposedFact[] | null = Array.isArray(raw) ? (raw as ProposedFact[]) : Array.isArray(facts) ? (facts as ProposedFact[]) : null
         if (!arr?.length) {
           setError(code ? text.slice(-400) || `Exited with ${code}` : 'The agent did not return any facts.')
           return
@@ -432,22 +436,10 @@ function ScanView({ existing, onCancel, onAdd }: { existing: MemoryCard[]; onCan
 }
 
 function PushView({ cards, onBack }: { cards: MemoryCard[]; onBack: () => void }) {
-  const consoles = useApp(
-    useShallow((s) => {
-      const p = s.project
-      if (!p) return [] as string[]
-      // "id|name|agentId|live" keeps the selector output to primitives
-      return p.workspaces.flatMap((w) => w.nodes.filter((n) => n.type === 'console').map((n) => `${n.id}|${(n.data as ConsoleData).name}|${(n.data as ConsoleData).agentId}|${s.live[n.id] ? 1 : 0}|${w.name}`))
-    })
-  )
-  const list = useMemo(
-    () =>
-      consoles.map((s) => {
-        const [id, name, agentId, live, ws] = s.split('|')
-        return { id, name, agentId, live: live === '1', ws }
-      }),
-    [consoles]
-  )
+  // one JSON string, so the selector's result still compares by value without a shallow compare of
+  // objects it rebuilds on every store change — and without a delimiter a console name can break
+  const rows = useApp((s) => (s.project ? JSON.stringify(pushTargets(s.project, s.live)) : '[]'))
+  const list = useMemo(() => JSON.parse(rows) as PushTarget[], [rows])
   const liveIds = list.filter((c) => c.live).map((c) => c.id)
   const [picked, setPicked] = useState<string[]>(liveIds)
   const [submit, setSubmit] = useState(false)

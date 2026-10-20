@@ -116,3 +116,48 @@ test('saving refuses an invalid project instead of replacing a good board', () =
 test('project ids that are not file names are rejected', () => {
   assert.equal(store.loadProject('../app'), null)
 })
+
+test('a board written by a newer Fleetboard is left exactly as it was', () => {
+  // ~/.fleetboard/projects/<id>.json is the only copy of a board. Nothing read `schema` before, so a
+  // file from a newer version loaded as if it were this version's, the fill-in pass dropped whatever
+  // that version had added, and the next save stamped it back down — a silent one-way downgrade.
+  const id = 'future01'
+  const file = path.join(projects, `${id}.json`)
+  const newer = { ...board(id, 'future'), schema: 99, somethingNewerAdded: { kept: true } }
+  fs.writeFileSync(file, JSON.stringify(newer))
+  const before = fs.readFileSync(file, 'utf8')
+
+  assert.equal(store.loadProject(id), null, 'it does not open')
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'and it is untouched on disk')
+  // not treated as damage: nothing is moved aside, because nothing is wrong with it
+  assert.deepEqual(
+    fs.readdirSync(projects).filter((f) => f.startsWith(id) && f !== `${id}.json`),
+    []
+  )
+
+  // the user is told why, with the number that explains it
+  assert.equal(emitted.at(-1)?.[0], 'store:recovered')
+  const notice = emitted.at(-1)?.[1] as { what: string; tooNew?: number; corruptCopy: string }
+  assert.equal(notice.what, id)
+  assert.equal(notice.tooNew, 99)
+  assert.equal(notice.corruptCopy, '', 'no copy was made: the file is fine, this build is old')
+
+  // and an edit cannot overwrite it either
+  assert.throws(() => store.saveProject(board(id, 'future') as never), /newer version of Fleetboard/)
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'still untouched after an attempted save')
+})
+
+test('a board from this version, or with no schema at all, still opens and saves', () => {
+  const id = 'present1'
+  fs.writeFileSync(path.join(projects, `${id}.json`), JSON.stringify(board(id, 'present')))
+  assert.ok(store.loadProject(id), 'this version opens')
+
+  // hand-edited or very old files have no schema: that is not from the future
+  const legacy = 'legacy01'
+  const noSchema = board(legacy, 'legacy') as Record<string, unknown>
+  delete noSchema.schema
+  fs.writeFileSync(path.join(projects, `${legacy}.json`), JSON.stringify(noSchema))
+  assert.ok(store.loadProject(legacy), 'a file with no schema still opens')
+  store.saveProject(board(legacy, 'legacy') as never)
+  assert.equal(JSON.parse(fs.readFileSync(path.join(projects, `${legacy}.json`), 'utf8')).schema, 1, 'and is stamped with this version')
+})

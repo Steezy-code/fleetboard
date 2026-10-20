@@ -73,3 +73,37 @@ test('the diff of a file with glob characters is that file only', async () => {
   assert.match(r.diff, /\+v3/)
   assert.doesNotMatch(r.diff, /other changed/)
 })
+
+test('a checkout of a name that is also a path is refused, not a silent revert', async () => {
+  // `git checkout .` and `git checkout src` take the name as a pathspec and throw away the
+  // uncommitted work there. The Git card's branch list is the usual caller, but the name arrives
+  // over IPC, so the branch has to be unambiguous.
+  write('app/i/page.tsx', 'work in progress\n')
+  const before = await ipcMain.invoke('git:status', repo)
+  assert.ok(
+    before.status.files.some((f: any) => f.path === 'app/i/page.tsx'),
+    'the file starts out modified'
+  )
+  for (const name of ['.', 'app', 'app/i/page.tsx']) {
+    const r = await ipcMain.invoke('git:checkout', repo, name)
+    assert.equal(r.ok, false, `checkout ${name} must fail`)
+  }
+  const after = await ipcMain.invoke('git:status', repo)
+  assert.ok(
+    after.status.files.some((f: any) => f.path === 'app/i/page.tsx'),
+    'the uncommitted work is still there'
+  )
+})
+
+test('a real branch, and a commit id, still check out', async () => {
+  sh('add', '-A')
+  sh('commit', '-qm', 'wip')
+  const head = sh('rev-parse', 'HEAD').trim()
+  assert.equal((await ipcMain.invoke('git:checkout', repo, 'side', true)).ok, true, 'create a branch')
+  assert.equal(sh('rev-parse', '--abbrev-ref', 'HEAD').trim(), 'side')
+  const first = sh('rev-list', '--max-parents=0', 'HEAD').trim()
+  assert.equal((await ipcMain.invoke('git:checkout', repo, first)).ok, true, 'a commit id (detached, as remote branches use)')
+  assert.equal(sh('rev-parse', 'HEAD').trim(), first)
+  assert.equal((await ipcMain.invoke('git:checkout', repo, 'side')).ok, true, 'back to the branch')
+  assert.equal(sh('rev-parse', 'HEAD').trim(), head)
+})

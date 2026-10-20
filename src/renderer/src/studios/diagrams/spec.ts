@@ -23,7 +23,8 @@ export interface DGroup {
 
 export interface DiagramSpec {
   title: string
-  nodes: DNode[]
+  /** never empty: sanitizeSpec returns null rather than a diagram with nothing in it */
+  nodes: [DNode, ...DNode[]]
   edges: DEdge[]
   groups?: DGroup[]
   /** TB: layered top→bottom (default), LR: layered left→right, radial: mind map */
@@ -64,7 +65,8 @@ export function sanitizeSpec(raw: any): DiagramSpec | null {
     nodes.push({ id, label: str(n?.label, 60) || id, sub: str(n?.sub ?? n?.detail, 70) || undefined, shape, group })
     if (nodes.length >= 40) break
   }
-  if (!nodes.length) return null
+  const [firstNode, ...restNodes] = nodes
+  if (!firstNode) return null
   const edges: DEdge[] = []
   const seen = new Set<string>()
   for (const e of Array.isArray(src.edges) ? src.edges : Array.isArray(src.links) ? src.links : []) {
@@ -79,7 +81,7 @@ export function sanitizeSpec(raw: any): DiagramSpec | null {
   const used = new Set(nodes.map((n) => n.group).filter(Boolean))
   return {
     title: str(src.title, 80) || 'Diagram',
-    nodes,
+    nodes: [firstNode, ...restNodes],
     edges,
     groups: groups.filter((g) => used.has(g.id)),
     layout: src.layout === 'LR' || src.layout === 'radial' ? src.layout : undefined

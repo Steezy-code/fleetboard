@@ -52,7 +52,7 @@ export const pad2 = (n: number) => String(n).padStart(2, '0')
 export const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
 export const todayYmd = () => ymd(new Date())
 export const parseYmd = (s: string) => {
-  const [y, m, d] = s.split('-').map(Number)
+  const [y = 1970, m, d] = s.split('-').map(Number)
   return new Date(y, (m || 1) - 1, d || 1)
 }
 export const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
@@ -60,7 +60,7 @@ export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', '
 export const shortDate = (s: string) => {
   const d = parseYmd(s)
   const now = new Date()
-  const base = `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getDate()}`
+  const base = `${(MONTHS[d.getMonth()] ?? '').slice(0, 3)} ${d.getDate()}`
   return d.getFullYear() === now.getFullYear() ? base : `${base}, ${d.getFullYear()}`
 }
 /** Today / Tomorrow / Yesterday / "Sep 14" plus whether it is in the past. */
@@ -74,7 +74,7 @@ export function dueInfo(s: string): { label: string; tone: 'today' | 'soon' | 'p
 /** "14:30" → "2:30pm" */
 export const fmtTime = (t?: string) => {
   if (!t) return ''
-  const [h, m] = t.split(':').map(Number)
+  const [h = 0, m] = t.split(':').map(Number)
   const hh = h % 12 || 12
   return `${hh}${m ? ':' + pad2(m) : ''}${h < 12 ? 'am' : 'pm'}`
 }

@@ -36,7 +36,15 @@ const VECTORS = [
   '<noscript><p title="</noscript><img src=x onerror=window.__pwned=19>">',
   '[md link](javascript:window.__pwned=20)',
   '[md tab](java\tscript:window.__pwned=21)',
-  '<a href="java\u0000script:window.__pwned=22">nul</a>'
+  '<a href="java\u0000script:window.__pwned=22">nul</a>',
+  // A streamed brief is re-rendered on every chunk, so the sanitizer also sees half-written markup.
+  // These are the vectors above cut mid-tag, the way an agent's output arrives.
+  '<img src=x onerror="window.__pwned=23"',
+  '<img src=x onerror="window.__pwned=24',
+  '<svg onload="window.__pwned=25"',
+  '<iframe srcdoc="<script>parent.__pwned=26</scr',
+  '<a href="javascript:window.__pwned=27',
+  '<details open ontoggle="window.__pwned=28"><summary>x'
 ]
 
 test('no vector runs script, in markdown or raw HTML, even when its links are clicked', async () => {
@@ -74,4 +82,28 @@ test('ordinary markdown survives sanitizing', async () => {
 test('the Documents studio keeps its callouts', async () => {
   const html = await app.eval(() => (window as any).__fleetboard.markdown.renderDocMarkdown('> **Note** this matters\n\n# Doc'))
   assert.match(html, /<blockquote class="callout callout-note">/)
+})
+
+test('a brief rendered chunk by chunk, as it streams, never runs script', async () => {
+  // the Handoff and Sweep panels re-render on every chunk from the agent, so every prefix of a
+  // hostile brief reaches the sanitizer — not just the finished text
+  const brief = 'Summary of the session\n\n- did a thing\n\n<img src=x onerror="window.__pwned=101">\n\nmore <svg onload="window.__pwned=102"></svg> text\n'
+  const result = await app.eval(async (text) => {
+    const fb = (window as any).__fleetboard.markdown
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const bad: { at: number; html: string }[] = []
+    for (let i = 1; i <= text.length; i++) {
+      const html = fb.renderMarkdown(text.slice(0, i))
+      host.innerHTML = html
+      const handlers = [...host.querySelectorAll('*')].flatMap((el) => [...el.attributes].filter((a) => /^on/i.test(a.name) || a.name === 'srcdoc').map((a) => a.name))
+      const tags = [...host.querySelectorAll('script,iframe,svg,math,object,embed')].map((el) => el.tagName)
+      if (handlers.length || tags.length) bad.push({ at: i, html })
+    }
+    await new Promise((r) => setTimeout(r, 300))
+    host.remove()
+    return { bad, pwned: (window as any).__pwned ?? null }
+  }, brief)
+  assert.deepEqual(result.bad, [], 'a prefix of the brief rendered live markup')
+  assert.equal(result.pwned, null, 'no script ran while the brief streamed')
 })

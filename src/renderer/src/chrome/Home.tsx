@@ -16,6 +16,7 @@ const ago = (t: number) => {
 /** Launcher: recent projects, open a folder, which agent CLIs are installed. */
 export function Home() {
   const projects = useApp((s) => s.projects)
+  const recent = projects[0]
   const agents = useApp((s) => s.agents)
   const app = useApp.getState()
   const installed = useMemo(() => AGENTS.filter((a) => agents.find((x) => x.id === a.id && x.path) && a.id !== 'shell'), [agents])
@@ -55,9 +56,9 @@ export function Home() {
             <button className="btn home-sweep-btn" style={{ height: 38, padding: '0 16px' }} onClick={() => app.openPanel('sweep')} title="Read-only health check across all your repos">
               <Sunrise size={15} /> Morning sweep
             </button>
-            {projects[0] && (
-              <button className="btn" style={{ height: 38, padding: '0 16px' }} onClick={() => app.openProject(projects[0].path)}>
-                Continue {projects[0].name} <ArrowRight size={14} />
+            {recent && (
+              <button className="btn" style={{ height: 38, padding: '0 16px' }} onClick={() => app.openProject(recent.path)}>
+                Continue {recent.name} <ArrowRight size={14} />
               </button>
             )}
           </div>

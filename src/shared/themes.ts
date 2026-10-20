@@ -25,13 +25,41 @@ export interface TermPalette {
   brightWhite: string
 }
 
+/**
+ * The CSS custom properties a theme sets, without the leading --. Named rather than
+ * Record<string, string>: every theme defines all of them, several are read by name here and in the
+ * window chrome, and a Record said nothing about whether a theme that forgot one would be noticed.
+ */
+export interface ThemeTokens {
+  bg: string
+  board: string
+  dot: string
+  panel: string
+  'panel-2': string
+  'panel-3': string
+  line: string
+  'line-2': string
+  'line-3': string
+  text: string
+  'text-2': string
+  muted: string
+  dim: string
+  accent: string
+  ok: string
+  warn: string
+  danger: string
+  blue: string
+  info: string
+  /** only the light theme sets its own: themeTokens supplies the default */
+  shadow?: string
+}
+
 export interface Theme {
   id: string
   name: string
   blurb: string
   light: boolean
-  /** CSS custom properties without the leading -- */
-  tokens: Record<string, string>
+  tokens: ThemeTokens
   term: Omit<TermPalette, 'cursor' | 'selectionBackground'>
 }
 
@@ -54,7 +82,11 @@ const DARK_TERM = {
   brightWhite: '#fafaf9'
 }
 
-export const THEMES: Theme[] = [
+/**
+ * Every theme, first one first. Typed as a list that is never empty, because themeById falls back to
+ * THEMES[0] for an unknown id and the whole app's colours come from what it returns.
+ */
+export const THEMES: readonly [Theme, ...Theme[]] = [
   {
     id: 'ember',
     name: 'Ember',
@@ -269,9 +301,9 @@ export const DEFAULT_THEME = 'ember'
 export const themeById = (id: string | undefined) => THEMES.find((t) => t.id === id) ?? THEMES[0]
 
 const rgbOf = (hex: string): [number, number, number] | null => {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
-  if (!m) return null
-  const n = parseInt(m[1], 16)
+  const six = /^#?([0-9a-f]{6})$/i.exec(hex.trim())?.[1]
+  if (!six) return null
+  const n = parseInt(six, 16)
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
@@ -279,11 +311,13 @@ const rgbOf = (hex: string): [number, number, number] | null => {
 export function onColor(hex: string): string {
   const rgb = rgbOf(hex)
   if (!rgb) return '#fff'
-  const [r, g, b] = rgb.map((v) => {
+  // sRGB to linear light, per channel, so the three stay three and not an array of maybe-numbers
+  const lin = (v: number) => {
     const c = v / 255
     return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
-  })
-  const L = 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+  const [r, g, b] = rgb
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
   return L > 0.42 ? '#141414' : '#fff'
 }
 

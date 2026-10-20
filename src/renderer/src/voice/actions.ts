@@ -56,15 +56,16 @@ function lev(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 1) return 2
   const dp = Array.from({ length: b.length + 1 }, (_, i) => i)
   for (let i = 1; i <= a.length; i++) {
-    let prev = dp[0]
+    let prev = dp[0] ?? 0
     dp[0] = i
     for (let j = 1; j <= b.length; j++) {
-      const tmp = dp[j]
-      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
+      // every cell is inside the row by construction; 0 is what a cell outside it would cost
+      const tmp = dp[j] ?? 0
+      dp[j] = Math.min(tmp + 1, (dp[j - 1] ?? 0) + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1))
       prev = tmp
     }
   }
-  return dp[b.length]
+  return dp[b.length] ?? 0
 }
 
 /** Agent id for a spoken / typed agent name ("claude code", "codecs", "Gemini CLI"), or null. */
@@ -122,14 +123,15 @@ export function resolveTeam(ref: string): Group | null {
   if (ord) return groups[Number(ord[1]) - 1] ?? null
   const ordWord = /^(first|second|third|fourth|fifth|last)\s+(?:group|team)$/.exec(raw)
   if (ordWord) {
-    const i = { first: 0, second: 1, third: 2, fourth: 3, fifth: 4, last: groups.length - 1 }[ordWord[1]]!
-    return groups[i] ?? null
+    const word = ordWord[1] ?? ''
+    const i = word === 'last' ? groups.length - 1 : { first: 0, second: 1, third: 2, fourth: 3, fifth: 4 }[word]
+    return i === undefined ? null : groups[i] ?? null
   }
   const byRole = groups.find((g) => norm(g.role) === n)
   if (byRole) return byRole
   if (n.length >= 4) {
     const fuzzy = groups.filter((g) => lev(norm(g.name), n) <= 1)
-    if (fuzzy.length === 1) return fuzzy[0]
+    if (fuzzy.length === 1) return fuzzy[0] ?? null
   }
   return null
 }
@@ -172,8 +174,8 @@ export function resolveRef(ref: string, scope: 'all' | 'workspace' = 'all'): str
     if (byAgent.length) return byAgent.map((c) => c.id)
   }
   if (n.length >= 4) {
-    const fuzzy = list.filter((c) => lev(norm(c.data.name), n) <= 1)
-    if (fuzzy.length === 1) return [fuzzy[0].id]
+    const [onlyFuzzy, ...restFuzzy] = list.filter((c) => lev(norm(c.data.name), n) <= 1)
+    if (onlyFuzzy && !restFuzzy.length) return [onlyFuzzy.id]
   }
   return []
 }
@@ -206,8 +208,8 @@ export function selectedConsoles(): string[] {
 
 /** The console "this" refers to: selection, maximized one, else the most recently active. */
 export function currentConsole(): string | null {
-  const sel = selectedConsoles()
-  if (sel.length) return sel[0]
+  const [firstSelected] = selectedConsoles()
+  if (firstSelected) return firstSelected
   const app = useApp.getState()
   if (app.focusedNode && consoles().some((c) => c.id === app.focusedNode)) return app.focusedNode
   const ws = activeWs()
@@ -410,7 +412,7 @@ function wireEnd(ref: string): string | null {
   const team = resolveTeam(ref)
   if (team) return team.id
   const ids = resolveRef(ref, 'workspace')
-  return ids.length === 1 ? ids[0] : null
+  return ids.length === 1 ? ids[0] ?? null : null
 }
 
 const afterLayout = (fn: () => void) => window.setTimeout(fn, 60)
@@ -438,7 +440,8 @@ export async function runAction(a: Action): Promise<ActionResult> {
       if (!ids.length) return { ok: false, line: `No console matches ${a.targets.join(', ')}.` }
       ids.forEach((id) => sendToConsole(id, a.text, a.submit))
       touch(ids)
-      const team = a.targets.length === 1 ? resolveTeam(a.targets[0]) : null
+      const onlyTarget = a.targets.length === 1 ? a.targets[0] : undefined
+      const team = onlyTarget ? resolveTeam(onlyTarget) : null
       const who = team ? `${team.name} group` : namesOf(ids)
       return {
         ok: true,

@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "postinstall": "node scripts/postinstall.mjs",
     "app": "bin/fleetboard --rebuild",
     "test": "node scripts/test-unit.mjs",
@@ -47,6 +48,11 @@
     "nanoid": "^6.0.2",
     "node-pty": "^1.1.0",
     "zustand": "^5.0.15"
+  },
+  "overrides": {
+    "kokoro-js": {
+      "@huggingface/transformers": "$@huggingface/transformers"
+    }
   },
   "author": {
     "name": "Steezy-code"

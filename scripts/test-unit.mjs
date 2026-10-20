@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 
-const POSIX_ONLY = new Set(['orphans', 'pty-dispose', 'goal-check', 'cli-run', 'pty-send', 'write-text'])
+const POSIX_ONLY = new Set(['orphans', 'pty-dispose', 'goal-check', 'cli-run', 'pty-send', 'write-text', 'stray-children'])
 const dir = path.join('test', 'unit')
 const files = fs
   .readdirSync(dir)

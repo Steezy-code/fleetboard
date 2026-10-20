@@ -201,7 +201,7 @@ export function cleanMarkdown(text: string, final = false): string {
   return doc.replace(/\s+$/, '') + '\n'
 }
 
-export const titleOf = (md: string) => /^#[ \t]+(.+)$/m.exec(md)?.[1].replace(/[*_`]/g, '').trim()
+export const titleOf = (md: string) => /^#[ \t]+(.+)$/m.exec(md)?.[1]?.replace(/[*_`]/g, '').trim()
 
 export const slugify = (s: string) =>
   s
