@@ -69,8 +69,12 @@ function newId(agentId: string, name: string, list: Profile[]) {
 
 function decodeJwtEmail(token: unknown): string | undefined {
   if (typeof token !== 'string') return
+  // a token with no dots in it has no payload segment; it reached Buffer.from as undefined and the
+  // catch below turned that into the same answer, which is right but only by accident
+  const [, payload64] = token.split('.')
+  if (!payload64) return
   try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'))
+    const payload = JSON.parse(Buffer.from(payload64, 'base64url').toString('utf8'))
     return payload.email ?? payload['https://api.openai.com/profile']?.email
   } catch {
     return
