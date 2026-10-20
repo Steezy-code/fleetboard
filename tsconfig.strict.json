@@ -13,5 +13,5 @@
   "compilerOptions": {
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src/shared"]
+  "include": ["src/shared", "src/renderer/src/board/ink"]
 }

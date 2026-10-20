@@ -1,3 +1,4 @@
+import { pairs, pairsRound } from '@shared/seq'
 import type { InkItem } from '@shared/types'
 import type { Pt } from './rough'
 
@@ -82,9 +83,10 @@ function distToSeg(px: number, py: number, a: Pt, b: Pt) {
 }
 const distToPolyline = (px: number, py: number, pts: Pt[], closed = false) => {
   let d = Infinity
-  for (let k = 0; k + 1 < pts.length; k++) d = Math.min(d, distToSeg(px, py, pts[k], pts[k + 1]))
-  if (closed && pts.length > 2) d = Math.min(d, distToSeg(px, py, pts[pts.length - 1], pts[0]))
-  if (pts.length === 1) d = Math.hypot(px - pts[0][0], py - pts[0][1])
+  // round the shape when it is closed, which is the same segments plus the one back to the start
+  for (const [a, b] of closed && pts.length > 2 ? pairsRound(pts) : pairs(pts)) d = Math.min(d, distToSeg(px, py, a, b))
+  const only = pts.length === 1 ? pts[0] : undefined
+  if (only) d = Math.hypot(px - only[0], py - only[1])
   return d
 }
 
@@ -134,8 +136,8 @@ export function hitItem(i: InkItem, x: number, y: number, tol: number): boolean 
 
 /** Topmost item under a point. */
 export function hitTest(ink: InkItem[], x: number, y: number, tol: number): InkItem | null {
-  for (let k = ink.length - 1; k >= 0; k--) if (hitItem(ink[k], x, y, tol)) return ink[k]
-  return null
+  // last drawn is topmost
+  return ink.findLast((i) => hitItem(i, x, y, tol)) ?? null
 }
 
 /**
@@ -145,20 +147,14 @@ export function hitTest(ink: InkItem[], x: number, y: number, tol: number): InkI
  */
 export function midPoint(pts: [Pt, ...Pt[]]): Pt {
   if (pts.length === 1) return pts[0]
-  const lens: number[] = []
-  let total = 0
-  for (let k = 0; k + 1 < pts.length; k++) {
-    const l = Math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1])
-    lens.push(l)
-    total += l
-  }
-  let acc = total / 2
-  for (let k = 0; k < lens.length; k++) {
-    if (acc <= lens[k]) {
-      const t = lens[k] ? acc / lens[k] : 0
-      return [pts[k][0] + (pts[k + 1][0] - pts[k][0]) * t, pts[k][1] + (pts[k + 1][1] - pts[k][1]) * t]
+  const segs = [...pairs(pts)].map(([a, b]) => ({ a, b, len: Math.hypot(b[0] - a[0], b[1] - a[1]) }))
+  let acc = segs.reduce((sum, sg) => sum + sg.len, 0) / 2
+  for (const { a, b, len } of segs) {
+    if (acc <= len) {
+      const t = len ? acc / len : 0
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
     }
-    acc -= lens[k]
+    acc -= len
   }
   // every segment walked and nothing matched: floating point, so the end of the line
   return pts[pts.length - 1] ?? pts[0]
@@ -192,18 +188,20 @@ export function textBox(i: InkItem): Box {
 
 /** Two arrowhead barbs at the end of the polyline. */
 export function arrowHead(pts: Pt[], width: number): [Pt, Pt, Pt] | null {
-  if (pts.length < 2) return null
-  const tip = pts[pts.length - 1]
+  const tip = pts.length > 1 ? pts[pts.length - 1] : undefined
+  if (!tip) return null
   // walk back to a point far enough away for a stable direction
+  const crowding = (p: Pt | undefined) => !!p && Math.hypot(tip[0] - p[0], tip[1] - p[1]) < 6
   let k = pts.length - 2
-  while (k > 0 && Math.hypot(tip[0] - pts[k][0], tip[1] - pts[k][1]) < 6) k--
+  while (k > 0 && crowding(pts[k])) k--
   const from = pts[k]
+  if (!from) return null
   const dx = tip[0] - from[0]
   const dy = tip[1] - from[1]
   const len = Math.hypot(dx, dy)
   if (len < 1) return null
   let total = 0
-  for (let j = 0; j + 1 < pts.length; j++) total += Math.hypot(pts[j + 1][0] - pts[j][0], pts[j + 1][1] - pts[j][1])
+  for (const [a, b] of pairs(pts)) total += Math.hypot(b[0] - a[0], b[1] - a[1])
   const head = Math.max(6, Math.min(total * 0.4, 12 + width * 3.2))
   const ang = Math.atan2(dy, dx)
   const spread = Math.PI / 7.5
@@ -214,14 +212,12 @@ export function arrowHead(pts: Pt[], width: number): [Pt, Pt, Pt] | null {
 
 /** Smoothed SVG path through freehand points (quadratic midpoints). */
 export function inkPath(points: [number, number][]) {
-  if (!points.length) return ''
-  if (points.length < 3) return `M${points.map((p) => p.join(',')).join(' L')}`
-  let d = `M${points[0][0]},${points[0][1]}`
-  for (let i = 1; i < points.length - 1; i++) {
-    const [x, y] = points[i]
-    const [nx, ny] = points[i + 1]
-    d += ` Q${x},${y} ${(x + nx) / 2},${(y + ny) / 2}`
-  }
+  const first = points[0]
   const last = points[points.length - 1]
+  if (!first || !last) return ''
+  if (points.length < 3) return `M${points.map((p) => p.join(',')).join(' L')}`
+  let d = `M${first[0]},${first[1]}`
+  // a quadratic through each interior point, ending halfway to the next one
+  for (const [[x, y], [nx, ny]] of pairs(points.slice(1))) d += ` Q${x},${y} ${(x + nx) / 2},${(y + ny) / 2}`
   return `${d} L${last[0]},${last[1]}`
 }

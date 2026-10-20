@@ -376,8 +376,9 @@ export const useApp = create<AppState>((set, get) => {
       mutateProject((p) => ({ ...p, workspaces: p.workspaces.map((w) => (w.id === id ? { ...w, name } : w)) })),
     closeWorkspace: (id) =>
       mutateProject((p) => {
-        const workspaces = p.workspaces.filter((w) => w.id !== id)
-        if (!workspaces.length) workspaces.push(newWorkspace('Workspace 1'))
+        const [kept, ...rest] = p.workspaces.filter((w) => w.id !== id)
+        // closing the last workspace leaves a fresh empty one, never a board with none
+        const workspaces: [Workspace, ...Workspace[]] = kept ? [kept, ...rest] : [newWorkspace('Workspace 1')]
         const activeWorkspaceId = p.activeWorkspaceId === id ? workspaces[0].id : p.activeWorkspaceId
         return { ...p, workspaces, activeWorkspaceId }
       }),
