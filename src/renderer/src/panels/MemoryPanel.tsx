@@ -326,8 +326,11 @@ function ScanView({ existing, onCancel, onAdd }: { existing: MemoryCard[]; onCan
     run.promise
       .then(({ code, text }) => {
         done = true
-        const raw = extractJson<any[]>(text)
-        const arr = Array.isArray(raw) ? raw : Array.isArray((raw as any)?.facts) ? (raw as any).facts : null
+        // the model wrote this, so every field is unknown until it has been through String()/normalize
+        type ProposedFact = { category?: unknown; title?: unknown; body?: unknown }
+        const raw = extractJson<unknown>(text)
+        const facts = (raw as { facts?: unknown } | null)?.facts
+        const arr: ProposedFact[] | null = Array.isArray(raw) ? (raw as ProposedFact[]) : Array.isArray(facts) ? (facts as ProposedFact[]) : null
         if (!arr?.length) {
           setError(code ? text.slice(-400) || `Exited with ${code}` : 'The agent did not return any facts.')
           return
