@@ -14,14 +14,14 @@ export function patchInk(patches: Record<string, Partial<InkItem>>, persist = tr
   const s = useApp.getState()
   const p = s.project
   if (!p) return
-  const ids = Object.keys(patches)
-  if (!ids.length) return
+  const [firstId] = Object.keys(patches)
+  if (!firstId) return
   const workspaces = p.workspaces.map((w) =>
     w.id !== p.activeWorkspaceId ? w : { ...w, ink: w.ink.map((i) => (patches[i.id] ? { ...i, ...patches[i.id] } : i)) }
   )
   useApp.setState({ project: { ...p, workspaces } })
   // any store mutation schedules a save of the whole project
-  if (persist) s.updateInk(ids[0], {})
+  if (persist) s.updateInk(firstId, {})
 }
 
 export function selectedInk(): InkItem[] {
