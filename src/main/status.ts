@@ -59,6 +59,33 @@ const CURSOR_ITEM = new RegExp(`^(\\s*)[${SELECTOR}]\\s+(?:[✔✓]\\s+)?(\\S.*)
 /** hints that say the screen is a menu to pick from */
 const MENU_HINT = /\b(enter|return) to (confirm|select|choose)\b|↑\/↓|↑↓|arrow keys|esc(ape)? to cancel/i
 
+/**
+ * The row at an index, or '' past either end of the screen. Every predicate here asks something of
+ * a row — is it a rule, is it blank, does it start with a selector — and the answer for a row that
+ * is not on screen is the answer for an empty one, which is what detectPrompt already said with
+ * `raw[view.cursorY] ?? ''`.
+ */
+const lineAt = (lines: string[], i: number) => lines[i] ?? ''
+
+/** A numbered option row, by name: "  ❯ 2. Keep going" */
+interface NumberedRow {
+  /** the whole row as matched */
+  line: string
+  indent: string
+  selected: boolean
+  /** the number as written, which is what its column is found by */
+  numText: string
+  num: number
+  label: string
+}
+
+function numbered(l: string): NumberedRow | null {
+  const m = NUMBERED_ITEM.exec(l)
+  if (!m) return null
+  const [line, indent = '', mark, numText = '', label = ''] = m
+  return { line, indent, selected: !!mark, numText, num: Number(numText), label }
+}
+
 const indentOf = (l: string) => l.length - l.trimStart().length
 const blankish = (l: string) => !l.trim() || RULE.test(l)
 const stripMark = (t: string) => t.replace(/^[✔✓]\s+/, '').trim()
@@ -68,10 +95,10 @@ const stripMark = (t: string) => t.replace(/^[✔✓]\s+/, '').trim()
  * Text typed there can look like a menu ("❯ 1. fix the bug"), so it never counts as one.
  */
 function isInputBox(lines: string[], i: number) {
-  if (!INPUT_GLYPH.test(lines[i])) return false
+  if (!INPUT_GLYPH.test(lineAt(lines, i))) return false
   for (let j = i - 1; j >= 0; j--) {
-    if (!lines[j].trim()) continue
-    return RULE.test(lines[j])
+    if (!lineAt(lines, j).trim()) continue
+    return RULE.test(lineAt(lines, j))
   }
   return false
 }
@@ -83,8 +110,8 @@ function isInputBox(lines: string[], i: number) {
  */
 function lastInputBoxEnd(lines: string[]): number {
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (!SELECTOR_START.test(lines[i]) || !isInputBox(lines, i)) continue
-    for (let j = i + 1; j < lines.length; j++) if (RULE.test(lines[j])) return j
+    if (!SELECTOR_START.test(lineAt(lines, i)) || !isInputBox(lines, i)) continue
+    for (let j = i + 1; j < lines.length; j++) if (RULE.test(lineAt(lines, j))) return j
     return i
   }
   return -1
@@ -103,26 +130,27 @@ interface Menu {
  * text or its description).
  */
 function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
-  const first = NUMBERED_ITEM.exec(lines[i])!
-  const col = first[0].indexOf(first[3], first[1].length)
+  const first = numbered(lineAt(lines, i))
+  if (!first) return null
+  const col = first.line.indexOf(first.numText, first.indent.length)
   const isOption = (l: string) => {
-    const m = NUMBERED_ITEM.exec(l)
-    return m && m[0].indexOf(m[3], m[1].length) === col ? m : null
+    const o = numbered(l)
+    return o && o.line.indexOf(o.numText, o.indent.length) === col ? o : null
   }
   const belongs = (l: string) => blankish(l) || indentOf(l) > col
   let top = i
   for (let j = i - 1; j >= 0; j--) {
-    if (isOption(lines[j])) top = j
-    else if (!belongs(lines[j])) break
+    if (isOption(lineAt(lines, j))) top = j
+    else if (!belongs(lineAt(lines, j))) break
   }
   const options: PromptOption[] = []
   let wrapped = false
   for (let j = top; j < lines.length; j++) {
-    const l = lines[j]
+    const l = lineAt(lines, j)
     const m = isOption(l)
     if (m) {
-      if (Number(m[3]) !== options.length + 1) break
-      options.push({ label: m[4].trim(), selected: !!m[2] })
+      if (m.num !== options.length + 1) break
+      options.push({ label: m.label.trim(), selected: m.selected })
       // a label that reaches the right edge continues on the next row
       wrapped = l.length >= cols - 12
       continue
@@ -132,7 +160,9 @@ function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
       wrapped = false
       continue
     }
+    // the row walked first is always an option, so by here there is one for this row to belong to
     const o = options[options.length - 1]
+    if (!o) break
     if (wrapped) o.label += ' ' + l.trim()
     else o.detail = o.detail ? `${o.detail} ${l.trim()}` : l.trim()
     wrapped = wrapped && l.length >= cols - 12
@@ -147,14 +177,15 @@ function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
  * lines can be plain text: a menu hint on screen, or a question just above it with nothing below.
  */
 function cursorMenu(lines: string[], i: number, hinted: boolean, cols: number): Menu | null {
-  const m = CURSOR_ITEM.exec(lines[i])!
-  const col = lines[i].length - m[2].length
+  const after = CURSOR_ITEM.exec(lineAt(lines, i))?.[2]
+  if (after === undefined) return null
+  const col = lineAt(lines, i).length - after.length
   // tree connectors (Claude Code's "⎿ result" under a "● Tool(...)" line) are output, not options
   const sibling = (l: string) => !!l.trim() && indentOf(l) === col && !/^\s*[⎿└├│┃]/.test(l)
   let top = i
   let bottom = i
-  while (top > 0 && sibling(lines[top - 1])) top--
-  while (bottom < lines.length - 1 && sibling(lines[bottom + 1])) bottom++
+  while (top > 0 && sibling(lineAt(lines, top - 1))) top--
+  while (bottom < lines.length - 1 && sibling(lineAt(lines, bottom + 1))) bottom++
   const siblings = bottom - top
   if (siblings < 1) return null
   // wrapped prose, not options: Codex echoes a sent message as "› text…" with the rest of it wrapped
@@ -166,7 +197,7 @@ function cursorMenu(lines: string[], i: number, hinted: boolean, cols: number): 
     if (!last || !asked) return null
   }
   const options: PromptOption[] = []
-  for (let j = top; j <= bottom; j++) options.push({ label: stripMark(j === i ? m[2] : lines[j]), selected: j === i })
+  for (let j = top; j <= bottom; j++) options.push({ label: stripMark(j === i ? after : lineAt(lines, j)), selected: j === i })
   return { reason: 'cursor-menu', options, top }
 }
 
@@ -177,15 +208,15 @@ function cursorMenu(lines: string[], i: number, hinted: boolean, cols: number): 
 function findMenu(lines: string[], cols: number, hinted: boolean): Menu | null {
   const candidates = (fn: (i: number) => Menu | null) => {
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (!SELECTOR_START.test(lines[i]) || isInputBox(lines, i)) continue
+      if (!SELECTOR_START.test(lineAt(lines, i)) || isInputBox(lines, i)) continue
       const menu = fn(i)
       if (menu) return menu
     }
     return null
   }
   return (
-    candidates((i) => (NUMBERED_ITEM.exec(lines[i])?.[2] ? numberedMenu(lines, i, cols) : null)) ??
-    candidates((i) => (CURSOR_ITEM.test(lines[i]) && !NUMBERED_ITEM.test(lines[i]) ? cursorMenu(lines, i, hinted, cols) : null))
+    candidates((i) => (numbered(lineAt(lines, i))?.selected ? numberedMenu(lines, i, cols) : null)) ??
+    candidates((i) => (CURSOR_ITEM.test(lineAt(lines, i)) && !NUMBERED_ITEM.test(lineAt(lines, i)) ? cursorMenu(lines, i, hinted, cols) : null))
   )
 }
 
@@ -193,8 +224,8 @@ function findMenu(lines: string[], cols: number, hinted: boolean): Menu | null {
 function questionAbove(lines: string[], top: number): string | undefined {
   let nearest: string | undefined
   for (let j = top - 1; j >= 0 && j >= top - 10; j--) {
-    const t = lines[j].trim()
-    if (!t || RULE.test(lines[j])) continue
+    const t = lineAt(lines, j).trim()
+    if (!t || RULE.test(lineAt(lines, j))) continue
     if (/\?$/.test(t)) return t
     nearest ??= t
   }
@@ -208,7 +239,7 @@ export function detectPrompt(view: ScreenView): Prompt | null {
   const raw = view.lines.map(normalizeLine)
   const cols = view.cols ?? Math.max(80, ...raw.map((l) => l.length))
   let end = raw.length
-  while (end > 0 && !raw[end - 1].trim()) end--
+  while (end > 0 && !lineAt(raw, end - 1).trim()) end--
   if (!end) return null
   let start = Math.max(0, end - REGION_ROWS)
   const box = lastInputBoxEnd(raw.slice(0, end))
@@ -224,7 +255,7 @@ export function detectPrompt(view: ScreenView): Prompt | null {
     const menu = findMenu(region, cols, MENU_HINT.test(text))
     if (menu) return { reason: menu.reason, kind: 'menu', lines, question: questionAbove(region, menu.top), options: menu.options }
     for (const [reason, re] of HINTS) if (re.test(text)) return { reason, kind: answerKind(reason), lines }
-    const last = raw[end - 1]
+    const last = lineAt(raw, end - 1)
     for (const [reason, re] of CURSOR_PROMPTS) if (re.test(last)) return { reason, kind: answerKind(reason), lines: [last.trim()], question: last.trim() }
     return null
   }
@@ -356,9 +387,11 @@ export class StatusTracker {
   private activeSince(now: number, since: number) {
     const from = Math.max(now - ACTIVE_WINDOW_MS, since)
     const recent = this.outputs.filter((t) => t > from)
-    if (!recent.length || now - recent[recent.length - 1] > QUIET_MS) return false
+    const first = recent[0]
+    const last = recent[recent.length - 1]
+    if (first === undefined || last === undefined || now - last > QUIET_MS) return false
     if (recent.length >= 6) return true
-    return recent.length >= 2 && recent[recent.length - 1] - recent[0] >= 300
+    return recent.length >= 2 && last - first >= 300
   }
 
   evaluate(now: number, prompt: Prompt | null): ConsoleStatus {
