@@ -181,7 +181,7 @@ function SkillDetail({ skill, projectPath, onDeleted }: { skill: SkillInfo; proj
         <button className="btn ghost sm" style={{ color: 'var(--danger)' }} onClick={remove}>
           <Trash2 size={12} /> Delete
         </button>
-        <button className="btn ghost sm" onClick={() => invoke('skills:open', skill.dir)}>
+        <button className="btn ghost sm" onClick={() => invoke('skills:open', skill.dir, projectPath)}>
           <FolderOpen size={12} /> Open folder
         </button>
         <span className="spacer" />
