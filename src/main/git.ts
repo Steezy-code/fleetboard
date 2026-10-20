@@ -121,12 +121,12 @@ const CODE_FOR: Record<string, string> = { M: 'M', T: 'M', A: 'A', D: 'D', R: 'R
 function displayCode(x: string, y: string) {
   if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) return 'U'
   // prefer the index change for adds/renames, the worktree change otherwise
-  if (x === 'R' || x === 'C' || x === 'A') return CODE_FOR[x]
+  if (x === 'R' || x === 'C' || x === 'A') return CODE_FOR[x] ?? 'M'
   if (y !== '.') return CODE_FOR[y] ?? 'M'
   return CODE_FOR[x] ?? 'M'
 }
 
-function parseStatus(out: string, root: string): GitStatus {
+export function parseStatus(out: string, root: string): GitStatus {
   const st: GitStatus = { branch: '', detached: false, oid: null, upstream: null, ahead: 0, behind: 0, files: [], root }
   const parts = out.split('\0')
   for (let i = 0; i < parts.length; i++) {
@@ -154,9 +154,15 @@ function parseStatus(out: string, root: string): GitStatus {
       st.files.push({ path: rec.slice(2), code: '?', x: '?', y: '?', staged: false, unstaged: true, untracked: true })
     } else if (kind === '1' || kind === '2' || kind === 'u') {
       const fields = rec.split(' ')
-      const xy = fields[1]
-      const x = xy[0]
-      const y = xy[1]
+      // The XY field, which every kind of record has second. Reading fields[1][0] of a record
+      // without one threw, and took the status read for the whole repo with it. No git this parser
+      // is given emits such a record — a truncated or timed-out read exits non-zero and status()
+      // turns back before here — so this is the next porcelain version, or a byte of something
+      // else, costing one file instead of the panel.
+      const xy = fields[1] ?? ''
+      if (xy.length < 2) continue
+      const x = xy.charAt(0)
+      const y = xy.charAt(1)
       // path is everything after the fixed number of fields
       const fixed = kind === '1' ? 8 : kind === '2' ? 9 : 10
       const p = fields.slice(fixed).join(' ')
@@ -219,8 +225,8 @@ async function log(cwd: string, n = 20): Promise<GitResult<{ commits: GitCommit[
   return { ok: true, commits }
 }
 
-/** "3 hours ago" → "3h ago" */
-function shortRel(s: string) {
+/** "3 hours ago" → "3h ago". Takes a missing date, which is what its callers can hand it. */
+function shortRel(s: string | undefined) {
   return (s ?? '')
     .replace(/(\d+) seconds? ago/, '$1s ago')
     .replace(/(\d+) minutes? ago/, '$1m ago')
