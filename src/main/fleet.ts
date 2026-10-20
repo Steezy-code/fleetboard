@@ -42,6 +42,8 @@ const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
 /** lead id → pending fleet_wait resolver */
+/** this module's timers, so they can be stopped (see initFleet / stopFleetTicks) */
+const ticks: NodeJS.Timeout[] = []
 const waiters = new Map<string, (events: FleetMessage[]) => void>()
 /** ask id → pending fleet_ask_user resolver */
 const askWaiters = new Map<string, (answer: string) => void>()
@@ -1039,8 +1041,17 @@ export async function initFleet(c: MainContext) {
   ctx.ptys.onSpawn(memberStarted)
   void findClaudeConfig()
   port = await startServer()
-  setInterval(deliverTick, 700)
-  setInterval(trustTick, 900)
+  // kept and unref'd, the way pty.ts and remote.ts handle theirs. Without this they go on ticking
+  // through dispose(), typing queued messages into consoles that are being torn down, and a live
+  // timer is on its own enough to hold the process open.
+  for (const [fn, ms] of [
+    [deliverTick, 700],
+    [trustTick, 900]
+  ] as const) {
+    const t = setInterval(fn, ms)
+    t.unref?.()
+    ticks.push(t)
+  }
 
   const { ipc } = ctx
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
@@ -1179,6 +1190,12 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
 }
 
 /** A project's team state, if it has one. */
+/** Stop the team timers. Called when the app quits. */
+export function stopFleetTicks() {
+  for (const t of ticks) clearInterval(t)
+  ticks.length = 0
+}
+
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {

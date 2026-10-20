@@ -14,7 +14,7 @@ import * as profiles from './profiles'
 import * as sweep from './sweep'
 import * as ci from './ci'
 import * as goal from './goal'
-import { initFleet } from './fleet'
+import { initFleet, stopFleetTicks } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
@@ -181,6 +181,11 @@ function registerCore() {
 
   ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
+    // headless runs and goal checks are not consoles, so dispose() never saw them: a planner run or
+    // an `npm test` goal check outlived the app, spending tokens with its output going nowhere
+    cli.killRuns()
+    goal.killGoalChecks()
+    stopFleetTicks()
     await ptys.dispose()
     // the board is already saved; don't let a slow child process keep the app alive
     win?.destroy()
@@ -266,6 +271,9 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', async () => {
+  cli.killRuns()
+  goal.killGoalChecks()
+  stopFleetTicks()
   await ptys.dispose()
   app.quit()
 })
