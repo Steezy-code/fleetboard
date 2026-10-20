@@ -192,6 +192,9 @@ function registerCore() {
     win = null
     setTimeout(() => app.exit(0), 300)
   })
+  // the renderer's own stray errors, into the same log as the main process's
+  ipcMain.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
+
   // asked once by a page as it starts: was it reloaded after the window crashed?
   ipcMain.handle('app:crashRecovered', () => {
     const was = crashRecovered

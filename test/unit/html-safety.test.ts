@@ -97,3 +97,10 @@ test('a secret is never generated with Math.random', () => {
   ).map((f) => f.rel)
   assert.deepEqual(offenders, [], 'a secret or token must come from node:crypto, not Math.random')
 })
+
+test('a URL that comes out of the board file is checked before it is used', () => {
+  // ~/.fleetboard/projects/<id>.json is written by the app and by agents, and these two read a URL
+  // straight out of it into the DOM on every load
+  const img = FILES.find((f) => f.rel === 'renderer/src/nodes/ImageNode.tsx')!
+  assert.match(img.text, /safeUrl\(/, 'ImageNode must check node.data.src before it reaches <img src>')
+})

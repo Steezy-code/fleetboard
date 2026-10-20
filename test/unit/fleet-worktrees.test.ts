@@ -74,3 +74,18 @@ test("a branch is only deleted once the lead's branch really holds its commits",
   // a branch that does not exist is not "contained"
   assert.equal(await containedIn(repo, 'fleet/lead--gone', 'fleet/lead'), false)
 })
+
+test('a project id is checked before it becomes a file or folder name', async () => {
+  // it arrives over IPC and is used both as ~/.fleetboard/fleet/<id>.json and as a folder under
+  // ~/.fleetboard/worktrees/<id>/. store.ts has always checked exactly this; fleet.ts did not.
+  const { stateFileFor } = await import('../../src/main/fleet')
+  for (const bad of ['../../.config/autostart/x', '..', 'a/b', 'a\\b', '', 'has space', 'dot.dot', 'x/../../y']) {
+    assert.throws(() => stateFileFor(bad), /Bad project id/, JSON.stringify(bad))
+  }
+  // what store.projectIdFor actually produces is a short hash, and ids with dashes exist too
+  for (const good of ['3f8a1c2d9e0b', 'abc-123_XYZ']) {
+    const f = stateFileFor(good)
+    assert.ok(f.endsWith(`${good}.json`), f)
+    assert.ok(!f.includes('..'), f)
+  }
+})

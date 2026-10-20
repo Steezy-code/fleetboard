@@ -61,7 +61,20 @@ const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
 
-const stateFile = (projectId: string) => path.join(fleetDir, `${projectId}.json`)
+/**
+ * A project id is a hash from store.projectIdFor, and it is used as a file name and as a folder name
+ * under ~/.fleetboard/worktrees. It arrives over IPC, and store.ts checks exactly this before using
+ * one as a path (`/^[\w-]+$/`) — fleet.ts did not, so `fleet:startLead` with an id of
+ * "../../.config/autostart/x" wrote its state outside ~/.fleetboard and created folders there too.
+ */
+const assertProjectId = (projectId: string) => {
+  if (!/^[\w-]+$/.test(projectId)) throw new Error('Bad project id')
+  return projectId
+}
+
+const stateFile = (projectId: string) => path.join(fleetDir, `${assertProjectId(projectId)}.json`)
+/** exported for the test that pins the check above */
+export const stateFileFor = stateFile
 
 function loadAll() {
   for (const f of fs.readdirSync(fleetDir)) {
@@ -149,7 +162,7 @@ function linkHeavyDirs(projectPath: string, wt: string) {
 const ADD_ALL = ['add', '-A', '--', '.', ':(exclude)node_modules', ':(exclude).venv', ':(exclude)venv', ':(exclude)vendor']
 
 async function createWorktree(repoCwd: string, projectPath: string, projectId: string, dirName: string, branch: string) {
-  const dir = path.join(treesDir, projectId, dirName)
+  const dir = path.join(treesDir, assertProjectId(projectId), dirName)
   fs.mkdirSync(path.dirname(dir), { recursive: true })
   const r = await git(repoCwd, ['worktree', 'add', '-b', branch, dir, 'HEAD'])
   if (!r.ok) throw new Error(`git worktree add failed: ${r.err}`)
