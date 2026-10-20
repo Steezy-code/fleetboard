@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
-import { dirs, renameRetrying } from './paths'
+import { dirs, writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
 import { allowed, grant, outsideMessage } from './roots'
@@ -81,8 +81,8 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
 /**
  * Write a file the user edits. With `base` (what the editor loaded or last saved), only while the file
  * still holds exactly that: an agent's change made meanwhile is never overwritten; the caller gets what
- * is there now (null: the file is gone). Written to a temporary file and renamed, so a crash midway
- * never leaves it half written; its permissions are kept.
+ * is there now (null: the file is gone). Written through writeDurable, so neither a crash nor a power
+ * loss can leave it half written or empty; its permissions are kept.
  */
 export function writeText(file: string, content: string, base?: string): WriteResult {
   if (base !== undefined) {
@@ -103,14 +103,9 @@ export function writeText(file: string, content: string, base?: string): WriteRe
   }
   fs.mkdirSync(path.dirname(target), { recursive: true })
   const mode = fs.statSync(target, { throwIfNoEntry: false })?.mode
+  // hidden, and beside the target: this one lands in the user's own project folder
   const tmp = path.join(path.dirname(target), `.${path.basename(target)}.fleetboard-${process.pid}-${Date.now()}.tmp`)
-  try {
-    fs.writeFileSync(tmp, content, mode !== undefined ? { mode: mode & 0o7777 } : undefined)
-    renameRetrying(tmp, target)
-  } catch (e) {
-    fs.rmSync(tmp, { force: true })
-    throw e
-  }
+  writeDurable(target, content, mode === undefined ? undefined : mode & 0o7777, tmp)
   return { ok: true }
 }
 
