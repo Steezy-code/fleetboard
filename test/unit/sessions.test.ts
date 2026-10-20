@@ -22,22 +22,23 @@ test('ids: only UUIDs, which is what the CLIs accept', () => {
 })
 
 test('Claude Code: a saved conversation (in any project folder, as Claude resumes by id from anywhere)', () => {
-  const st = (id: string, env: Record<string, string> = { HOME: home }) => sessionState('claude', id, env, '/home/me/repo')
+  const st = (id: string, env: Record<string, string> = { HOME: home, USERPROFILE: home }) => sessionState('claude', id, env, '/home/me/repo')
   assert.equal(st(ID), 'free', 'no config dir yet')
   put(`.claude/projects/-home-me-repo/${OTHER}.jsonl`, '{}\n')
   assert.equal(st(ID), 'free', 'nothing said yet: Claude Code has no file, and starting under the id works')
   put(`.claude/projects/-home-me-other-repo/${ID}.jsonl`, '{}\n')
   assert.equal(st(ID), 'resumable')
-  assert.equal(st(ID, { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), 'free', 'another config dir (a profile)')
+  assert.equal(st(ID, { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), 'free', 'another config dir (a profile)')
   put(`profile/projects/-x/${OTHER}.jsonl`)
-  assert.equal(st(OTHER, { HOME: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), 'resumable')
+  assert.equal(st(OTHER, { HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, 'profile') }), 'resumable')
   assert.equal(st('..'), 'free')
 })
 
 test('Gemini CLI: resumable once something was said; an untouched session holds its id', () => {
   const cwd = '/home/me/proj'
-  const hash = crypto.createHash('sha256').update(cwd).digest('hex')
-  const st = (id: string, dir = cwd) => sessionState('gemini', id, { HOME: home }, dir)
+  // what Gemini hashes is the absolute folder (D:\\home\\me\\proj on Windows)
+  const hash = crypto.createHash('sha256').update(path.resolve(cwd)).digest('hex')
+  const st = (id: string, dir = cwd) => sessionState('gemini', id, { HOME: home, USERPROFILE: home }, dir)
   // the lines Gemini CLI writes (seen in real chats): a header, the context it adds, then the chat
   const header = (id: string, project = hash) => JSON.stringify({ sessionId: id, projectHash: project, startTime: '2026-10-19T08:32:22.345Z', kind: 'main' })
   const context = JSON.stringify({ id: 'd049', type: 'user', content: [{ text: '<session_context>\nThis is the Gemini CLI. We are setting up the context for our chat.' }] })
@@ -73,8 +74,8 @@ test('Gemini CLI: resumable once something was said; an untouched session holds 
 })
 
 test('CLIs without ids, and Codex with no sessions yet', () => {
-  assert.equal(sessionState('aider', ID, { HOME: home }, home), 'free')
-  assert.equal(sessionState('codex', ID, { HOME: home }, home), 'free')
+  assert.equal(sessionState('aider', ID, { HOME: home, USERPROFILE: home }, home), 'free')
+  assert.equal(sessionState('codex', ID, { HOME: home, USERPROFILE: home }, home), 'free')
 })
 
 // ---- Codex: no id at start; its session is found after the first turn ----
@@ -95,7 +96,7 @@ function rollout(id: string, cwd: string, startedAt: number, prompt?: string) {
   if (prompt) lines.push({ timestamp: ts, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] } })
   fs.writeFileSync(path.join(dir, `rollout-${ts.slice(0, 19).replace(/:/g, '-')}-${seq++}-${id}.jsonl`), lines.map((l) => JSON.stringify(l)).join('\n') + '\n')
 }
-const env = { HOME: home, CODEX_HOME: codexHome }
+const env = { HOME: home, USERPROFILE: home, CODEX_HOME: codexHome }
 const T = Date.now()
 const S1 = '01a152d6-d8a1-7553-afc2-db83baf0c7af'
 const S2 = '01a152d7-afaf-7611-b8a8-24a055d3a617'

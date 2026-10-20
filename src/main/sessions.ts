@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { homeOf } from './platform'
 
 // Each Claude Code / Gemini CLI console gets its own conversation id, so reopening the board resumes
 // that console's conversation. The CLIs' own "continue" picks the most recent conversation in the
@@ -26,7 +27,7 @@ export type SessionState = 'resumable' | 'taken' | 'free' | 'lost'
 
 export function sessionState(agentId: string, id: string, env: Record<string, string | undefined>, cwd: string): SessionState {
   if (!validSessionId(id)) return 'free'
-  const home = env.HOME || os.homedir()
+  const home = homeOf(env)
   const dirs = (p: string) => {
     try {
       return fs.readdirSync(p)
@@ -102,7 +103,7 @@ function readGeminiChat(file: string): { sessionId?: string; projectHash?: strin
 // and what was said: <CODEX_HOME or ~/.codex>/sessions/YYYY/MM/DD/rollout-<time>-<id>.jsonl. After a
 // console's first turn, the new session in its folder that no other console has is its own.
 
-const codexRoot = (env: Record<string, string | undefined>) => path.join(env.CODEX_HOME || path.join(env.HOME || os.homedir(), '.codex'), 'sessions')
+const codexRoot = (env: Record<string, string | undefined>) => path.join(env.CODEX_HOME || path.join(homeOf(env), '.codex'), 'sessions')
 
 function readDir(p: string): string[] {
   try {

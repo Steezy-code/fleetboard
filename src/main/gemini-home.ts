@@ -2,14 +2,14 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
-import { linkPath } from './platform'
+import { homeOf, linkPath } from './platform'
 
 // Gemini CLI takes MCP servers only from its settings files, so a team console gets a Gemini home of
 // its own (GEMINI_CLI_HOME): every entry of the user's ~/.gemini linked in (sign-in, trusted folders,
 // sessions), and a settings.json that is the user's plus the fleet server. The process's HOME is not
 // changed, so commands it runs see the user's home as usual.
 
-const realGeminiDir = (env: Record<string, string | undefined>) => path.join(env.GEMINI_CLI_HOME || env.HOME || os.homedir(), '.gemini')
+const realGeminiDir = (env: Record<string, string | undefined>) => path.join(env.GEMINI_CLI_HOME || homeOf(env), '.gemini')
 
 /** JSON with // and /* comments (Gemini's settings allow them); null when it is not that. */
 export function parseJsonc(text: string): unknown {
