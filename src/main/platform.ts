@@ -88,10 +88,23 @@ export function shimScript(cmdFile: string): string | null {
   return fs.existsSync(script) ? script : null
 }
 
-/** cmd.exe quoting for one argument (inside `cmd /d /s /c "…"`). */
+/**
+ * cmd.exe quoting for one argument (inside `cmd /d /s /c "…"`).
+ *
+ * A double quote is doubled (""), not backslash-escaped. \" is a C-runtime convention that cmd.exe
+ * does not honour: cmd counts raw quote characters, so \" ends the quoted run as far as its own
+ * metacharacter scan is concerned, and whatever follows — &, |, another quote — is read as shell
+ * syntax. That is the BatBadBut class of bug, and it is reachable here because cli.ts sends
+ * model-written prompts to a CLI installed as a .cmd that is not an npm shim. "" is read as a
+ * literal quote both by cmd and by the C runtime that parses argv on the other side.
+ *
+ * Not neutralised: % inside quotes is expanded by cmd and cannot be escaped on a command line, so
+ * an argument naming an existing variable has its value substituted. That reads an environment
+ * value into the prompt; it does not end the quoted run, so it cannot start a command.
+ */
 export function cmdQuote(arg: string): string {
   if (arg && !/[\s"&|<>^%(),;=!]/.test(arg)) return arg
-  return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`
+  return `"${arg.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`
 }
 
 /**
