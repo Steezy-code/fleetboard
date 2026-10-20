@@ -311,6 +311,17 @@ export function ideaDeeper(nodeId: string, idea: Idea) {
 
 export const dropIdea = (nodeId: string, idea: Idea) => markIdea(nodeId, idea.id, null)
 
+/** A brainstorm card that has no topic yet (added by hand): give it one and start. */
+export function startOn(nodeId: string, topic: string) {
+  const project = useApp.getState().project
+  const t = topic.trim()
+  if (!project || !t) return
+  const panel = pickPanel()
+  useApp.getState().updateNode(nodeId, { title: `Brainstorm · ${clip(t, 48)}` })
+  update(nodeId, { topic: t.charAt(0).toUpperCase() + t.slice(1), status: 'running', panel, ideas: [], startedAt: Date.now(), error: undefined })
+  void run(nodeId, t, panel, project)
+}
+
 /** Run it again with a fresh panel (same topic). */
 export function rerunBrainstorm(nodeId: string) {
   const d = dataOf(nodeId)

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, CircleX, FileText, LoaderCircle, RotateCcw, Sparkles, Telescope, Users, X } from 'lucide-react'
 import type { NodeProps } from './types'
 import { agentColor, agentLabel } from '../engine/consoles'
-import { PERSONAS, dropIdea, ideaDeeper, ideaToPlan, ideaToTeam, isRunning, rerunBrainstorm, type BrainstormData, type Idea, type PersonaId } from '../voice/helm/brainstorm'
+import { PERSONAS, dropIdea, ideaDeeper, ideaToPlan, ideaToTeam, isRunning, rerunBrainstorm, startOn, type BrainstormData, type Idea, type PersonaId } from '../voice/helm/brainstorm'
 
 const PERSONA_TONE: Record<PersonaId, string> = { pragmatist: 'var(--ok)', wildcard: 'var(--accent)', critic: 'var(--info)' }
 const DONE_LABEL = { team: 'Sent to the team', plan: 'In PLAN.md', deeper: 'Went deeper' } as const
@@ -10,8 +10,35 @@ const DONE_LABEL = { team: 'Sent to the team', plan: 'In PLAN.md', deeper: 'Went
 const secs = (ms: number) => (ms < 60_000 ? `${Math.round(ms / 1000)}s` : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`)
 
 /** Oracle's brainstorm: the panel (who is thinking with which CLI) and the ranked ideas with their buttons. */
-export default function BrainstormNode({ node }: NodeProps<BrainstormData>) {
-  const d = node.data
+export default function BrainstormNode({ node }: NodeProps<Partial<BrainstormData>>) {
+  if (!node.data?.topic) return <AskTopic nodeId={node.id} />
+  const d: BrainstormData = { status: 'done', panel: [], ideas: [], startedAt: Date.now(), ...node.data, topic: node.data.topic }
+  return <Session nodeId={node.id} d={d} />
+}
+
+/** A card added by hand: what should the panel think about? */
+function AskTopic({ nodeId }: { nodeId: string }) {
+  const [topic, setTopic] = useState('')
+  const go = () => topic.trim() && startOn(nodeId, topic)
+  return (
+    <div className="bs bs-ask">
+      <span className="bs-badge">
+        <Sparkles size={14} />
+      </span>
+      <div className="bs-topic">What should the panel brainstorm?</div>
+      <div className="muted small">A pragmatist, a wild card and a critic think about it in parallel; Oracle ranks their ideas here.</div>
+      <div className="row" style={{ gap: 6, width: '100%' }}>
+        <input className="input grow" placeholder="Ways to make onboarding faster" value={topic} onChange={(e) => setTopic(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} />
+        <button className="btn primary" onClick={go}>
+          Start
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function Session({ nodeId, d }: { nodeId: string; d: BrainstormData }) {
+  const node = { id: nodeId }
   const live = d.status === 'running' || d.status === 'merging'
   const cut = live && !isRunning(node.id)
   const [, tick] = useState(0)
