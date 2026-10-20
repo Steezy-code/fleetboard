@@ -184,20 +184,23 @@ export async function containedIn(projectPath: string, branch?: string, into?: s
   return (await git(projectPath, ['merge-base', '--is-ancestor', branch, into])).ok
 }
 
+/** What keepUncommitted did: there was nothing to keep, it made a rescue commit, or it could not. */
+export type Kept = 'clean' | 'rescued' | 'failed'
+
 /**
  * Commit whatever a member never committed, so its worktree can be removed without losing work.
- * Returns false when there is uncommitted work it could not save — then the worktree stays.
+ * 'failed' when there is uncommitted work it could not save — then the worktree stays.
  */
-async function keepUncommitted(s: FleetState, m: FleetMember): Promise<boolean> {
+async function keepUncommitted(s: FleetState, m: FleetMember): Promise<Kept> {
   const add = await git(m.cwd, ADD_ALL)
   if (!add.ok) {
     trouble(s, `${m.name}'s changes could not be staged (${add.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
-    return false
+    return 'failed'
   }
-  if ((await git(m.cwd, ['diff', '--cached', '--quiet'])).ok) return true // nothing of its own uncommitted
+  if ((await git(m.cwd, ['diff', '--cached', '--quiet'])).ok) return 'clean' // nothing of its own uncommitted
   if (!m.branch) {
     trouble(s, `${m.name} has uncommitted changes and no branch of its own, so its folder is kept at ${m.cwd}.`)
-    return false
+    return 'failed'
   }
   const r = await git(m.cwd, [
     'commit',
@@ -206,11 +209,23 @@ async function keepUncommitted(s: FleetState, m: FleetMember): Promise<boolean> 
   ])
   if (!r.ok) {
     trouble(s, `${m.name} has uncommitted work that could not be committed (${r.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
-    return false
+    return 'failed'
   }
   trouble(s, `${m.name} had work it never reported; it is kept as a commit on ${m.branch}.`, 'info')
-  return true
+  return 'rescued'
 }
+
+/**
+ * Whether a member's branch may still be deleted once its worktree is gone.
+ *
+ * `asked` was decided by the caller, and dismissTeam decides it with containedIn *before* any of this
+ * runs — so it can only speak for the commits that existed then. keepUncommitted may put a new commit
+ * on the branch a moment later, one the lead's branch cannot possibly contain, right after telling the
+ * user the work "is kept as a commit on <branch>". Deleting the branch there made that commit
+ * unreachable and the message a lie, so a rescue commit always keeps the branch.
+ */
+export const branchToDelete = (asked: 'merged' | 'force' | 'keep', kept: Kept): 'merged' | 'force' | 'keep' =>
+  kept === 'rescued' ? 'keep' : asked
 
 /**
  * Whether a member's worktree is its own to remove.
@@ -241,7 +256,8 @@ export function ownWorktree(
 async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merged' | 'force' | 'keep') {
   const projectPath = s.projectPath
   if (!ownWorktree(m, Object.values(s.members), treesDir)) return
-  if (!(await keepUncommitted(s, m))) return
+  const kept = await keepUncommitted(s, m)
+  if (kept === 'failed') return
   for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
     const p = path.join(m.cwd, d)
     try {
@@ -252,7 +268,8 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   }
   const rm = await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
   if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
-  if (m.branch && deleteBranch !== 'keep') await git(projectPath, ['branch', deleteBranch === 'force' ? '-D' : '-d', m.branch])
+  const how = branchToDelete(deleteBranch, kept)
+  if (m.branch && how !== 'keep') await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])
 }
 
 // ---------------------------------------------------------------- prompts
@@ -1220,6 +1237,8 @@ async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 
   // It used to be deleted with -D either way, so a worker that reported "blocked", or whose console
   // died before it reported, had its commits made unreachable — after the lead's own report had told
   // the user that work existed.
+  // This answer is about the commits that exist now; a rescue commit made during the dismissal would
+  // make it stale, which is why branchToDelete has the last word over it.
   for (const m of crew) await dismiss(s, m, (await containedIn(s.projectPath, m.branch, lead.branch)) ? 'force' : 'keep')
   await dismiss(s, lead, branch)
   s.ready = null
