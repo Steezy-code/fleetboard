@@ -25,6 +25,33 @@ const remember = (key: string, add: string[]) => useApp.getState().setProjectExt
 export const autoRouteOn = () => extras().prAutoRoute !== false
 export const setAutoRoute = (on: boolean) => useApp.getState().setProjectExtra('prAutoRoute', on ? undefined : false)
 
+/**
+ * Whose review comments may be handed to an agent on their own.
+ *
+ * A comment routed automatically becomes instructions for a CLI running in the user's checkout. On a
+ * public repository anyone can leave one, so without this anyone could tell that agent what to do —
+ * and if the console was started with auto-approval, the agent would act on it without asking.
+ * GitHub's authorAssociation is the right signal: these three mean the author has write access, or
+ * is the repository's owner.
+ *
+ * Everything else — CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE, MANNEQUIN, or an association GitHub
+ * did not give us — still raises a notice with "Send to…" and "Mark handled" in the CI drawer. It is
+ * read by a person first, which is the whole difference.
+ */
+const WRITE_ACCESS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
+
+export function trustedAuthor(c: PrComment, viewer?: string): boolean {
+  if (viewer && c.author && c.author.toLowerCase() === viewer.toLowerCase()) return true
+  return WRITE_ACCESS.has(String(c.association ?? '').toUpperCase())
+}
+
+/** A console that answers its own permission prompts must never be fed a comment automatically. */
+export function autoApproves(consoleId: string): boolean {
+  const node = allConsoles().find((c) => c.id === consoleId)
+  if (!node) return false
+  return (node.data.autoApprove as boolean | undefined) ?? useApp.getState().settings.autoApprove
+}
+
 /** Comments no agent has been given yet. */
 export function unsent(pr: PrFeedback): PrComment[] {
   const sent = new Set(ids('prSent'))
@@ -95,6 +122,11 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   if (!list.length) return null
   const msg = feedbackMessage(pr, list)
   const owner = ownerOf(pr.branch)
+  if (owner && opts.auto && autoApproves(owner.id)) {
+    // it would act on these words without asking: tell the user instead, who can still send it by hand
+    app.toast(`${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}: ${owner.name} approves everything, so they were not sent automatically`, 'warn')
+    return null
+  }
   if (owner) {
     if (owner.lead) await invoke('fleet:userMessage', owner.id, msg)
     else sendToConsole(owner.id, msg)
@@ -113,7 +145,9 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   const taken = allConsoles().map((c) => c.data.name as string)
   let name = `PR #${pr.number} fixer`
   for (let n = 2; taken.includes(name); n++) name = `PR #${pr.number} fixer ${n}`
-  const [id] = spawnConsoles({ names: [name], initialPrompt: prompt })
+  // explicitly not auto-approving: the prompt is built from other people's words, and without this
+  // the console would inherit the global auto-approve setting
+  const [id] = spawnConsoles({ names: [name], initialPrompt: prompt, autoApprove: false })
   if (!id) return null
   setBranchAgent(pr.branch, id)
   markSent(pr, list)
@@ -138,9 +172,24 @@ export function applyFeedback(result: PrFeedbackResult) {
   remember('prSeen', fresh.flatMap((x) => x.list.map((c) => c.id)))
   for (const { pr, list } of fresh) {
     const who = [...new Set(list.map((c) => '@' + c.author))].join(', ')
-    if (autoRouteOn() && agentMade(pr.branch))
-      void routeFeedback(pr, { list, auto: true }).then((id) => id && notifyFeedback(`Review comments on PR #${pr.number}`, `${list.length} from ${who}, sent to its agent`, false))
-    else notifyFeedback(`New review comments on PR #${pr.number}`, `${list.length} from ${who}: ${clip(list[0].body.replace(/\s+/g, ' '), 90)}`)
+    // only people with write access get to instruct an agent without a person reading first
+    const trusted = list.filter((c) => trustedAuthor(c, result.viewer))
+    const outside = list.filter((c) => !trustedAuthor(c, result.viewer))
+    if (autoRouteOn() && agentMade(pr.branch) && trusted.length) {
+      const from = [...new Set(trusted.map((c) => '@' + c.author))].join(', ')
+      void routeFeedback(pr, { list: trusted, auto: true }).then((id) => id && notifyFeedback(`Review comments on PR #${pr.number}`, `${trusted.length} from ${from}, sent to its agent`, false))
+    }
+    if (outside.length) {
+      const from = [...new Set(outside.map((c) => '@' + c.author))].join(', ')
+      notifyFeedback(
+        `New review comments on PR #${pr.number}`,
+        trusted.length
+          ? `${outside.length} more from ${from}, not sent on: no write access to this repo`
+          : `${outside.length} from ${from}: ${clip(outside[0].body.replace(/\s+/g, ' '), 90)}`
+      )
+    } else if (!(autoRouteOn() && agentMade(pr.branch) && trusted.length)) {
+      notifyFeedback(`New review comments on PR #${pr.number}`, `${list.length} from ${who}: ${clip(list[0].body.replace(/\s+/g, ' '), 90)}`)
+    }
   }
 }
 
