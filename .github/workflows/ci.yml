@@ -9,6 +9,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# the default for a token is whatever the repository settings say, which may include write. Nothing
+# here needs more than reading the code.
+permissions:
+  contents: read
+
 jobs:
   checks:
     runs-on: ubuntu-24.04
@@ -29,6 +34,16 @@ jobs:
 
       - name: Install (Electron + node-pty built for it)
         run: npm ci
+
+      # a known-vulnerable dependency should fail the build, not wait to be noticed. Moderate and
+      # below are reported without failing: this app ships no server and several of those advisories
+      # are denial-of-service in a build tool.
+      - name: Dependency audit
+        run: npm audit --audit-level=high --omit=dev
+
+      - name: Dependency audit (full, advisory only)
+        if: always()
+        run: npm audit || true
 
       - name: Typecheck
         run: npm run typecheck

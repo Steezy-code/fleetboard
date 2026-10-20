@@ -36,6 +36,17 @@ function webPermission(permission: string, url: string | undefined) {
   }
 }
 
+/**
+ * What the app's own window may have. Push-to-talk needs the microphone, and in Electron the 'media'
+ * permission covers the camera too — granting it outright handed over both. Anything that asks for
+ * video is refused; audio-only, and a request that does not say (older Electron, or a check rather
+ * than a request), still goes through, because denying those would break push-to-talk.
+ */
+export function appPermission(permission: string, mediaTypes?: string[]) {
+  if (permission === 'media') return !mediaTypes?.includes('video')
+  return permission === 'clipboard-read' || permission === 'notifications'
+}
+
 // Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
 app.on('web-contents-created', (_e, contents) => {
   contents.on('will-attach-webview', (_ev, prefs) => {
@@ -233,8 +244,10 @@ app.whenReady().then(async () => {
     if (process.platform === 'win32' && /^\/[A-Za-z]:/.test(p)) p = p.slice(1)
     return net.fetch(pathToFileURL(p).toString())
   })
-  // Microphone for push-to-talk; everything else stays denied.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'media' || permission === 'clipboard-read' || permission === 'notifications'))
+  // Microphone for push-to-talk; the camera and everything else stays denied.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
+    cb(appPermission(permission, (details as { mediaTypes?: string[] }).mediaTypes))
+  )
   // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
   // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
   const web = session.fromPartition(WEB_PARTITION)

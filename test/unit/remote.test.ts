@@ -10,6 +10,16 @@ test('picks the Tailscale address and a real LAN address, never a container brid
   assert.deepEqual(found, { tailscale: '100.101.102.103', lan: '192.168.1.20' })
   assert.deepEqual(findAddresses({ eth0: iface('8.8.8.8'), docker0: iface('172.17.0.1') }), { tailscale: undefined, lan: undefined }, 'a public address is not a LAN')
   assert.equal(findAddresses({ x: iface('100.63.0.1') }).tailscale, undefined, '100.63 is outside 100.64/10')
+  // 100.64/10 is shared address space, not Tailscale's: a CGNAT ISP or a hotspot hands one out on a
+  // real interface, and calling that "encrypted" in Settings is the dangerous way to be wrong
+  assert.equal(findAddresses({ wlp2s0: iface('100.90.1.2') }).tailscale, undefined, 'a CGNAT Wi-Fi address is not Tailscale')
+  assert.equal(findAddresses({ ppp0: iface('100.70.0.5') }).tailscale, undefined, 'nor a mobile broadband one')
+  assert.equal(findAddresses({ eth0: iface('100.80.0.9') }).tailscale, undefined, 'nor a CGNAT ethernet link')
+  // Windows names the adapter "Tailscale"; Linux calls it tailscale0
+  assert.equal(findAddresses({ Tailscale: iface('100.101.102.103') }).tailscale, '100.101.102.103', 'Windows adapter name')
+  assert.equal(findAddresses({ tailscale1: iface('100.101.102.104') }).tailscale, '100.101.102.104')
+  // the right name with the wrong range is not it either
+  assert.equal(findAddresses({ tailscale0: iface('192.168.1.5') }).tailscale, undefined, 'a tailscale0 outside the range')
 })
 
 const HOST = '100.101.102.103:4321'
