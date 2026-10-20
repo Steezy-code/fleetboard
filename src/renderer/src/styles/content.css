@@ -1868,3 +1868,10 @@ body.kb-dragging * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.bs-ask {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 24px;
+}
