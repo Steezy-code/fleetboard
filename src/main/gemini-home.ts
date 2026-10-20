@@ -90,8 +90,10 @@ export function geminiTrusts(folder: string, env: Record<string, string | undefi
     return false
   }
   if (!isObj(rules)) return false
-  const target = path.resolve(folder)
-  const within = (dir: string) => target === dir || target.startsWith(dir.endsWith(path.sep) ? dir : dir + path.sep)
+  // Windows folders compare without case
+  const fold = (p: string) => (process.platform === 'win32' ? p.toLowerCase() : p)
+  const target = fold(path.resolve(folder))
+  const within = (dir: string) => target === fold(dir) || target.startsWith(fold(dir.endsWith(path.sep) ? dir : dir + path.sep))
   let verdict: boolean | undefined
   let best = -1
   for (const [p, rule] of Object.entries(rules)) {
