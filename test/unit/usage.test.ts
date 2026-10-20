@@ -8,6 +8,7 @@ import path from 'node:path'
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-usage-'))
 process.env.HOME = home
+process.env.USERPROFILE = home // what os.homedir() reads on Windows
 process.env.FLEETBOARD_HOME = path.join(home, 'fb')
 delete process.env.CLAUDE_CONFIG_DIR
 delete process.env.CODEX_HOME

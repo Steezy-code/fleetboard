@@ -57,8 +57,9 @@ test('PATH is found whatever its case (Windows spells it Path)', () => {
   assert.equal(pathOf({}), '')
   const bin = path.join(dir, 'bin')
   fs.mkdirSync(bin)
-  const tool = path.join(bin, 'mytool')
-  fs.writeFileSync(tool, '#!/bin/sh\n', { mode: 0o755 })
-  assert.equal(findExecutable('mytool', { Path: bin }), tool)
+  // Windows needs an extension from PATHEXT (and prefers it in that order); POSIX the executable bit
+  const tool = path.join(bin, process.platform === 'win32' ? 'mytool.cmd' : 'mytool')
+  fs.writeFileSync(tool, process.platform === 'win32' ? '@echo off\r\n' : '#!/bin/sh\n', { mode: 0o755 })
+  assert.equal(findExecutable('mytool', { Path: bin, PATHEXT: '.COM;.EXE;.BAT;.CMD' }), tool)
   assert.equal(findExecutable('nothere', { PATH: bin }), null)
 })

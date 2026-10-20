@@ -3,6 +3,7 @@
 // started is ended (process groups and signals on POSIX, the process tree on Windows).
 import { execFile, execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 
 export const IS_WIN = process.platform === 'win32'
@@ -112,6 +113,12 @@ export function launch(file: string, args: string[], env: Record<string, string 
 
 /** child_process options a launch needs (cmd.exe's own quoting must reach it as written). */
 export const launchOptions = (l: Launch) => (IS_WIN && /cmd\.exe$/i.test(l.file) ? { windowsVerbatimArguments: true, windowsHide: true } : { windowsHide: true })
+
+/**
+ * The user's home as agent CLIs see it: $HOME on POSIX; on Windows the profile folder (USERPROFILE),
+ * which is where Claude Code, Codex and Gemini keep their files even when Git Bash sets HOME.
+ */
+export const homeOf = (env: Record<string, string | undefined>) => (IS_WIN ? env.USERPROFILE : env.HOME) || os.homedir()
 
 /** Paths the renderer sees use forward slashes on Windows too (C:/dir/file): one form to compare. */
 export const toRendererPath = (p: string) => (IS_WIN ? p.replace(/\\/g, '/') : p)

@@ -11,7 +11,7 @@ import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { loginEnv } from './env'
-import { linkPath } from './platform'
+import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
@@ -301,7 +301,7 @@ function render(s: FleetState, msg: FleetMessage) {
 let claudeConfigFile = ''
 async function findClaudeConfig() {
   const env = await loginEnv()
-  claudeConfigFile = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(env.HOME || os.homedir(), '.claude.json')
+  claudeConfigFile = env.CLAUDE_CONFIG_DIR ? path.join(env.CLAUDE_CONFIG_DIR, '.claude.json') : path.join(homeOf(env), '.claude.json')
 }
 
 /** Is this folder (or a parent) trusted in the user's Claude Code config? Read-only. */

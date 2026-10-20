@@ -13,7 +13,8 @@ const write = (f: string, c: string) => {
   fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true })
   fs.writeFileSync(path.join(repo, f), c)
 }
-const WEIRD = ['app/[id]/page.tsx', 'docs/my notes.md', 'src/ünïcødé.ts', 'quote"d.txt', "it's.txt", 'new\nline.txt', '-dash.txt', 'star*.txt']
+// Windows can't have " * or a newline in a file name
+const WEIRD = ['app/[id]/page.tsx', 'docs/my notes.md', 'src/ünïcødé.ts', "it's.txt", '-dash.txt', ...(process.platform === 'win32' ? ['brace{1}.txt', 'semi;colon.txt'] : ['quote"d.txt', 'new\nline.txt', 'star*.txt'])]
 
 before(async () => {
   process.env.SHELL = '/bin/false'

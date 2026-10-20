@@ -39,7 +39,8 @@ test("a team console's home: the user's files linked in, their settings plus the
   assert.equal(settings.general.note, 'a // inside a string stays')
   assert.deepEqual(settings.mcpServers.theirs, { command: 'their-server' }, "the user's servers are kept")
   assert.deepEqual(settings.mcpServers.fleet, { httpUrl: 'http://127.0.0.1:5000/mcp/con_ada', headers: { Authorization: 'Bearer secret-token' }, trust: true, timeout: 600000 })
-  assert.equal(fs.statSync(path.join(dot, 'settings.json')).mode & 0o077, 0, 'the token is readable by the user only')
+  // (Windows has no permission bits: the file is in the user's profile, which only they can read)
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dot, 'settings.json')).mode & 0o077, 0, 'the token is readable by the user only')
   assert.ok(!fs.readFileSync(path.join(real, 'settings.json'), 'utf8').includes('fleet'), "the user's own settings are untouched")
   // again (a restart): same home, no errors
   assert.equal(geminiTeamHome('con_ada', { url: 'u', token: 't' }, { HOME: home }), h)
