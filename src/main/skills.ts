@@ -26,18 +26,18 @@ export function parseFrontmatter(text: string): Record<string, string> {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
   if (!m) return {}
   const out: Record<string, string> = {}
-  const lines = m[1].split(/\r?\n/)
+  const lines = (m[1] ?? '').split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
-    const kv = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(lines[i])
-    if (!kv) continue
-    let v = kv[2].trim()
+    const [, key, rest = ''] = /^([A-Za-z0-9_-]+):\s*(.*)$/.exec(lines[i] ?? '') ?? []
+    if (!key) continue
+    let v = rest.trim()
     if (v === '>' || v === '|' || v === '>-' || v === '|-' || v === '') {
       // folded / literal block: gather indented lines
       const block: string[] = []
-      while (i + 1 < lines.length && /^\s+/.test(lines[i + 1])) block.push(lines[++i].trim())
+      while (/^\s+/.test(lines[i + 1] ?? '')) block.push((lines[++i] ?? '').trim())
       v = block.join(v.startsWith('|') ? '\n' : ' ')
     }
-    out[kv[1]] = v.replace(/^["']|["']$/g, '')
+    out[key] = v.replace(/^["']|["']$/g, '')
   }
   return out
 }

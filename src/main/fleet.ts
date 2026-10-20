@@ -791,7 +791,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
         if (dirty) {
           // subject from the worker's own summary (what changed), body keeps the task it was given
           const summary = String(a.summary).trim()
-          const subject = summary.split('\n')[0].replace(/^[-*•\s]+/, '').replace(/\.$/, '').slice(0, 72) || 'Work from ' + m.name
+          const subject = (summary.split('\n')[0] ?? '').replace(/^[-*•\s]+/, '').replace(/\.$/, '').slice(0, 72) || 'Work from ' + m.name
           const c = await git(m.cwd, ['commit', '-m', `${subject}\n\n${summary.slice(0, 2000)}\n\nTask: ${m.task?.slice(0, 500) ?? ''}\nBy ${m.name} (Fleetboard team)`])
           commitNote = c.ok ? ` Committed on ${m.branch}.` : ` (commit failed: ${c.err.slice(0, 200)})`
           // the lead is a model: without this the user never hears that the work was not saved
@@ -928,9 +928,10 @@ function startServer(): Promise<number> {
     const server = http.createServer((req, res) => {
       const m = /^\/mcp\/([^/?]+)\/?(?:\?|$)/.exec(req.url ?? '')
       if (!m) return res.writeHead(404).end()
-      let caller = m[1]
+      const [, encoded = ''] = m
+      let caller = encoded
       try {
-        caller = decodeURIComponent(m[1])
+        caller = decodeURIComponent(encoded)
       } catch {
         /* use as is */
       }
@@ -971,7 +972,7 @@ function startServer(): Promise<number> {
         const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
         if (hangup.signal.aborted) return
         if (!out.length) return res.writeHead(202).end()
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': m[1] })
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': encoded })
         res.end(JSON.stringify(batch ? out : out[0]))
       })
     })
@@ -1103,7 +1104,7 @@ export async function initFleet(c: MainContext) {
     const push = await git(lead.cwd, ['push', '-u', 'origin', lead.branch])
     if (!push.ok) return { ok: false, error: `Push failed: ${push.err.slice(0, 400)}` }
     const summary = s.ready.summary.trim()
-    const title = (summary.split('\n')[0].replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
+    const title = ((summary.split('\n')[0] ?? '').replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
     const body = `${summary}\n\n---\nGoal: ${lead.task ?? ''}\n\nBuilt by a Fleetboard team (${lead.name} and ${Object.values(s.members).filter((x) => x.leadId === lead.id).length} helpers). ${s.ready.commits} commits, ${s.ready.files.length} files.`
     const env = await loginEnv()
     const r = await new Promise<{ ok: boolean; out: string; err: string }>((resolve) =>
@@ -1122,6 +1123,7 @@ export async function initFleet(c: MainContext) {
     const s = states.get(projectId)
     if (!s?.ready) return false
     const lead = s.members[s.ready.leadId]
+    if (!lead) return false
     await dismissTeam(s, lead, s.ready.prUrl ? 'keep' : s.ready.commits ? 'keep' : 'force')
     return true
   })
@@ -1180,7 +1182,8 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
   merging.add(projectId)
   try {
     const lead = s.members[s.ready.leadId]
-    if (lead?.branch) {
+    if (!lead) return { ok: false, error: 'The team has no lead to merge from.' }
+    if (lead.branch) {
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution

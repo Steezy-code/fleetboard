@@ -198,7 +198,7 @@ export function findCodexSession(env: Record<string, string | undefined>, opts: 
   const screen = squash(opts.screen)
   // the start of it: a long prompt wraps on screen
   const shown = found.filter((s) => s.firstPrompt && squash(s.firstPrompt) && screen.includes(squash(s.firstPrompt).slice(0, 40)))
-  return shown.length === 1 ? shown[0].id : undefined
+  return shown.length === 1 ? shown[0]?.id : undefined
 }
 
 /** Whether Codex has a session file with this id. */

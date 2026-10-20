@@ -45,7 +45,7 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
       const batch = level.slice(i, i + 16)
       const lists = await Promise.all(batch.map((p) => fs.promises.readdir(p.dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[])))
       batch.forEach((p, j) => {
-        const entries = lists[j].filter((e) => !IGNORE.has(e.name)).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+        const entries = (lists[j] ?? []).filter((e) => !IGNORE.has(e.name)).sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
         left -= entries.length
         for (const e of entries) {
           const full = toRendererPath(path.join(p.dir, e.name))

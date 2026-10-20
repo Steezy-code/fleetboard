@@ -13,7 +13,7 @@ async function version(bin: string): Promise<string | undefined> {
     const l = launch(bin, ['--version'], env)
     execFile(l.file, l.args, { env, timeout: 4000, ...launchOptions(l) }, (err, out) => {
       if (err) return resolve(undefined)
-      resolve(String(out).trim().split('\n')[0].slice(0, 60))
+      resolve((String(out).trim().split('\n')[0] ?? '').slice(0, 60))
     })
   })
 }

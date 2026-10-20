@@ -171,7 +171,9 @@ export function loadProject(id: string): Project | null {
     if (!isObj(w.camera) || ![w.camera.x, w.camera.y, w.camera.zoom].every((n) => Number.isFinite(n) && n !== null)) w.camera = { x: 0, y: 0, zoom: 1 } as Workspace['camera']
     w.extras = isObj(w.extras) ? w.extras : {}
   }
-  if (!p.workspaces.some((w) => w.id === p.activeWorkspaceId)) p.activeWorkspaceId = p.workspaces[0].id
+  // every board has a workspace: one was put there above if the file had none
+  const firstWs = p.workspaces[0]
+  if (firstWs && !p.workspaces.some((w) => w.id === p.activeWorkspaceId)) p.activeWorkspaceId = firstWs.id
   p.extras = isObj(p.extras) ? p.extras : {}
   // the board being opened is the current one from now on, not only once it is first saved: the
   // filesystem handlers take their project root from here (roots.ts), and the file tree reads before
