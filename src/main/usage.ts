@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { pairs } from '@shared/seq'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { listProfiles } from './profiles'
@@ -234,9 +235,9 @@ export function parseClaude(text: string, file: string, prev?: Parsed): Parsed {
     ]
     // Claude Code writes one line per content block of the same message; keep the last (final) usage.
     const prev = id !== ':' ? byId.get(id) : undefined
-    if (prev !== undefined) {
-      const p = b.events[prev]
-      ev[3] = Math.max(ev[3], p[3])
+    const prevEvent = prev !== undefined ? b.events[prev] : undefined
+    if (prev !== undefined && prevEvent) {
+      ev[3] = Math.max(ev[3], prevEvent[3])
       b.events[prev] = ev
     } else {
       if (id !== ':') byId.set(id, b.events.length)
@@ -613,12 +614,14 @@ function agentUsage(agent: UsageAgent, evs: FlatEv[]): AgentUsage {
   // longest session: active time, ignoring idle gaps over 30 minutes
   let longestSession: AgentUsage['longestSession'] = null
   for (const times of sessions.values()) {
+    const started = times[0]
+    if (started === undefined) continue
     let ms = 0
-    for (let i = 1; i < times.length; i++) {
-      const gap = times[i] - times[i - 1]
+    for (const [a, b] of pairs(times)) {
+      const gap = b - a
       if (gap < 30 * 60_000) ms += gap
     }
-    if (!longestSession || ms > longestSession.ms) longestSession = { ms, date: dayKey(times[0]) }
+    if (!longestSession || ms > longestSession.ms) longestSession = { ms, date: dayKey(started) }
   }
 
   const heatmap = dayRange(364).map((date) => ({ date, total: daily.get(date) ?? 0 }))
@@ -652,7 +655,8 @@ function buildReport(): UsageReport {
     agents[a] = agentUsage(a, evs)
     for (const x of evs) {
       const i = dayIdx.get(dayKey(x.t))
-      if (i !== undefined) add(days[i][a], x.e)
+      const day = i !== undefined ? days[i] : undefined
+      if (day) add(day[a], x.e)
     }
   }
   report = { generatedAt: Date.now(), agents, days, roots: roots() }

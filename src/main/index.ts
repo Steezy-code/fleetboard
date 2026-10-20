@@ -130,7 +130,7 @@ function createWindow() {
     if (details.reason === 'clean-exit' || !win || win.isDestroyed()) return
     const now = Date.now()
     crashes.push(now)
-    while (now - crashes[0] > 60_000) crashes.shift()
+    while ((crashes[0] ?? Infinity) < now - 60_000) crashes.shift()
     console.error(`window crashed (${details.reason}, exit ${details.exitCode})`)
     if (crashes.length > 3) {
       // not showErrorBox: it would hold up this process, and with it every console's output

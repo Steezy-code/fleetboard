@@ -328,7 +328,7 @@ export function nextPlanItem(root: string): { file: string; item: string } | nul
     for (const l of lines) {
       const h = /^\s{0,3}#{1,6}\s+(.*)$/.exec(l)
       if (h) {
-        inSection = /known gaps|\bnext\b/i.test(h[1])
+        inSection = /known gaps|\bnext\b/i.test(h[1] ?? '')
         continue
       }
       if (inSection && /^\s*(?:[-*+]|\d+[.)])\s+\S/.test(l) && !/^\s*[-*+]\s+\[[xX]\]/.test(l)) return { file, item: clean(l) }
@@ -356,15 +356,15 @@ export function score(r: SweepRepo): void {
   const approved = r.prs.filter((p) => !p.isDraft && p.reviewDecision === 'APPROVED')
   if (changes.length) {
     s += 18 * changes.length
-    a.push(changes.length === 1 ? `PR #${changes[0].number} has changes requested` : `${changes.length} PRs have changes requested`)
+    a.push(changes.length === 1 ? `PR #${changes[0]?.number} has changes requested` : `${changes.length} PRs have changes requested`)
   }
   if (waiting.length) {
     s += 10 * Math.min(waiting.length, 4)
-    a.push(waiting.length === 1 ? `PR #${waiting[0].number} is waiting on review` : `${waiting.length} PRs waiting on review`)
+    a.push(waiting.length === 1 ? `PR #${waiting[0]?.number} is waiting on review` : `${waiting.length} PRs waiting on review`)
   }
   if (approved.length) {
     s += 6 * approved.length
-    a.push(approved.length === 1 ? `PR #${approved[0].number} is approved and ready to merge` : `${approved.length} approved PRs ready to merge`)
+    a.push(approved.length === 1 ? `PR #${approved[0]?.number} is approved and ready to merge` : `${approved.length} approved PRs ready to merge`)
   }
   const dirty = r.uncommitted + r.untracked
   if (dirty) {
@@ -506,7 +506,7 @@ async function inspect(c: SweepCandidate, opts: { fetch: boolean; gh: string | n
       .split('\n')
       .filter(Boolean)
       .map((l) => {
-        const [name, t] = l.split('\x1f')
+        const [name = '', t] = l.split('\x1f')
         return { name, time: Number(t) * 1000 }
       })
     const names = new Set(local.map((b) => b.name))
@@ -582,7 +582,8 @@ async function pool<T, R>(items: T[], n: number, fn: (item: T, i: number) => Pro
   const worker = async () => {
     while (next < items.length) {
       const i = next++
-      out[i] = await fn(items[i], i)
+      const item = items[i]
+      if (item !== undefined) out[i] = await fn(item, i)
     }
   }
   await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker))

@@ -219,7 +219,7 @@ async function log(cwd: string, n = 20): Promise<GitResult<{ commits: GitCommit[
     .map((s) => s.replace(/^\n/, ''))
     .filter(Boolean)
     .map((rec) => {
-      const [hash, short, subject, author, date, at] = rec.split('\x1f')
+      const [hash = '', short = '', subject = '', author = '', date, at] = rec.split('\x1f')
       return { hash, short, subject, author, date: shortRel(date), time: Number(at) * 1000, pushed: anyRemote && !unpushed.has(hash) }
     })
   return { ok: true, commits }
@@ -321,7 +321,7 @@ async function push(cwd: string): Promise<GitResult<{ output: string; setUpstrea
   }
   const remotes = (await git(cwd, ['remote'])).stdout.split('\n').filter(Boolean)
   if (!remotes.length) return fail('No remote configured — add one with `git remote add origin <url>`')
-  const remote = remotes.includes('origin') ? 'origin' : remotes[0]
+  const remote = remotes.includes('origin') ? 'origin' : remotes[0] ?? 'origin'
   const r = await git(cwd, ['push', '-u', remote, 'HEAD'], { timeout: 120000 })
   if (r.code !== 0) return fail(cleanErr(r, 'git push failed'))
   return { ok: true, output: r.stderr.trim(), setUpstream: true }
@@ -360,7 +360,7 @@ async function branches(cwd: string, all = false): Promise<GitResult<{ branches:
     .split('\n')
     .filter(Boolean)
     .map((l) => {
-      const [ref, head, upstream, date] = l.split('\x1f')
+      const [ref = '', head, upstream, date] = l.split('\x1f')
       const remote = ref.startsWith('refs/remotes/')
       const name = ref.replace(/^refs\/heads\//, '').replace(/^refs\/remotes\//, '')
       return { name, current: head === '*', upstream: upstream || null, date: shortRel(date), remote }
@@ -387,8 +387,9 @@ function parseRemoteUrl(url: string): { owner: string; repo: string; web: string
   let p = ''
   const scp = /^[\w.-]+@([^:/]+):(.+)$/.exec(url)
   if (scp) {
-    host = scp[1]
-    p = scp[2]
+    const [, scpHost = '', scpPath = ''] = scp
+    host = scpHost
+    p = scpPath
   } else {
     try {
       const u = new URL(url)
@@ -403,6 +404,7 @@ function parseRemoteUrl(url: string): { owner: string; repo: string; web: string
   if (segs.length < 2) return null
   const repo = segs[segs.length - 1]
   const owner = segs.slice(0, -1).join('/')
+  if (!repo) return null
   return { owner, repo, web: `https://${host}/${owner}/${repo}` }
 }
 

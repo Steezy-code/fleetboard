@@ -66,11 +66,12 @@ const v4 = (ifaces: Ifaces) =>
 const TAILSCALE_IFACE = /^tailscale\d*$/i
 const isTailscale = (name: string, a: string) => {
   if (!TAILSCALE_IFACE.test(name)) return false
-  const [x, y] = a.split('.').map(Number)
+  // a NaN octet fails every comparison below, which is the answer for an address with too few
+  const [x = NaN, y = NaN] = a.split('.').map(Number)
   return x === 100 && y >= 64 && y <= 127
 }
 const isPrivate = (a: string) => {
-  const [x, y] = a.split('.').map(Number)
+  const [x = NaN, y = NaN] = a.split('.').map(Number)
   return x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
 }
 /** container and VM bridges: reachable from this machine only */
@@ -107,7 +108,7 @@ export function checkRequest(req: { method?: string; headers: http.IncomingHttpH
 const failures: number[] = []
 const lockedOut = () => {
   const now = Date.now()
-  while (failures.length && now - failures[0] > 60_000) failures.shift()
+  while ((failures[0] ?? Infinity) < now - 60_000) failures.shift()
   return failures.length >= 30
 }
 

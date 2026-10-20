@@ -82,9 +82,9 @@ export function shimScript(cmdFile: string): string | null {
   } catch {
     return null
   }
-  const m = /"%~?dp0%?\\?([^"%]+\.(?:c?js|mjs))"\s+%\*/i.exec(text)
-  if (!m) return null
-  const script = path.join(path.dirname(cmdFile), ...m[1].split(/[\\/]+/))
+  const rel = /"%~?dp0%?\\?([^"%]+\.(?:c?js|mjs))"\s+%\*/i.exec(text)?.[1]
+  if (!rel) return null
+  const script = path.join(path.dirname(cmdFile), ...rel.split(/[\\/]+/))
   return fs.existsSync(script) ? script : null
 }
 

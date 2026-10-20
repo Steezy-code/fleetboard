@@ -13,5 +13,5 @@
   "compilerOptions": {
     "noUncheckedIndexedAccess": true
   },
-  "include": ["src/shared", "src/renderer/src/board/ink", "src/renderer/src/studios/diagrams"]
+  "include": ["src/shared", "src/renderer/src/board/ink", "src/renderer/src/studios/diagrams", "src/main"]
 }

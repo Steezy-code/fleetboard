@@ -32,13 +32,15 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
   return new Promise((resolve) => {
     const server = http.createServer((req, res) => {
       const m = /^\/hook\/([^/]+)\/([^/]+)\/([A-Za-z]+)$/.exec(req.url ?? '')
-      let id = m?.[2] ?? ''
+      // /hook/<secret>/<console id>/<event name>
+      const [, secret = '', rawId = '', event = ''] = m ?? []
+      let id = rawId
       try {
         id = decodeURIComponent(id)
       } catch {
         /* malformed escape: use it as is */
       }
-      if (!m || req.method !== 'POST' || !sameSecret(m[1], consoleToken(id)) || refuse(req, port)) {
+      if (!m || req.method !== 'POST' || !sameSecret(secret, consoleToken(id)) || refuse(req, port)) {
         req.resume()
         return res.writeHead(403).end()
       }
@@ -52,7 +54,7 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
         } catch {
           /* no payload, or cut off at MAX_BODY: the event name still counts */
         }
-        listener(id, m[3], payload)
+        listener(id, event, payload)
       })
     })
     // the app lives as long as Electron does, not as long as this server listens
