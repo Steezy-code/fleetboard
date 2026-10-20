@@ -68,8 +68,13 @@ function detailOf(p: Prompt): string | undefined {
       .slice(a + 1, b)
       .map((l) => l.trim())
       .filter((l) => l && !/^Tip:/.test(l))
+  // the last two rules, and the one before them when there is one: two is the minimum checked above
   const n = rules.length
-  const block = [...(n >= 3 ? between(rules[n - 3], rules[n - 2]) : []), ...between(rules[n - 2], rules[n - 1])]
+  const prev = rules[n - 2]
+  const last = rules[n - 1]
+  if (prev === undefined || last === undefined) return undefined
+  const third = n >= 3 ? rules[n - 3] : undefined
+  const block = [...(third !== undefined ? between(third, prev) : []), ...between(prev, last)]
   return block.length && block.length <= 14 ? block.join('\n') : undefined
 }
 

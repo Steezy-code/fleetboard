@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:strict": "tsc --noEmit -p tsconfig.strict.json",
     "postinstall": "node scripts/postinstall.mjs",
     "app": "bin/fleetboard --rebuild",
     "test": "node scripts/test-unit.mjs",

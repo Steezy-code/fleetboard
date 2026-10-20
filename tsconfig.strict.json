@@ -1,0 +1,17 @@
+// noUncheckedIndexedAccess, on for the directories that have been through it. The flag is right —
+// arr[i] really can be undefined — but turning it on everywhere at once means ~630 errors, and the
+// way that gets "fixed" in a hurry is several hundred ! assertions, which leaves the code exactly as
+// safe as it was and the flag a lie about it. So it goes on a directory at a time, each one's shapes
+// fixed rather than asserted, and `include` below is the record of how far that has got.
+//
+// tsconfig.json is untouched, so `npm run typecheck` stays green throughout and nothing needs a
+// @ts-expect-error (the repo has none). Note that `include` sets the root set only: files these
+// import are checked too, which is why src/shared comes first — everything imports it, it imports
+// nothing above itself.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUncheckedIndexedAccess": true
+  },
+  "include": ["src/shared"]
+}
