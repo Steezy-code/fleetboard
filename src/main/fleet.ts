@@ -548,6 +548,28 @@ const TOOLS: ToolDef[] = [
   }
 ]
 
+/**
+ * Which roles may call a tool, or null for a name that is not a fleet tool at all.
+ *
+ * `tools/list` only decides what a member is *told* about. A console reads its own MCP config, so it
+ * can send any tool name it likes: this is where the role is actually enforced. Without it a worker
+ * — that is, anything able to prompt-inject a worker through a file, issue, dependency or PR comment
+ * it reads — can call fleet_finish and put its own unreviewed branch on the user's Ready card, or
+ * fleet_dismiss a sibling's unmerged work.
+ */
+export function toolRoles(name: string): FleetRole[] | null {
+  return TOOLS.find((t) => t.name === name)?.roles ?? null
+}
+
+/** Why `role` may not call `name`, or null when it may. Says what the caller can use instead. */
+export function toolDenial(name: string, role: FleetRole): string | null {
+  const roles = toolRoles(name)
+  if (!roles) return `Unknown tool ${name}`
+  if (roles.includes(role)) return null
+  const mine = TOOLS.filter((t) => t.roles.includes(role)).map((t) => t.name)
+  return `${name} is for the ${roles.join(' / ')} role; you are a ${role}. Your tools: ${mine.join(', ')}.`
+}
+
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true })
 
@@ -555,6 +577,8 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
+  const denied = toolDenial(name, m.role)
+  if (denied) return fail(denied)
   const lead = m.role === 'lead' ? m : m.leadId ? s.members[m.leadId] : undefined
   const team = () => Object.values(s.members).filter((x) => x.leadId === (lead?.id ?? m.id) && x.status !== 'closed')
 
