@@ -54,7 +54,11 @@ const DARK_TERM = {
   brightWhite: '#fafaf9'
 }
 
-export const THEMES: Theme[] = [
+/**
+ * Every theme, first one first. Typed as a list that is never empty, because themeById falls back to
+ * THEMES[0] for an unknown id and the whole app's colours come from what it returns.
+ */
+export const THEMES: readonly [Theme, ...Theme[]] = [
   {
     id: 'ember',
     name: 'Ember',
