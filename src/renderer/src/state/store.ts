@@ -253,6 +253,15 @@ const removeNodesNow = (ids: string[]) => (useApp.getState() as any)._removeNode
 
 let saveTimer: number | undefined
 let saveWarnedAt = 0
+/**
+ * Drop a save that is still waiting out its debounce. Only for the paths that save straight away:
+ * the pending timer holds an older snapshot of the project and would write it back over the newer
+ * one.
+ */
+function cancelScheduledSave() {
+  window.clearTimeout(saveTimer)
+  saveTimer = undefined
+}
 function scheduleSave(p: Project | null) {
   if (!p) return
   window.clearTimeout(saveTimer)
@@ -355,6 +364,7 @@ export const useApp = create<AppState>((set, get) => {
       windowSession.set(OPEN_PROJECT, null)
       restoreFocusInstantly()
       const p = get().project
+      cancelScheduledSave()
       if (p) invoke('store:saveProject', p)
       set({ project: null, selection: [], panel: null, drawer: null, focusedNode: null })
       invoke<ProjectMeta[]>('store:projects').then((projects) => set({ projects }))
