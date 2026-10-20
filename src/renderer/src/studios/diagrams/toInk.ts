@@ -1,6 +1,7 @@
 import type { InkItem } from '@shared/types'
 import { uid } from '../../lib/api'
 import type { Layout, Pt } from './layout'
+import type { DShape } from './spec'
 
 // Layout → loose ink figures on the board. Everything shares a figureId so the figure can be
 // selected, exported and found again.
@@ -11,7 +12,10 @@ export const INK = '#f2ede6'
 const INK_SOFT = '#c9c0b6'
 const INK_DIM = '#8f857b'
 /** role-like tints for the Colorful style */
-export const PALETTE = ['#ff7a45', '#60a5fa', '#3ecf8e', '#c084fc', '#f5b740', '#2dd4bf', '#f43f5e', '#a8a29e']
+export const PALETTE: readonly [string, ...string[]] = ['#ff7a45', '#60a5fa', '#3ecf8e', '#c084fc', '#f5b740', '#2dd4bf', '#f43f5e', '#a8a29e']
+
+/** A colour per index, the palette starting over when there are more of them than colours. */
+const hue = (i: number) => PALETTE[i % PALETTE.length] ?? PALETTE[0]
 
 export const TITLE_SIZE = 30
 const NODE_SIZE = 15
@@ -48,7 +52,7 @@ export function layoutToInk(l: Layout, origin: { x: number; y: number }, style: 
   const P = (p: Pt): Pt => [Math.round(p[0] + ox), Math.round(p[1] + oy)]
 
   // colors: per group in Colorful, or per branch for mind maps, or by shape
-  const groupColor = new Map(l.groups.map((g, i) => [g.id, PALETTE[i % PALETTE.length]]))
+  const groupColor = new Map(l.groups.map((g, i) => [g.id, hue(i)]))
   const branchColor = new Map<string, string>()
   if (l.dir === 'radial') {
     const root = l.nodes.find((n) => n.depth === 0)
@@ -59,7 +63,7 @@ export function layoutToInk(l: Layout, origin: { x: number; y: number }, style: 
     }
     const first = l.nodes.filter((n) => n.depth === 1)
     first.forEach((n, i) => {
-      const c = PALETTE[i % PALETTE.length]
+      const c = hue(i)
       const stack = [n.id]
       while (stack.length) {
         const v = stack.pop()!
@@ -69,10 +73,10 @@ export function layoutToInk(l: Layout, origin: { x: number; y: number }, style: 
       }
     })
   }
-  const shapeColor: Record<string, string> = { rect: PALETTE[0], ellipse: PALETTE[2], diamond: PALETTE[4] }
+  const shapeColor: Record<DShape, string> = { rect: hue(0), ellipse: hue(2), diamond: hue(4) }
   const colorOf = (id: string) => {
     const n = l.nodes.find((x) => x.id === id)!
-    if (l.dir === 'radial') return n.depth === 0 ? PALETTE[0] : branchColor.get(id) ?? PALETTE[1]
+    if (l.dir === 'radial') return n.depth === 0 ? hue(0) : branchColor.get(id) ?? hue(1)
     return (n.group && groupColor.get(n.group)) || shapeColor[n.shape]
   }
   const alpha = (hex: string, a: string) => `${hex}${a}`

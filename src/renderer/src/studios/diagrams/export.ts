@@ -1,3 +1,4 @@
+import { pairs, pairsRound } from '@shared/seq'
 import type { InkItem } from '@shared/types'
 import { TITLE_SIZE } from './toInk'
 
@@ -73,13 +74,13 @@ function roughLine(a: Pt, b: Pt, rand: () => number, amp: number) {
 
 function roughPoly(pts: Pt[], rand: () => number, amp = 1.6) {
   let d = ''
-  for (let pass = 0; pass < 2; pass++) for (let i = 0; i < pts.length; i++) d += roughLine(pts[i], pts[(i + 1) % pts.length], rand, amp) + ' '
+  for (let pass = 0; pass < 2; pass++) for (const [a, b] of pairsRound(pts)) d += roughLine(a, b, rand, amp) + ' '
   return d
 }
 
 function roundedRectPts(x: number, y: number, w: number, h: number, r: number): Pt[] {
   const pts: Pt[] = []
-  const c = [
+  const c: [number, number, number][] = [
     [x + w - r, y + r, -Math.PI / 2],
     [x + w - r, y + h - r, 0],
     [x + r, y + h - r, Math.PI / 2],
@@ -90,10 +91,12 @@ function roundedRectPts(x: number, y: number, w: number, h: number, r: number): 
 }
 
 function smoothClosed(pts: Pt[]) {
-  let d = `M${((pts[0][0] + pts[1][0]) / 2).toFixed(1)},${((pts[0][1] + pts[1][1]) / 2).toFixed(1)}`
-  for (let i = 1; i <= pts.length; i++) {
-    const p = pts[i % pts.length]
-    const n = pts[(i + 1) % pts.length]
+  const [first, second] = pts
+  if (!first || !second) return ''
+  let d = `M${((first[0] + second[0]) / 2).toFixed(1)},${((first[1] + second[1]) / 2).toFixed(1)}`
+  // through every point and back round to the first, each curve ending halfway along the next edge
+  const edges = [...pairsRound(pts)]
+  for (const [p, n] of [...edges.slice(1), ...edges.slice(0, 1)]) {
     d += ` Q${p[0].toFixed(1)},${p[1].toFixed(1)} ${((p[0] + n[0]) / 2).toFixed(1)},${((p[1] + n[1]) / 2).toFixed(1)}`
   }
   return d + ' Z'
@@ -115,15 +118,14 @@ function roughEllipse(cx: number, cy: number, rx: number, ry: number, rand: () =
   return d
 }
 
+// the same shape as geometry.ts's inkPath, for the figure the exporter draws rather than the board
 function smoothOpen(points: Pt[]) {
-  if (points.length < 3) return `M${points.map((p) => p.join(',')).join(' L')}`
-  let d = `M${points[0][0]},${points[0][1]}`
-  for (let i = 1; i < points.length - 1; i++) {
-    const [x, y] = points[i]
-    const [nx, ny] = points[i + 1]
-    d += ` Q${x},${y} ${(x + nx) / 2},${(y + ny) / 2}`
-  }
+  const first = points[0]
   const last = points[points.length - 1]
+  if (!first || !last) return ''
+  if (points.length < 3) return `M${points.map((p) => p.join(',')).join(' L')}`
+  let d = `M${first[0]},${first[1]}`
+  for (const [[x, y], [nx, ny]] of pairs(points.slice(1))) d += ` Q${x},${y} ${(x + nx) / 2},${(y + ny) / 2}`
   return `${d} L${last[0]},${last[1]}`
 }
 
@@ -189,11 +191,14 @@ export function figureToSvg(items: InkItem[], pad = 48): { svg: string; width: n
       case 'line':
       case 'arrow': {
         const pts = (i.points ?? []).map(T)
-        if (pts.length < 2) break
-        if (i.sloppy && pts.length === 2) out.push(`<path d="${roughLine(pts[0], pts[1], rand, 1.2)} ${roughLine(pts[0], pts[1], rand, 1.2)}" fill="none" ${common}/>`)
+        const [p0, p1] = pts
+        const e = pts[pts.length - 1]
+        const a = pts[pts.length - 2]
+        // two points is the least a line can have, and then both ends of the head exist as well
+        if (!p0 || !p1 || !e || !a) break
+        if (i.sloppy && pts.length === 2) out.push(`<path d="${roughLine(p0, p1, rand, 1.2)} ${roughLine(p0, p1, rand, 1.2)}" fill="none" ${common}/>`)
         else out.push(`<path d="${smoothOpen(pts)}" fill="none" ${common}/>`)
         if (i.kind === 'arrow') {
-          const [a, e] = [pts[pts.length - 2], pts[pts.length - 1]]
           const ang = Math.atan2(e[1] - a[1], e[0] - a[0])
           const len = Math.max(10, sw * 5.5)
           const h1: Pt = [e[0] - Math.cos(ang - 0.45) * len, e[1] - Math.sin(ang - 0.45) * len]
@@ -237,7 +242,9 @@ export function figureToPngBase64(items: InkItem[], scale = 2): Promise<string> 
       ctx.fillRect(0, 0, canvas.width, canvas.height)
       ctx.scale(scale, scale)
       ctx.drawImage(img, 0, 0, width, height)
-      resolve(canvas.toDataURL('image/png').split(',')[1])
+      // the base64 payload, which is everything after the data URL's comma
+      const url = canvas.toDataURL('image/png')
+      resolve(url.slice(url.indexOf(',') + 1))
     }
     img.onerror = () => reject(new Error('Could not rasterize the figure'))
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
@@ -344,11 +351,15 @@ export function figureToExcalidraw(items: InkItem[]) {
   const arrows = items.filter((i) => i.kind === 'arrow' && i.points && i.points.length >= 2)
   const used = new Set<string>()
   const key = (p: Pt) => `${Math.round(p[0])},${Math.round(p[1])}`
-  const arrowByStart = new Map(arrows.map((a) => [key(a.points![0]), a]))
+  // every arrow was filtered to two points or more above, so each one has a start
+  const arrowByStart = new Map(arrows.flatMap((a) => (a.points?.[0] ? [[key(a.points[0]), a] as const] : [])))
 
   const linear = (i: InkItem, pts: Pt[], type: 'arrow' | 'line', head: boolean) => {
-    const [x0, y0] = pts[0]
-    const rel = pts.map(([x, y]) => [x - x0, y - y0])
+    const start = pts[0]
+    const end = pts[pts.length - 1]
+    if (!start || !end) return
+    const [x0, y0] = start
+    const rel = pts.map(([x, y]): Pt => [x - x0, y - y0])
     const xs = rel.map((p) => p[0])
     const ys = rel.map((p) => p[1])
     const el = base(i, type, {
@@ -366,8 +377,8 @@ export function figureToExcalidraw(items: InkItem[]) {
       elbowed: false
     })
     if (type === 'arrow') {
-      const s = hit(pts[0])
-      const e = hit(pts[pts.length - 1])
+      const s = hit(start)
+      const e = hit(end)
       if (s) {
         el.startBinding = { elementId: s.id, focus: 0, gap: 6 }
         s.boundElements.push({ type: 'arrow', id: el.id })
@@ -382,12 +393,15 @@ export function figureToExcalidraw(items: InkItem[]) {
 
   for (const i of items) {
     if (i.kind === 'path' && i.points?.length) {
-      const tip = arrowByStart.get(key(i.points[i.points.length - 1]))
-      if (tip && i.figureId && tip.figureId === i.figureId) {
+      const pathEnd = i.points[i.points.length - 1]
+      const tip = pathEnd ? arrowByStart.get(key(pathEnd)) : undefined
+      const tipEnd = tip?.points?.at(-1)
+      const start = i.points[0]
+      if (tip && tipEnd && i.figureId && tip.figureId === i.figureId) {
         used.add(tip.id)
-        linear(i, [...i.points, tip.points![tip.points!.length - 1]], 'arrow', true)
-      } else {
-        const [x0, y0] = i.points[0]
+        linear(i, [...i.points, tipEnd], 'arrow', true)
+      } else if (start) {
+        const [x0, y0] = start
         elements.push(
           base(i, 'freedraw', {
             x: x0,

@@ -1,3 +1,4 @@
+import { pairs } from '@shared/seq'
 import type { DiagramSpec, DNode } from './spec'
 
 // Layered DAG layout (Sugiyama-style, small graphs):
@@ -106,16 +107,15 @@ export function borderPoint(n: { x: number; y: number; w: number; h: number; sha
 
 /** Point halfway along an edge's polyline. At least one point, for the reason midPoint gives. */
 function polylineMid(points: [Pt, ...Pt[]]): Pt {
-  let total = 0
-  for (let i = 1; i < points.length; i++) total += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1])
+  const segs = [...pairs(points)].map(([a, b]) => ({ a, b, len: Math.hypot(b[0] - a[0], b[1] - a[1]) }))
+  const half = segs.reduce((sum, sg) => sum + sg.len, 0) / 2
   let acc = 0
-  for (let i = 1; i < points.length; i++) {
-    const seg = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1])
-    if (acc + seg >= total / 2) {
-      const k = seg ? (total / 2 - acc) / seg : 0
-      return [points[i - 1][0] + (points[i][0] - points[i - 1][0]) * k, points[i - 1][1] + (points[i][1] - points[i - 1][1]) * k]
+  for (const { a, b, len } of segs) {
+    if (acc + len >= half) {
+      const k = len ? (half - acc) / len : 0
+      return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]
     }
-    acc += seg
+    acc += len
   }
   return points[0]
 }
@@ -138,22 +138,29 @@ interface V {
 
 /** Order-preserving placement closest to `desired` with minimum center separations (PAV). */
 function placeOrdered(desired: number[], seps: number[]): number[] {
-  const n = desired.length
-  const offset = new Array<number>(n)
-  for (let i = 0; i < n; i++) offset[i] = i ? offset[i - 1] + seps[i] : 0
+  // each wanted position with the running separation it sits behind, so the two cannot come apart
+  let run = 0
+  const items = desired.map((want, i) => {
+    run = i ? run + (seps[i] ?? 0) : 0
+    return { want, offset: run }
+  })
   const blocks: { v: number; w: number; n: number }[] = []
-  for (let i = 0; i < n; i++) {
-    blocks.push({ v: desired[i] - offset[i], w: 1, n: 1 })
-    while (blocks.length > 1 && blocks[blocks.length - 2].v > blocks[blocks.length - 1].v) {
-      const b = blocks.pop()!
-      const a = blocks[blocks.length - 1]
+  for (const { want, offset } of items) {
+    blocks.push({ v: want - offset, w: 1, n: 1 })
+    // merge back while the block before this one wants to be further along than it does
+    for (;;) {
+      const b = blocks[blocks.length - 1]
+      const a = blocks[blocks.length - 2]
+      if (!a || !b || a.v <= b.v) break
+      blocks.pop()
       a.v = (a.v * a.w + b.v * b.w) / (a.w + b.w)
       a.w += b.w
       a.n += b.n
     }
   }
   const out: number[] = []
-  for (const b of blocks) for (let k = 0; k < b.n; k++) out.push(b.v + offset[out.length])
+  // the blocks cover the items exactly, so each position has its own offset back
+  for (const b of blocks) for (let k = 0; k < b.n; k++) out.push(b.v + (items[out.length]?.offset ?? 0))
   return out
 }
 
@@ -234,13 +241,15 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
       chain.push(id)
     }
     chain.push(b)
-    for (let k = 1; k < chain.length; k++) link(chain[k - 1], chain[k])
+    for (const [from, to] of pairs(chain)) link(from, to)
     chains[i] = chain
   }
 
   const R = Math.max(...[...V.values()].map((v) => v.rank)) + 1
   let layers: string[][] = Array.from({ length: R }, () => [])
-  for (const v of V.values()) layers[v.rank].push(v.id)
+  for (const v of V.values()) (layers[v.rank] ??= []).push(v.id)
+  /** the ids at a rank — nothing at a rank outside the graph, which is what an empty layer is */
+  const layer = (r: number): string[] => layers[r] ?? []
 
   // 4. ordering
   const pos = new Map<string, number>()
@@ -268,20 +277,21 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
     let c = 0
     for (let r = 0; r + 1 < R; r++) {
       const es: [number, number][] = []
-      for (const a of layers[r]) for (const b of down.get(a) ?? []) es.push([pos.get(a)!, pos.get(b)!])
-      for (let i = 0; i < es.length; i++)
-        for (let j = i + 1; j < es.length; j++) if ((es[i][0] - es[j][0]) * (es[i][1] - es[j][1]) < 0) c++
+      for (const a of layer(r)) for (const b of down.get(a) ?? []) es.push([pos.get(a)!, pos.get(b)!])
+      // every pair of edges between these two ranks: they cross when their ends are in opposite order
+      for (const [i, e1] of es.entries()) for (const e2 of es.slice(i + 1)) if ((e1[0] - e2[0]) * (e1[1] - e2[1]) < 0) c++
     }
     return c
   }
   const sortLayer = (r: number, nb: Map<string, string[]>) => {
     const bary = new Map<string, number>()
-    for (const id of layers[r]) {
+    for (const id of layer(r)) {
       const ns = nb.get(id) ?? []
       bary.set(id, ns.length ? ns.reduce((s, u) => s + pos.get(u)!, 0) / ns.length : pos.get(id)!)
     }
-    layers[r] = [...layers[r]].sort((a, b) => bary.get(a)! - bary.get(b)!)
-    layers[r].forEach((id, i) => pos.set(id, i))
+    const sorted = [...layer(r)].sort((a, b) => bary.get(a)! - bary.get(b)!)
+    layers[r] = sorted
+    sorted.forEach((id, i) => pos.set(id, i))
   }
   if (hasGroups) cluster()
   let best = layers.map((l) => [...l])
@@ -305,8 +315,15 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
   const padLo = dir === 'TB' ? 26 : 42
   const padHi = 26
   const thickness = layers.map((l) => Math.max(0, ...l.map((id) => V.get(id)!.main)))
+  // each rank half its own thickness past the gap after the one before it
   const mainAt: number[] = []
-  thickness.forEach((t, r) => (mainAt[r] = r ? mainAt[r - 1] + thickness[r - 1] / 2 + rankGap + t / 2 : t / 2))
+  let prevAt = 0
+  let prevThick = 0
+  for (const [r, t] of thickness.entries()) {
+    prevAt = r ? prevAt + prevThick / 2 + rankGap + t / 2 : t / 2
+    prevThick = t
+    mainAt.push(prevAt)
+  }
 
   const sep = (a: string, b: string) => {
     const va = V.get(a)!
@@ -324,9 +341,10 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
       let width = 0
       for (const l of layers) {
         const m = l.filter((id) => V.get(id)!.key === k)
-        if (!m.length) continue
-        let w = V.get(m[0])!.cross
-        for (let i = 1; i < m.length; i++) w += sep(m[i - 1], m[i]) - (V.get(m[i - 1])!.cross + V.get(m[i])!.cross) / 2 + V.get(m[i])!.cross
+        const [firstInBand] = m
+        if (!firstInBand) continue
+        let w = V.get(firstInBand)!.cross
+        for (const [prev, id] of pairs(m)) w += sep(prev, id) - (V.get(prev)!.cross + V.get(id)!.cross) / 2 + V.get(id)!.cross
         width = Math.max(width, w)
       }
       const lo = at + (k ? padLo : 0)
@@ -339,7 +357,8 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
     for (const id of l) {
       const k = V.get(id)!.key
       const last = segs[segs.length - 1]
-      if (hasGroups && last && V.get(last[0])!.key === k) last.push(id)
+      const head = last?.[0]
+      if (hasGroups && last && head && V.get(head)!.key === k) last.push(id)
       else if (!hasGroups && last) last.push(id)
       else segs.push([id])
     }
@@ -347,24 +366,35 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
   }
   const x = new Map<string, number>()
   const place = (seg: string[], desired: number[]) => {
-    const seps = seg.map((id, i) => (i ? sep(seg[i - 1], id) : 0))
+    const first = seg[0]
+    const last = seg[seg.length - 1]
+    if (!first || !last) return
+    const seps = seg.map((id, i) => {
+      const prev = seg[i - 1]
+      return prev ? sep(prev, id) : 0
+    })
     let xs = placeOrdered(desired, seps)
-    const band = hasGroups ? bands.get(V.get(seg[0])!.key) : undefined
+    const band = hasGroups ? bands.get(V.get(first)!.key) : undefined
     if (band) {
-      const left = xs[0] - V.get(seg[0])!.cross / 2
-      const right = xs[xs.length - 1] + V.get(seg[seg.length - 1])!.cross / 2
+      const left = (xs[0] ?? 0) - V.get(first)!.cross / 2
+      const right = (xs[xs.length - 1] ?? 0) + V.get(last)!.cross / 2
       let shift = 0
       if (right - left >= band.hi - band.lo) shift = (band.lo + band.hi) / 2 - (left + right) / 2
       else if (left < band.lo) shift = band.lo - left
       else if (right > band.hi) shift = band.hi - right
       xs = xs.map((v) => v + shift)
     }
-    seg.forEach((id, i) => x.set(id, xs[i]))
+    // one position per id, so a node without one keeps where it was rather than moving to zero
+    seg.forEach((id, i) => {
+      const at = xs[i]
+      if (at !== undefined) x.set(id, at)
+    })
   }
   // initial: packed and centered (in its band)
   for (const l of layers)
     for (const seg of segments(l)) {
-      const band = hasGroups ? bands.get(V.get(seg[0])!.key) : undefined
+      const head = seg[0]
+      const band = hasGroups && head ? bands.get(V.get(head)!.key) : undefined
       const center = band ? (band.lo + band.hi) / 2 : 0
       place(seg, seg.map(() => center))
     }
@@ -372,7 +402,7 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
   for (let it = 0; it < 12; it++) {
     const order = it % 2 === 0 ? layers.map((_, r) => r) : layers.map((_, r) => R - 1 - r)
     for (const r of order) {
-      for (const seg of segments(layers[r])) {
+      for (const seg of segments(layer(r))) {
         const desired = seg.map((id) => {
           const ns = it >= 10 ? [...(up.get(id) ?? []), ...(down.get(id) ?? [])] : it % 2 === 0 ? up.get(id) ?? [] : down.get(id) ?? []
           return ns.length ? mean(ns) : x.get(id)!
@@ -385,7 +415,8 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
   // map to x/y
   const center = (id: string): Pt => {
     const v = V.get(id)!
-    return dir === 'TB' ? [x.get(id)!, mainAt[v.rank]] : [mainAt[v.rank], x.get(id)!]
+    const along = mainAt[v.rank] ?? 0
+    return dir === 'TB' ? [x.get(id)!, along] : [along, x.get(id)!]
   }
   const lnodes: LNode[] = nodes.map((n) => {
     const s = sizes.get(n.id)!
@@ -395,17 +426,22 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
   const lmap = new Map(lnodes.map((n) => [n.id, n]))
 
   // 6. edges
-  const edges: LEdge[] = spec.edges.map((e, i) => {
-    let chain = chains[i]
-    if (reversed.has(i)) chain = [...chain].reverse()
-    // a chain is [from, …one dummy per rank crossed, to]: two points or more, and never one, since
-    // spec.ts drops an edge whose ends are the same node
-    const pts = chain.map(center) as [Pt, Pt, ...Pt[]]
+  const edges: LEdge[] = spec.edges.flatMap((e, i) => {
+    // a chain is [from, …one dummy per rank crossed, to], one per edge and never shorter than two,
+    // since spec.ts drops an edge whose ends are the same node
+    const chain = chains[i]
+    if (!chain) return []
+    const pts = (reversed.has(i) ? [...chain].reverse() : chain).map(center)
+    const second = pts[1]
+    if (!second) return []
     const a = lmap.get(e.from)!
     const b = lmap.get(e.to)!
-    pts[0] = borderPoint(a, pts[1])
-    pts[pts.length - 1] = borderPoint(b, pts[pts.length - 2])
-    return { from: e.from, to: e.to, label: e.label, points: pts, directed: true, labelAt: polylineMid(pts) }
+    // each end stops at its node's border, aiming at the next point along — which for a two-point
+    // edge means the far end aims at the near end as it has just been moved
+    const start = borderPoint(a, second)
+    const toward = pts.length > 2 ? pts[pts.length - 2] ?? start : start
+    const points: [Pt, ...Pt[]] = [start, ...pts.slice(1, -1), borderPoint(b, toward)]
+    return [{ from: e.from, to: e.to, label: e.label, points, directed: true, labelAt: polylineMid(points) }]
   })
 
   const groups: LGroup[] = (spec.groups ?? []).flatMap((g) => {
@@ -433,7 +469,9 @@ function radial(spec: DiagramSpec): Layout {
   // root: a node nothing points to (the most connected one), else the most connected overall
   const indeg = new Map(nodes.map((n) => [n.id, 0]))
   for (const e of spec.edges) indeg.set(e.to, indeg.get(e.to)! + 1)
-  const byDegree = [...nodes].sort((a, b) => adj.get(b.id)!.size - adj.get(a.id)!.size)
+  // a spec always holds at least one node (sanitizeSpec returns null otherwise), so there is a root
+  const byDegree: [DNode, ...DNode[]] = [...nodes]
+  byDegree.sort((a, b) => adj.get(b.id)!.size - adj.get(a.id)!.size)
   const root = byDegree.find((n) => !indeg.get(n.id) && adj.get(n.id)!.size) ?? byDegree[0]
   const parent = new Map<string, string | null>([[root.id, null]])
   const children = new Map<string, string[]>(nodes.map((n) => [n.id, []]))
