@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smartphone, Square, X } from 'lucide-react'
+import { mapWorkspaces } from '@shared/types'
 import { invoke, on, IS_WIN } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { UsagePill } from './UsagePill'
@@ -172,7 +173,7 @@ function updateConsoleLaunch(workspaceId: string, id: string, launch: 'resume' |
   const p = useApp.getState().project!
   const project = {
     ...p,
-    workspaces: p.workspaces.map((w) =>
+    workspaces: mapWorkspaces(p, (w) =>
       w.id === workspaceId ? { ...w, nodes: w.nodes.map((n) => (n.id === id ? { ...n, data: { ...n.data, launch } } : n)) } : w
     )
   }

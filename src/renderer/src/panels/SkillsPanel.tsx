@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useShallow } from 'zustand/react/shallow'
 import { FolderOpen, Plus, RefreshCw, Save, Sparkles, Terminal, Trash2 } from 'lucide-react'
-import type { ConsoleData } from '@shared/types'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, sendToConsole } from '../engine/consoles'
+import { pushTargets, type PushTarget } from '../continuity/memory'
 import { Modal, Seg } from '../ui/Modal'
 import type { SkillInfo } from '../continuity/types'
 
@@ -195,20 +194,11 @@ function SkillDetail({ skill, projectPath, onDeleted }: { skill: SkillInfo; proj
 }
 
 function UseInConsole({ slug }: { slug: string }) {
-  const consoles = useApp(
-    useShallow((s) => {
-      const p = s.project
-      if (!p) return [] as string[]
-      return p.workspaces.flatMap((w) =>
-        w.nodes.filter((n) => n.type === 'console' && s.live[n.id]).map((n) => `${n.id}|${(n.data as ConsoleData).name}|${(n.data as ConsoleData).agentId}`)
-      )
-    })
-  )
+  // one JSON string rather than "id|name|agentId" per console: a console may be named anything, and
+  // a name holding the delimiter used to hand its fields to the wrong columns (see continuity/memory)
+  const rows = useApp((s) => (s.project ? JSON.stringify(pushTargets(s.project, s.live).filter((t) => t.live)) : '[]'))
   const [open, setOpen] = useState(false)
-  const list = consoles.map((c) => {
-    const [id, name, agentId] = c.split('|')
-    return { id, name, agentId }
-  })
+  const list = useMemo(() => JSON.parse(rows) as PushTarget[], [rows])
   const send = (id: string, name: string) => {
     sendToConsole(id, `/${slug}`, false)
     setOpen(false)

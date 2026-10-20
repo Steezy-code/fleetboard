@@ -49,7 +49,7 @@ function resolveWiki(ix: VaultIndex, target: string, from: string | null): strin
     const same = hits.find((h) => dirname(h) === d)
     if (same) return same
   }
-  return hits[0]
+  return hits[0] ?? null
 }
 
 function resolveFile(ix: VaultIndex, href: string, from: string, root: string): string | null {

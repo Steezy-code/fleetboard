@@ -23,9 +23,11 @@ function onKey(e: KeyboardEvent) {
   if (mod && e.key.toLowerCase() === 'd') {
     e.preventDefault()
     duplicateInk(sel)
-  } else if (e.key === 'Enter' && sel.length === 1 && sel[0].kind !== 'path') {
+  } else if (e.key === 'Enter' && sel.length === 1) {
+    const only = sel[0]
+    if (!only || only.kind === 'path') return
     e.preventDefault()
-    useInkUi.setState({ editing: sel[0].id })
+    useInkUi.setState({ editing: only.id })
   }
 }
 

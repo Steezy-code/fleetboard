@@ -40,8 +40,8 @@ export default function AccountsPanel({ agentId: initial }: { agentId?: string }
   }, [load])
 
   const use = (profileId?: string) => {
-    const ids = spawnConsoles({ agentId, profileId })
-    if (ids[0]) setTimeout(() => useApp.getState().focusItem(ids[0]), 60)
+    const [first] = spawnConsoles({ agentId, profileId })
+    if (first) setTimeout(() => useApp.getState().focusItem(first), 60)
   }
 
   const saveCurrent = async () => {
@@ -60,8 +60,8 @@ export default function AccountsPanel({ agentId: initial }: { agentId?: string }
     const p = await invoke<ProfileInfo>('profiles:create', agentId, name)
     setConnectName('')
     await load()
-    const ids = spawnConsoles({ agentId, profileId: p.id, names: [name] })
-    if (ids[0]) setTimeout(() => useApp.getState().focusItem(ids[0]), 60)
+    const [spawned] = spawnConsoles({ agentId, profileId: p.id, names: [name] })
+    if (spawned) setTimeout(() => useApp.getState().focusItem(spawned), 60)
     app.toast(`Sign in to "${name}" in the new console${agentId === 'claude' ? ' (/login)' : ''}.`, 'info')
   }
 
@@ -104,7 +104,7 @@ export default function AccountsPanel({ agentId: initial }: { agentId?: string }
       <div className="label acct-section">Your sign-in</div>
       <div className="acct-row current">
         <span className="acct-avatar" style={{ background: agent.color }}>
-          {current?.account ? initials(current.account.split('@')[0].replace(/[._-]/g, ' ')) : agent.name[0]}
+          {current?.account ? initials((current.account.split('@')[0] ?? '').replace(/[._-]/g, ' ')) : agent.name[0]}
         </span>
         <div className="grow">
           <div className="acct-name">{current?.account?.split(' · ')[0] ?? 'Default sign-in'}</div>

@@ -10,7 +10,8 @@ export function Heatmap({ days, color = 'var(--accent)' }: { days: { date: strin
   const top = 13
 
   const { cols, months, levels, width } = useMemo(() => {
-    const first = days.length ? new Date(days[0].date + 'T00:00:00') : new Date()
+    const earliest = days[0]
+    const first = earliest ? new Date(earliest.date + 'T00:00:00') : new Date()
     const lead = first.getDay()
     const cells = [...Array(lead).fill(null), ...days] as ({ date: string; total: number } | null)[]
     const cols: ({ date: string; total: number } | null)[][] = []
@@ -23,14 +24,15 @@ export function Heatmap({ days, color = 'var(--accent)' }: { days: { date: strin
       const m = new Date(d.date + 'T00:00:00').getMonth()
       if (m !== lastMonth) {
         // skip a label squeezed against the previous one
-        if (!months.length || ci * step - months[months.length - 1].x > 22)
+        const prevLabel = months[months.length - 1]
+        if (!prevLabel || ci * step - prevLabel.x > 22)
           months.push({ x: ci * step, label: new Date(d.date + 'T00:00:00').toLocaleDateString(undefined, { month: 'short' }) })
         lastMonth = m
       }
     })
     const nz = days.map((d) => d.total).filter((v) => v > 0).sort((a, b) => a - b)
     const q = (p: number) => nz[Math.min(nz.length - 1, Math.floor(p * nz.length))] ?? 0
-    const levels = [q(0.25), q(0.5), q(0.75)]
+    const levels: [number, number, number] = [q(0.25), q(0.5), q(0.75)]
     return { cols, months, levels, width: cols.length * step }
   }, [days, step])
 

@@ -185,10 +185,10 @@ export function applyFeedback(result: PrFeedbackResult) {
         `New review comments on PR #${pr.number}`,
         trusted.length
           ? `${outside.length} more from ${from}, not sent on: no write access to this repo`
-          : `${outside.length} from ${from}: ${clip(outside[0].body.replace(/\s+/g, ' '), 90)}`
+          : `${outside.length} from ${from}: ${clip((outside[0]?.body ?? '').replace(/\s+/g, ' '), 90)}`
       )
     } else if (!(autoRouteOn() && agentMade(pr.branch) && trusted.length)) {
-      notifyFeedback(`New review comments on PR #${pr.number}`, `${list.length} from ${who}: ${clip(list[0].body.replace(/\s+/g, ' '), 90)}`)
+      notifyFeedback(`New review comments on PR #${pr.number}`, `${list.length} from ${who}: ${clip((list[0]?.body ?? '').replace(/\s+/g, ' '), 90)}`)
     }
   }
 }

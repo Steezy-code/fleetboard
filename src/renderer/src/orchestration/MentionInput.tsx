@@ -50,7 +50,7 @@ export function MentionInput({
 
   const sync = (text: string, caret: number) => {
     const m = /(^|\s)@([\w.\-]*)$/.exec(text.slice(0, caret))
-    setQuery(m ? m[2] : null)
+    setQuery(m?.[2] ?? null)
     setHi(0)
   }
 
@@ -116,7 +116,10 @@ export function MentionInput({
             if (matches.length) {
               if (e.key === 'ArrowDown') return e.preventDefault(), setHi((hi + 1) % matches.length)
               if (e.key === 'ArrowUp') return e.preventDefault(), setHi((hi - 1 + matches.length) % matches.length)
-              if (e.key === 'Enter' || e.key === 'Tab') return e.preventDefault(), pick(matches[hi])
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                const picked = matches[hi]
+                return e.preventDefault(), picked ? pick(picked) : undefined
+              }
               if (e.key === 'Escape') return e.preventDefault(), setQuery(null)
             }
             if (e.key === 'Enter') {

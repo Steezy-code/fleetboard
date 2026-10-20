@@ -197,7 +197,10 @@ function eligible(l: Loop, ids = loopTargets(l)): string[] {
   const app = useApp.getState()
   const activeId = app.project?.activeWorkspaceId
   const wsOf = new Map(allConsoles().map((c) => [c.id, c.workspaceId]))
-  return ids.filter((id) => isLive(id) && !NOT_NOW.has(app.statuses[id]) && (l.background || wsOf.get(id) === activeId))
+  return ids.filter((id) => {
+    const status = app.statuses[id]
+    return isLive(id) && !(status && NOT_NOW.has(status)) && (l.background || wsOf.get(id) === activeId)
+  })
 }
 
 function retire(l: Loop, reason: 'goal' | 'runs' | 'time', note?: string) {

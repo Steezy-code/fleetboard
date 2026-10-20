@@ -115,12 +115,22 @@ export interface Workspace {
   extras: Record<string, any>
 }
 
+/**
+ * Every workspace replaced, keeping what Project says: a board always has at least one. Mapping a
+ * tuple gives a plain array back, so without this each caller would have to state the invariant
+ * again — and the one place that may remove a workspace (closeWorkspace) puts a fresh one there.
+ */
+export function mapWorkspaces(p: Project, f: (w: Workspace) => Workspace): [Workspace, ...Workspace[]] {
+  const [first, ...rest] = p.workspaces
+  return [f(first), ...rest.map(f)]
+}
+
 export interface Project {
   schema: number
   id: string
   name: string
   path: string
-  workspaces: Workspace[]
+  workspaces: [Workspace, ...Workspace[]]
   activeWorkspaceId: string
   lastOpened: number
   /** free-form per-project state owned by feature modules (loops, memory, ...) */
