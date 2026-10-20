@@ -55,17 +55,28 @@ test('closing a console ends everything it started', opts, async () => {
   const before = pings()
   const id = await spawn(a, 'shell', 'ping -n 600 127.0.0.1')
   await a.waitFor(() => pings() > before, { timeout: 30_000, label: 'ping running in the console' })
-  await a.eval((id) => (window as any).__fleetboard.useApp.getState().removeNodes([id]), id)
+  // what the console's Close button does
+  await a.invoke('pty:kill', id)
   await a.waitFor(() => pings() === before, { timeout: 15_000, label: 'ping ended with its console' })
 })
 
-test('local files load through fbfile:///C:/…', opts, async () => {
+test('local images load through fbfile:///C:/…', opts, async () => {
   const a = await ready()
-  const file = path.join(repo, 'pixel.txt')
-  fs.writeFileSync(file, 'fleetboard on windows')
-  const text = await a.eval(async (p) => {
-    const url = `fbfile:///${encodeURI(p.replace(/\\/g, '/'))}`
-    return (await fetch(url)).text()
-  }, file)
-  assert.equal(text, 'fleetboard on windows')
+  // a 1×1 PNG, in a folder with a space like many Windows paths
+  const file = path.join(repo, 'my images', 'pixel.png')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'))
+  const loaded = await a.eval(
+    (p) =>
+      new Promise<string>((resolve) => {
+        // as lib/api.ts fileUrl() builds it
+        const s = p.replace(/\\/g, '/')
+        const img = new Image()
+        img.onload = () => resolve(`loaded ${img.naturalWidth}x${img.naturalHeight}`)
+        img.onerror = () => resolve('error')
+        img.src = `fbfile://${encodeURI(s.startsWith('/') ? s : `/${s}`)}`
+      }),
+    file
+  )
+  assert.equal(loaded, 'loaded 1x1')
 })
