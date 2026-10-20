@@ -38,6 +38,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # the same sources again with noUncheckedIndexedAccess, over the directories that have been
+      # through it (tsconfig.strict.json's include list says which)
+      - name: Typecheck (noUncheckedIndexedAccess, migrated directories)
+        run: npm run typecheck:strict
+
       - name: Unit tests
         run: npm test
 
