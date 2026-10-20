@@ -1,4 +1,5 @@
-import { Map as MapIcon, Minus, Plus, Scan } from 'lucide-react'
+import { Lightbulb, Map as MapIcon, Minus, Plus, Scan } from 'lucide-react'
+import { useHelm } from '../voice/helm/helm'
 import { zoomToSelection } from '../board/Board'
 import { useApp, activeWs } from '../state/store'
 import { consoleNodes, pauseAll, resumeAll, spawnConsoles } from '../engine/consoles'
@@ -39,6 +40,13 @@ export function BottomBar() {
         </div>
       )}
       <div className="chip-row" style={tray ? { display: 'none' } : undefined}>
+        <button
+          className="chip"
+          title="A panel of three agents brainstorms a topic; Oracle ranks the ideas"
+          onClick={() => useHelm.setState((s) => ({ draft: { text: 'brainstorm ', n: (s.draft?.n ?? 0) + 1 } }))}
+        >
+          <Lightbulb size={12} /> Brainstorm
+        </button>
         <button className="chip" onClick={() => app.openPanel('spawn')}>
           New console
         </button>

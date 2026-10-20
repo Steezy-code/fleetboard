@@ -9,6 +9,7 @@ import {
   KanbanSquare,
   ListChecks,
   Network,
+  Sparkles,
   StickyNote,
   SquareTerminal,
   Type
@@ -28,6 +29,7 @@ import FileNode from './FileNode'
 import DocNode from './DocNode'
 import OrchestratorNode from './OrchestratorNode'
 import PlanNode from './PlanNode'
+import BrainstormNode from './BrainstormNode'
 
 const defs: NodeDef[] = [
   {
@@ -45,6 +47,7 @@ const defs: NodeDef[] = [
   { type: 'file', label: 'File', icon: FileCode2, component: FileNode, defaultSize: { w: 560, h: 420 }, minSize: { w: 260, h: 160 } },
   { type: 'doc', label: 'Document', icon: FileText, component: DocNode, defaultSize: { w: 520, h: 640 }, minSize: { w: 300, h: 260 } },
   { type: 'plan', label: 'Plan', icon: ListChecks, component: PlanNode, defaultSize: { w: 320, h: 360 }, minSize: { w: 240, h: 180 } },
+  { type: 'brainstorm', label: 'Brainstorm', icon: Sparkles, component: BrainstormNode, defaultSize: { w: 760, h: 620 }, minSize: { w: 420, h: 300 } },
   { type: 'orchestrator', label: 'Orchestrator', icon: Network, component: OrchestratorNode, defaultSize: { w: 340, h: 420 }, minSize: { w: 280, h: 240 } }
 ]
 

@@ -32,6 +32,7 @@ import {
 import { setVoice, showReply, useThread, useVoice } from './thread'
 import { askHelm, dismissHelm, pickHelmOption, runHelmOption, showHelm, useHelm } from './helm/helm'
 import { cycleFront, frontItem, runAction as runInboxAction } from '../fleet/inboxModel'
+import { brainstormTopic, startBrainstorm } from './helm/brainstorm'
 import { speak, stopSpeaking } from './tts'
 
 export type Source = 'voice' | 'typed'
@@ -630,6 +631,14 @@ export async function runCommand(raw: string, source: Source) {
     setVoice({ pending: null })
     thread().add('system', 'Previous plan dropped.')
   }
+  // "brainstorm X": straight to Oracle's panel, no routing round-trip
+  const topic = brainstormTopic(text)
+  if (topic) {
+    if (useHelm.getState().card) dismissHelm()
+    startBrainstorm(topic)
+    reply(`Brainstorming ${topic} with a panel of three. Ideas land on the board.`)
+    return
+  }
   // spoken answers to the Inbox's front card: "allow", "deny", "merge", "option two", "next"
   if (source === 'voice' && !useHelm.getState().card) {
     const i = inboxPick(light)
@@ -693,11 +702,11 @@ export async function runCommand(raw: string, source: Source) {
       return
     } catch (e: any) {
       helmFailed = true
-      thread().add('error', `Helm couldn't plan that: ${e?.message ?? e}`)
+      thread().add('error', `Oracle couldn't plan that: ${e?.message ?? e}`)
     }
   }
   const board = looksLikeBoardCommand(text)
-  if (helmFailed) app.toast(`Helm couldn't plan that; sent it to the ${board ? 'planner' : 'Lead'}`, 'warn')
+  if (helmFailed) app.toast(`Oracle couldn't plan that; sent it to the ${board ? 'planner' : 'Lead'}`, 'warn')
 
   // 5a. work for the team: anything that isn't about the board itself goes to the Lead
   if (!board) {

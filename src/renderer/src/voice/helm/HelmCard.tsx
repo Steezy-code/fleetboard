@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { AppWindow, Check, CornerDownLeft, Pencil, Send, ShipWheel, Users, Wrench, X, Zap } from 'lucide-react'
+import { AppWindow, Check, CornerDownLeft, Pencil, Send, Sparkles, Users, Wrench, X, Zap, Lightbulb } from 'lucide-react'
 import { useApp } from '../../state/store'
 import { playbookById } from '../../playbooks/catalog'
 import { PlaybookIcon } from '../../playbooks/PlaybooksView'
@@ -95,9 +95,9 @@ export function HelmCard() {
     >
       <div className="helm-head">
         <span className="helm-mark">
-          <ShipWheel size={13} />
+          <Sparkles size={13} />
         </span>
-        <span className="helm-name">Helm</span>
+        <span className="helm-name">Oracle</span>
         <span className="helm-req" title={card.request}>
           “{card.request}”
         </span>
@@ -179,7 +179,9 @@ function KindIcon({ o }: { o: HelmOption }) {
       return <AppWindow size={14} />
     case 'github':
       return <Wrench size={14} />
+    case 'brainstorm':
+      return <Lightbulb size={14} />
     default:
-      return <ShipWheel size={14} />
+      return <Sparkles size={14} />
   }
 }

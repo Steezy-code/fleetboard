@@ -250,7 +250,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
               </div>
               <div className="settings-row">
                 <div className="grow">
-                  <div>Helm</div>
+                  <div>Oracle</div>
                   <div className="muted small">The command bar reads the whole board first, then answers or suggests the best route: a playbook, a team, or a message to an agent already on it.</div>
                 </div>
                 <Switch on={settings.helm !== false} onChange={(v) => set({ helm: v })} />

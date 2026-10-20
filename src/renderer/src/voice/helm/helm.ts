@@ -13,10 +13,11 @@ import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planne
 import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
 import { routeFeedback, useFeedback } from '../../workbench/prFeedback'
+import { startBrainstorm } from './brainstorm'
 
 // ---------------------------------------------------------------- types / store
 
-export type HelmKind = 'playbook' | 'team' | 'send' | 'actions' | 'answer' | 'panel' | 'github'
+export type HelmKind = 'playbook' | 'team' | 'send' | 'actions' | 'answer' | 'panel' | 'github' | 'brainstorm'
 
 export interface HelmOption {
   label: string
@@ -31,6 +32,8 @@ export interface HelmOption {
   panel?: string
   /** fix a red CI run / give a PR's review comments to its agent; target is "branch" or "pr:<number>" */
   github?: { do: 'fix-ci' | 'send-feedback'; target: string }
+  /** what a brainstorm panel should think about */
+  topic?: string
 }
 
 export interface HelmResult {
@@ -69,7 +72,7 @@ const AUTO_PLAYBOOKS = ['morning-sweep', 'pr-review', 'db-safety']
 // ---------------------------------------------------------------- prompt
 
 function helmPrompt(text: string, board: string): string {
-  return `You are Helm, the router of Fleetboard: a visual board of real AI coding-agent terminals ("consoles": Claude Code, Codex, ...) where a Lead agent can plan work and run workers in git worktrees.
+  return `You are Oracle, the router of Fleetboard: a visual board of real AI coding-agent terminals ("consoles": Claude Code, Codex, ...) where a Lead agent can plan work and run workers in git worktrees.
 The user typed or said a request. Read the board snapshot, then answer and/or suggest the 1-3 best routes, best first.
 Reply with ONLY a JSON object, no prose, no code fences:
 {"reply":"<1-2 short sentences, spoken style>","options":[...],"auto":null}
@@ -81,6 +84,7 @@ Option shapes ("label": button text, 2-5 words; "detail": one line on what it do
 - {"kind":"actions","label":"...","detail":"...","actions":[<board actions>]}  board operations (schema below).
 - {"kind":"github","label":"...","detail":"...","github":{"do":"fix-ci","target":"branch|pr:<number>"}}  send an agent to fix a red CI run on this branch or on a PR, with the failed log (a PR's own agent gets it when it has one).
 - {"kind":"github","label":"...","detail":"...","github":{"do":"send-feedback","target":"pr:<number>"}}  give a PR's review comments to the agent that made it (or a new console in that branch).
+- {"kind":"brainstorm","label":"...","detail":"...","topic":"<the question to brainstorm, self-contained>"}  three agents (a pragmatist, a wild card, a critic) brainstorm it in parallel; Oracle merges and ranks the ideas on the board.
 - {"kind":"panel","label":"...","detail":"...","panel":"ci|missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|sweep|presets|git|chat|orchestrator"}  (ci = the CI & reviews drawer)
 - {"kind":"answer"}  no button: the answer is the reply itself.
 
@@ -91,6 +95,7 @@ Rules:
 - Questions about the board, the team or the work ("who needs me?", "what is Maya doing?", "did the tests pass?") → answer directly in "reply" from the snapshot (console output, statuses, plan, questions); options empty or one useful follow-up.
 - CI, PRs and reviews ("is CI green?", "any review comments?", "why is the build red?") → answer from CI AND PULL REQUESTS; offer a "github" option when something is red or has unsent comments.
 - "What should I work on?" / "what needs me?" → weigh, in order: questions waiting for the user, red CI, review comments not yet sent, changes requested, approved PRs to merge, PRs waiting on review, then OTHER REPOS from the morning sweep and the next plan item. Name the top 2-3 concretely, and give each one you can act on as an option (a "github" option for red CI or unsent review comments).
+- Open-ended "what could we…", "ideas for…", "how might we…", "what should this become" → offer a "brainstorm" option first (often with a playbook or team option as the alternative).
 - Prefer a playbook when one fits. Prefer "send" to an existing console when an agent on the board is already working on that thing or owns that area. Use "team" for custom multi-step work no playbook fits.
 - Only use console names, playbook ids and panels that exist. Never add kill/close/delete steps the user did not ask for.
 - At most 3 options, best first, each meaningfully different. Leave options empty when the reply fully answers.
@@ -109,13 +114,13 @@ User request: ${JSON.stringify(text)}`
 
 const str = (v: any, n = 2000) => (typeof v === 'string' ? v.trim().slice(0, n) : v == null ? '' : String(v).trim().slice(0, n))
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
-const KINDS: HelmKind[] = ['playbook', 'team', 'send', 'actions', 'answer', 'panel', 'github']
+const KINDS: HelmKind[] = ['playbook', 'team', 'send', 'actions', 'answer', 'panel', 'github', 'brainstorm']
 
 function coerceOption(raw: any): HelmOption | null {
   if (!raw || typeof raw !== 'object') return null
   let kind = str(raw.kind).toLowerCase() as HelmKind
   if (!KINDS.includes(kind)) {
-    kind = raw.github ? 'github' : raw.playbook ? 'playbook' : raw.goal ? 'team' : raw.text && raw.targets ? 'send' : Array.isArray(raw.actions) ? 'actions' : raw.panel ? 'panel' : 'answer'
+    kind = raw.github ? 'github' : raw.topic ? 'brainstorm' : raw.playbook ? 'playbook' : raw.goal ? 'team' : raw.text && raw.targets ? 'send' : Array.isArray(raw.actions) ? 'actions' : raw.panel ? 'panel' : 'answer'
   }
   const label = clip(str(raw.label, 200), 48)
   const detail = clip(str(raw.detail, 400), 140)
@@ -166,6 +171,11 @@ function coerceOption(raw: any): HelmOption | null {
       if (!githubTarget(what, target)) return null
       const fallback = what === 'fix-ci' ? (target === 'branch' ? 'Fix CI' : `Fix CI on PR #${target.slice(3)}`) : `Send PR #${target.slice(3)} comments`
       return { kind, label: label || fallback, detail, github: { do: what, target } }
+    }
+    case 'brainstorm': {
+      const topic = str(raw.topic ?? raw.text ?? raw.goal, 400)
+      if (!topic) return null
+      return { kind, label: label || 'Brainstorm it', detail: detail || `A panel of three thinks about: ${clip(topic, 100)}`, topic }
     }
     case 'answer':
       return { kind, label, detail }
@@ -255,13 +265,13 @@ export function showHelm(res: HelmResult, request: string, source: Source) {
   // the card shows the request and the reply; the caption steps aside
   setVoice({ captionUntil: 0 })
   reply(res.reply, false)
-  if (res.options.length) thread().add('plan', `Helm suggests · ${res.options.map((o, i) => `${i + 1}. ${o.label}`).join(' · ')}`)
+  if (res.options.length) thread().add('plan', `Oracle suggests · ${res.options.map((o, i) => `${i + 1}. ${o.label}`).join(' · ')}`)
   const card: HelmCardData = { id: uid('helm'), request, source, reply: res.reply, options: res.options, ran: null }
   useHelm.setState({ card })
   if (res.auto != null) {
     useHelm.setState({ card: { ...card, ran: res.auto } })
     const o = res.options[res.auto]
-    thread().add('plan', `Helm → ${o.label} (ran automatically)`)
+    thread().add('plan', `Oracle → ${o.label} (ran automatically)`)
     void execOption(o, request)
   }
 }
@@ -303,7 +313,7 @@ export async function runHelmOption(i: number | null = primaryIndex()) {
   const o = card.options[i]
   if (!o) return
   dismissHelm()
-  thread().add('plan', `Helm → ${o.label}`)
+  thread().add('plan', `Oracle → ${o.label}`)
   await execOption(o, card.request)
 }
 
@@ -339,6 +349,11 @@ async function execOption(o: HelmOption, request: string) {
         return await plan(o.actions!, '', request, false)
       case 'panel':
         return await plan([{ type: 'openPanel', name: o.panel! }], '', request, false)
+      case 'brainstorm': {
+        startBrainstorm(o.topic!)
+        reply(`Brainstorming with a panel of three. Ideas land on the board.`)
+        return
+      }
       case 'github': {
         const t = githubTarget(o.github!.do, o.github!.target)
         if (!t) throw new Error('that is no longer red or waiting')
