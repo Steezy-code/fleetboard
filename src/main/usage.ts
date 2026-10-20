@@ -113,7 +113,9 @@ function saveCache() {
   if (!cacheDirty) return
   cacheDirty = false
   try {
-    writeJsonAtomic(CACHE_FILE, { v: CACHE_VERSION, files: Object.fromEntries(cache) })
+    // not pretty-printed: every event is an array of eight numbers, and one-per-line makes this file
+    // roughly ten times bigger — it is rewritten whole on every scan, on the thread pumping the PTYs
+    writeJsonAtomic(CACHE_FILE, { v: CACHE_VERSION, files: Object.fromEntries(cache) }, undefined, { pretty: false })
   } catch {
     /* cache is an optimization only */
   }
