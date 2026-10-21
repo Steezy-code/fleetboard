@@ -27,6 +27,8 @@ export function wireConsoleEvents() {
   })
   // something failed in the background (it is in ~/.fleetboard/logs/main.log); the app keeps running
   on('app:error', (message: string) => app().toast(`Something went wrong in the background: ${message}`, 'warn'))
+  // main saying something the user needs to know in their own words (a refused tile permission)
+  on('app:notice', (message: string) => app().toast(message, 'warn'))
   on('pty:lostSession', (id: string) => {
     const name = allConsoles().find((c) => c.id === id)?.data.name ?? 'A console'
     app().toast(`${name}'s last conversation could not be resumed (its CLI no longer has it), so it started a new one.`, 'warn')

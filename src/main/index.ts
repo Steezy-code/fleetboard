@@ -20,6 +20,7 @@ import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
+import { appPermission, mediaTypesOf, webPermission } from './permissions'
 import { allowed, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
 
@@ -27,27 +28,6 @@ let win: BrowserWindow | null = null
 
 /** The session web tiles browse in (WebNode's <webview partition>). */
 const WEB_PARTITION = 'persist:fleetboard-web'
-const HARMLESS = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'])
-function webPermission(permission: string, url: string | undefined) {
-  if (HARMLESS.has(permission)) return true
-  try {
-    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(url ?? '').hostname)
-  } catch {
-    return false
-  }
-}
-
-/**
- * What the app's own window may have. Push-to-talk needs the microphone, and in Electron the 'media'
- * permission covers the camera too — granting it outright handed over both. Anything that asks for
- * video is refused; audio-only, and a request that does not say (older Electron, or a check rather
- * than a request), still goes through, because denying those would break push-to-talk.
- */
-export function appPermission(permission: string, mediaTypes?: string[]) {
-  if (permission === 'media') return !mediaTypes?.includes('video')
-  return permission === 'clipboard-read' || permission === 'notifications'
-}
-
 // Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
 app.on('web-contents-created', (_e, contents) => {
   contents.on('will-attach-webview', (_ev, prefs) => {
@@ -278,15 +258,26 @@ app.whenReady().then(async () => {
     if (!allowed(p, 'fbfile')) return new Response('', { status: 403 })
     return net.fetch(pathToFileURL(p).toString())
   })
-  // Microphone for push-to-talk; the camera and everything else stays denied.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
-    cb(appPermission(permission, (details as { mediaTypes?: string[] }).mediaTypes))
-  )
-  // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
-  // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
+  // Microphone for push-to-talk; the camera and everything else stays denied. The *check* handler
+  // matters as much as the request one: without it a check falls through to Electron's own answer,
+  // which is to allow.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) => cb(appPermission(permission, mediaTypesOf(details))))
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => appPermission(permission, mediaTypesOf(details)))
+  // Web tiles: Electron grants every permission unless told otherwise (see webPermission).
   const web = session.fromPartition(WEB_PARTITION)
-  web.setPermissionRequestHandler((_wc, permission, cb, details) => cb(webPermission(permission, details.requestingUrl)))
-  web.setPermissionCheckHandler((_wc, permission, origin) => webPermission(permission, origin))
+  const told = new Set<string>()
+  const refused = (permission: string) => {
+    // one notice per permission: a page may ask on every frame, and the toasts would bury the board
+    if (told.has(permission) || told.size > 50) return
+    told.add(permission)
+    ctx.emit('app:notice', `A web tile asked for ${permission.replace(/-/g, ' ')} and was refused. Fleetboard allows a page only the microphone and notifications, and only from your own machine.`)
+  }
+  web.setPermissionRequestHandler((_wc, permission, cb, details) => {
+    const ok = webPermission(permission, details.requestingUrl, mediaTypesOf(details))
+    if (!ok) refused(permission)
+    cb(ok)
+  })
+  web.setPermissionCheckHandler((_wc, permission, origin, details) => webPermission(permission, origin, mediaTypesOf(details)))
   // before any console starts: what a run that died left running would otherwise work on unseen
   const orphans = await endOrphans().catch(() => 0)
   if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
