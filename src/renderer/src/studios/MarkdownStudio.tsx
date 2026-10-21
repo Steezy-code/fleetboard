@@ -294,7 +294,10 @@ export default function MarkdownStudio(props: { path?: string }) {
     if (!isInside(root, path) || !relativeTo(root, path)) return toast('Stay inside the project folder', 'warn')
     if (await invoke<boolean>('fs:exists', path)) return open(path)
     try {
-      await invoke('fs:write', path, `# ${stripExt(baseName(file))}\n\n`)
+      // base: null is "only if it is not there", so a note an agent wrote in the meantime is opened
+      // rather than replaced by this empty stub
+      const made = await invoke<WriteResult>('fs:write', path, `# ${stripExt(baseName(file))}\n\n`, { base: null })
+      if (!made.ok) return open(path)
       const t = await loadTree()
       loadAll(t)
       await open(path, 'source')
