@@ -13,8 +13,10 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const SRC = path.join(import.meta.dirname, '..', '..', 'src', 'renderer', 'src', 'voice')
-const actions = fs.readFileSync(path.join(SRC, 'actions.ts'), 'utf8')
-const planner = fs.readFileSync(path.join(SRC, 'planner.ts'), 'utf8')
+// a Windows checkout has CRLF endings, and a pattern that says \n does not mean \r\n
+const read = (f: string) => fs.readFileSync(path.join(SRC, f), 'utf8').replace(/\r\n/g, '\n')
+const actions = read('actions.ts')
+const planner = read('planner.ts')
 
 /** The `type` of every variant of the Action union. */
 const union = (() => {
