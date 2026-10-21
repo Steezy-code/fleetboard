@@ -29,7 +29,9 @@ const FILES = walk(SRC).map((p) => ({ rel: path.relative(SRC, p).split(path.sep)
  * only safe once it has been through sanitizeHtml. These are the two modules that do that, and they
  * are the only ones allowed to import it.
  */
-const MAY_IMPORT_MARKED = ['renderer/src/workbench/markdown.ts', 'renderer/src/studios/docs/render.ts']
+// One module parses markdown now. studios/docs/render.ts used to call marked.parse itself, which is
+// why a document there got no relative images and no highlighting; it goes through renderMarkdown.
+const MAY_IMPORT_MARKED = ['renderer/src/workbench/markdown.ts']
 
 test('only the sanitizing modules import marked', () => {
   const importers = FILES.filter((f) => /from 'marked'/.test(f.text)).map((f) => f.rel).sort()
