@@ -19,7 +19,7 @@ const projectSkills = path.join(project, '.claude', 'skills')
 before(async () => {
   process.env.CLAUDE_CONFIG_DIR = claudeHome
   const skills = await import('../../src/main/skills')
-  skills.registerSkills({ ipc: ipcMain as never, win: () => null, ptys: null as never, settings: (() => ({})) as never, emit: () => {} })
+  skills.register({ ipc: ipcMain as never, win: () => null, ptys: null as never, settings: (() => ({})) as never, emit: () => {} })
 })
 
 const writeSkill = (root: string, slug: string, body: string) => {

@@ -12,10 +12,12 @@ import * as agents from './agents'
 import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
+import * as skills from './skills'
 import * as sweep from './sweep'
 import * as ci from './ci'
 import * as goal from './goal'
-import { initFleet, stopFleetTicks } from './fleet'
+import * as fleet from './fleet'
+import { stopFleetTicks } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
@@ -284,9 +286,11 @@ app.whenReady().then(async () => {
   if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal, ci, journal]) m.register(ctx)
-  sweep.register(ctx)
-  await initFleet(ctx)
+  // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
+  // be registered from inside profiles, which made its handlers appear to come from nowhere.
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, ci, sweep, journal]) m.register(ctx)
+  // these two start servers, so they are awaited rather than listed
+  await fleet.register(ctx)
   await remote.register(ctx)
   createWindow()
 })
