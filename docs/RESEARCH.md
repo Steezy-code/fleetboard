@@ -4,15 +4,15 @@ What each feature does and looks like. `docs/ARCHITECTURE.md` covers how the cod
 
 ## Visual language
 
-- Near-black board (`#0f0d0c`-ish) with a faint dot grid; warm off-white text; **one accent: red-orange** (`#ff4a2b`-ish) used for active tab, primary buttons, selection, status dots.
+- Near-black board (`#0f0d0c`) with a faint dot grid; warm off-white text; **one accent: red-orange** (`#ff4a2b`) used for active tab, primary buttons, selection, status dots.
 - Fonts: Geist (UI), JetBrains Mono (consoles), Fraunces italic (display).
-- **Top bar:** `← Back to home` · project selector (`▣ Votelanding ⌄`) · workspace tabs (active tab tinted red with a count badge) · `+` · `× Close` · right side: `● 27 live`, usage pill (`◔ resets 12:39am`), briefcase, settings, avatar.
+- **Top bar:** `← Back to home` · project selector (`▣ <project> ⌄`) · workspace tabs (active tab tinted red with a count badge) · `+` · `× Close` · right side: `● N live`, usage pill (`◔ resets <time>`), briefcase, settings, avatar.
 - **Left tool rail (vertical):** select (red when active), agent spawn, shapes, web/monitor, `Aa` text, pen/ink, eraser/tag, globe (web tile), image, connector.
 - **Right rail:** layers, checklist, settings/gear, folder (code), doc, markdown, loops.
-- **Bottom center:** chip row `New console · Spawn 4 · Group · Presets · Pause all · Resume all · Memory`, then a pill command bar with an orb icon: “Hold space to speak · @ to direct…”, chevron, stop, mic. Hint pill above: `Try "pass this task to codex"`. While listening: `● listening ▮▮▮` with live transcript caption below.
-- **Bottom left:** git branch `⎇ main 11`. **Bottom right:** zoom `− 78% +`.
+- **Bottom center:** chip row `New console · Spawn N · Group · Presets · Pause all · Resume all · Memory`, then a pill command bar with an orb icon: “Hold space to speak · @ to direct…”, chevron, stop, mic. Hint pill above: `Try "pass this task to codex"`. While listening: `● listening ▮▮▮` with live transcript caption below.
+- **Bottom left:** git branch `⎇ main N`. **Bottom right:** zoom `− N% +`.
 - **Console node:** title bar with colored agent dot + name (`Maya 2`), status pill (`● WORKING` red, `READY`, `YOLO`), buttons (duplicate, maximize, close). Body is the real terminal.
-- **Group frame:** dashed/rounded frame with header `● REVIEWERS 4 · idle ⌄`, tinted by role. Wires (curved red lines with dots) connect the Orchestrator node to groups.
+- **Group frame:** dashed/rounded frame with header `● REVIEWERS N · idle ⌄`, tinted by role. Wires (curved red lines with dots) connect the Orchestrator node to groups.
 
 ## Feature ledger
 
@@ -36,7 +36,7 @@ Each row: what the feature is → how Fleetboard does it.
 ### 03 Orchestration
 - Status per console: working / resting (idle) / needs you, driven by CLI hooks → Claude Code hooks via a per-console settings file, plus output heuristics for every other CLI (activity timing + prompt patterns).
 - **Mission map** modal: filter chips (All, Working, Needs you, Idle, Done), search, tree Orchestrator → Teams → consoles, side panel with Fleet counts (Working/Needs you/Idle/Done; Orchestrators/Teams/Consoles/Active loops), selection details with `Go to the console`, Pause, Kill.
-- **Orchestrator** panel: “21 agents · 3 groups”, list with live status, `Command 21 agents…` input; it types the command into the named consoles and submits.
+- **Orchestrator** panel: “N agents · M groups”, list with live status, `Command N agents…` input; it types the command into the named consoles and submits.
 - **Teams**: groups with roles (Frontend, Backend, Testers, Reviewers, Design, Docs, Security, General) and tints.
 - **Composer**: up to 12 slots, per-slot agent, “Fill all” with an agent, `Spawn N`.
 - **Handoff**: “pass this task to codex” → outgoing scrollback summarized by a CLI, brief typed into the new agent.
