@@ -458,6 +458,16 @@
   min-width: 34px;
   text-align: right;
 }
+/* Folded: the card is its header and nothing else, so the board behind it is usable again. The
+   header keeps the who / what / how-long line, which is what tells you whether to unfold it. */
+.it-card.folded .it-head {
+  cursor: pointer;
+  padding-bottom: 0;
+}
+.it-card.folded .it-head:hover .it-headtext {
+  color: var(--text);
+}
+
 /* Pre-merge review: each claim beside its evidence, and the diff beside the scope it was granted. */
 .it-review {
   display: flex;

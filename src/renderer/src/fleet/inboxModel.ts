@@ -53,11 +53,19 @@ interface InboxUi {
   /** key of the item in front (kept across refreshes) */
   front: string | null
   open: boolean
+  /**
+   * The card is folded to its one-line header. It stays folded until the user unfolds it, across
+   * new items too — someone who folded it away is not asking to be shown the next one in full.
+   *
+   * ponytail: in memory, so a reload starts unfolded. Keep it in a global (store:setGlobal) only
+   * if that turns out to be the wrong default.
+   */
+  folded: boolean
   /** when the front item came into view: number keys and Enter wait a moment, so a new card is never answered by a key meant for something else */
   shownAt: number
 }
 
-export const useInbox = create<InboxUi>(() => ({ items: [], front: null, open: false, shownAt: 0 }))
+export const useInbox = create<InboxUi>(() => ({ items: [], front: null, open: false, folded: false, shownAt: 0 }))
 
 const firstSeen = new Map<string, number>()
 const dismissed = new Set<string>()
@@ -90,6 +98,9 @@ export function cycleFront(dir: 1 | -1) {
 }
 
 export const toggleInbox = () => useInbox.setState((s) => ({ open: !s.open }))
+
+/** Fold the card away to its header, or bring it back. Folding also closes the list under it. */
+export const toggleFolded = () => useInbox.setState((s) => (s.folded ? { folded: false } : { folded: true, open: false }))
 
 /** A key or Enter can answer the front card only once it has been on screen a moment. */
 export const settled = () => Date.now() - useInbox.getState().shownAt > 600
