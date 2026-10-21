@@ -10,7 +10,21 @@ import { pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const ROOT = path.resolve(import.meta.dirname, '../..')
-const ELECTRON: string = require('electron')
+/**
+ * Where Electron is, without asking it to install itself.
+ *
+ * `require('electron')` downloads and extracts the binary when it is missing. One process doing that
+ * is slow; several doing it at once — which is what running the suite a few files at a time means,
+ * since each file is its own process — extract into the same folder together, and the result is a
+ * corrupt install ("failed to create resources.pak: File exists") and ETXTBSY for whichever process
+ * tries to run the half-written binary. Installing is `npm ci`'s job, so this only looks.
+ */
+const ELECTRON: string = (() => {
+  const pkg = path.dirname(require.resolve('electron/package.json'))
+  const bin = path.join(pkg, 'dist', fs.readFileSync(path.join(pkg, 'path.txt'), 'utf8').trim())
+  if (!fs.existsSync(bin)) throw new Error(`Electron is not installed (looked for ${bin}). Run \`npm ci\` before the end-to-end tests.`)
+  return bin
+})()
 export const FAKE_CLAUDE = path.join(ROOT, 'test/fake-agent/claude.mjs')
 
 export interface LaunchOptions {
@@ -187,12 +201,10 @@ export class App {
   /**
    * Start the app, retrying ETXTBSY.
    *
-   * "Text file busy" from execve means some process holds that binary open for writing. Nothing in
-   * this suite writes Electron, so I do not know what did — it appeared in CI once the suite started
-   * running three files at a time, and I have not reproduced it locally at three or four. What is
-   * certain is that it is a transient condition on starting the process, not something the app did:
-   * every one of those failures was this spawn, before the app existed. So: try again, a few times,
-   * briefly. If it ever stops being transient this will fail with the same error it always did.
+   * "Text file busy" from execve means something holds that binary open for writing — which in CI was
+   * Electron installing itself from several test processes at once, now prevented where ELECTRON is
+   * resolved above. This stays as cover for the general case: a transient condition on starting a
+   * process is worth trying again, briefly, rather than failing a whole run over.
    */
   private static async launchRetrying(start: () => ReturnType<typeof spawn>): Promise<ReturnType<typeof spawn>> {
     for (let i = 0; ; i++) {
