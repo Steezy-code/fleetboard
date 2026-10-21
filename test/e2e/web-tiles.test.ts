@@ -62,3 +62,15 @@ test('a site in a web tile gets nothing; a dev server gets the microphone and no
   assert.equal(reports.localhost.camera, 'NotAllowedError', 'and never the camera, however local it is')
   assert.equal(reports.localhost.geolocation, 'denied')
 })
+
+test('a tile URL that comes from the board file goes through the same allowlist', async () => {
+  // normalizeUrl is applied when the user types an address. A board file is not typed: agents write
+  // it, and the tile re-mounts data.url as the webview's src on every load. An external scheme there
+  // is handed to the operating system's handler for it.
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ type: 'web', x: 100, y: 700, w: 400, h: 300, data: { url: 'vscode://evil/payload' } }))
+  const src = await app.waitFor(() => app.eval(() => [...document.querySelectorAll('webview')].map((w) => w.getAttribute('src')).find((s) => s?.includes('evil')) ?? null), {
+    label: 'the tile mounted'
+  })
+  assert.doesNotMatch(src, /^vscode:/, 'not mounted as given')
+  assert.match(src, /^https:\/\/www\.google\.com\/search\?/, 'it falls through to a search, as a typed address does')
+})
