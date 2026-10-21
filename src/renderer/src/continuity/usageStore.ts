@@ -9,13 +9,19 @@ export interface Budget {
   session: number
   /** tokens per rolling 7-day week */
   week: number
+  /**
+   * Share of either budget at which the app stops spending this agent's tokens *on its own* — a loop
+   * typing into a console, a goal judge, the CI watcher spawning a fixer. 0 turns it off. What the
+   * user does by hand is never stopped.
+   */
+  ceiling: number
 }
 export type Budgets = Record<UsageAgent, Budget>
 
 export const DEFAULT_BUDGETS: Budgets = {
-  claude: { session: 6_000_000, week: 80_000_000 },
-  codex: { session: 6_000_000, week: 80_000_000 },
-  gemini: { session: 6_000_000, week: 80_000_000 }
+  claude: { session: 6_000_000, week: 80_000_000, ceiling: 0.95 },
+  codex: { session: 6_000_000, week: 80_000_000, ceiling: 0.95 },
+  gemini: { session: 6_000_000, week: 80_000_000, ceiling: 0.95 }
 }
 
 export const USAGE_AGENT_META: Record<UsageAgent, { label: string; color: string }> = {
@@ -88,7 +94,11 @@ export function startUsageWatch() {
   watching = true
   const s = useUsage.getState
   invoke<Budgets | undefined>('store:getGlobal', 'usageBudget').then((b) => {
-    if (b && typeof b === 'object') useUsage.setState({ budgets: { ...DEFAULT_BUDGETS, ...b } })
+    if (b && typeof b === 'object') {
+      // a budget saved before ceilings existed has none: take the default rather than read it as off
+      const merged = Object.fromEntries(USAGE_AGENT_IDS.map((a) => [a, { ...DEFAULT_BUDGETS[a], ...b[a] }])) as Budgets
+      useUsage.setState({ budgets: merged })
+    }
   })
   s().refreshLimits()
   window.setInterval(() => s().refreshLimits(), 60_000)

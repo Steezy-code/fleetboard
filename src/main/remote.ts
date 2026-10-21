@@ -2,12 +2,13 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import type { MainContext } from './context'
-import type { AnswerResult, PromptAnswer } from '@shared/prompt'
+import { describeAnswer, type AnswerResult, type PromptAnswer } from '@shared/prompt'
 import { approvalFor } from '@shared/approvals'
 import { qrSvg } from '@shared/qr'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { newSecret, sameSecret } from './localserver'
 import { currentProject } from './store'
+import { answered } from './journal'
 import { answerAsk, fleetState, mergeReady } from './fleet'
 import { PAGE_CSS, PAGE_HTML, PAGE_JS } from './remote-page'
 
@@ -232,6 +233,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
       const valid = a && typeof a === 'object' && (typeof (a as any).option === 'string' || typeof (a as any).yes === 'boolean' || (a as any).enter === true)
       if (typeof body.consoleId !== 'string' || !valid) return send(res, 400, { error: 'bad answer' })
       const r: AnswerResult = await ctx.ptys.answer(body.consoleId, a)
+      if (r.ok) answered('your phone', body.consoleId, describeAnswer(a))
       return send(res, r.ok ? 200 : 409, r)
     }
     if (url.pathname === '/api/ask') {

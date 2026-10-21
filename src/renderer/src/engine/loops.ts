@@ -1,5 +1,7 @@
 import { useApp, allConsoles } from '../state/store'
 import { invoke, runCli, uid } from '../lib/api'
+import { journal } from '../lib/journal'
+import { maySpendOn, spendable } from './guards'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
 import type { ConsoleStatus } from '@shared/types'
 import { stripAnsi } from '@shared/ansi'
@@ -40,7 +42,7 @@ export interface Loop {
   lastRunAt?: number
   runs: number
   /** why the loop retired itself */
-  ended?: { reason: 'goal' | 'runs' | 'time'; at: number; note?: string }
+  ended?: { reason: 'goal' | 'runs' | 'time' | 'stalled'; at: number; note?: string }
   /** last goal check verdict */
   lastCheck?: { at: number; met: boolean; note: string }
 }
@@ -95,6 +97,7 @@ export function removeLoop(id: string) {
 export function setLoopEnabled(id: string, enabled: boolean) {
   const l = getLoops().find((x) => x.id === id)
   if (!l) return
+  progress.delete(id)
   updateLoop(id, enabled ? { enabled, startedAt: Date.now(), lastRunAt: undefined, runs: l.ended ? 0 : l.runs, ended: undefined } : { enabled })
 }
 
@@ -177,6 +180,56 @@ const lastSent = new Map<string, number>()
 const lastFire = new Map<string, number>()
 const busy = new Set<string>()
 
+/**
+ * Consecutive runs that changed nothing before a loop gives up on itself.
+ *
+ * An idle-triggered loop fires every time a console goes working → idle, so an agent with nothing left
+ * to do gets re-prompted for ever, at full price, and says the same thing every time. Four runs is
+ * enough to tell that apart from a slow one.
+ */
+const STALL_RUNS = 4
+const progress = new Map<string, { print: string; same: number }>()
+
+/**
+ * A fingerprint of what the targeted consoles are showing — of the part that means something.
+ *
+ * The obvious version of this never fires: an agent TUI redraws an elapsed counter ("esc to
+ * interrupt · 12s") every second, so the screen is never byte-identical even when nothing is
+ * happening. Digits go, whitespace collapses, and only the last lines count — so a spinner and a
+ * clock look the same from one run to the next, while real work does not.
+ */
+async function screenPrint(ids: string[]): Promise<string | null> {
+  const tails = await Promise.all(ids.map((id) => consoleTail(id, 4000).then((t) => t, () => null)))
+  // a screen we could not read is not evidence of anything: no information, no verdict
+  if (tails.some((t) => t === null)) return null
+  return tails
+    .map((t) =>
+      (t ?? '')
+        .split('\n')
+        .map((l) => l.replace(/\d+/g, '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(-40)
+        .join('\n')
+    )
+    .join('\u001f')
+}
+
+/**
+ * Has anything changed since the last time this loop prompted? Read just after prompting, so the hot
+ * path does not wait on it: the instruction is the same every run, so the echo of it is too, and what
+ * is left is whatever the agent had produced by the time it was asked again.
+ */
+async function checkProgress(l: Loop, targets: string[]) {
+  const print = await screenPrint(targets)
+  if (print === null) return
+  const before = progress.get(l.id)
+  const same = before && before.print === print ? before.same + 1 : 0
+  progress.set(l.id, { print, same })
+  if (same < STALL_RUNS) return
+  const cur = getLoops().find((x) => x.id === l.id)
+  if (cur?.enabled) retire(cur, 'stalled', `nothing on the targeted consoles changed across ${same + 1} runs, so it was spending for nothing`)
+}
+
 function compile(t: Extract<LoopTrigger, { kind: 'output' }>): RegExp | null {
   if (!t.pattern) return null
   try {
@@ -203,10 +256,20 @@ function eligible(l: Loop, ids = loopTargets(l)): string[] {
   })
 }
 
-function retire(l: Loop, reason: 'goal' | 'runs' | 'time', note?: string) {
+const RETIRED: Record<NonNullable<Loop['ended']>['reason'], string> = {
+  goal: 'goal met ✓',
+  runs: 'finished its runs',
+  time: 'reached its time limit',
+  stalled: 'stopped: nothing is changing'
+}
+
+function retire(l: Loop, reason: NonNullable<Loop['ended']>['reason'], note?: string) {
   updateLoop(l.id, { enabled: false, ended: { reason, at: Date.now(), note } })
-  const msg = reason === 'goal' ? `Loop “${l.name}”: goal met ✓` : reason === 'runs' ? `Loop “${l.name}” finished its runs` : `Loop “${l.name}” reached its time limit`
-  useApp.getState().toast(msg, 'ok')
+  progress.delete(l.id)
+  const msg = `Loop “${l.name}” ${RETIRED[reason]}`
+  useApp.getState().toast(msg, reason === 'stalled' ? 'warn' : 'ok')
+  // the toast is gone in four seconds, and this is how a loop ends
+  journal('loop.end', note ? `${msg} — ${note}` : msg, { loop: l.id, name: l.name, reason, runs: l.runs })
 }
 
 /** Ask a CLI whether the goal is met. Resolves { met, note }. */
@@ -247,7 +310,8 @@ async function fire(loopId: string, ids: string[]) {
   if (busy.has(loopId)) return
   const l = getLoops().find((x) => x.id === loopId)
   if (!l || !l.enabled || !l.instruction.trim()) return
-  const targets = eligible(l, ids)
+  // nothing unattended spends past the ceiling; the user typing into the same console still does
+  const targets = spendable(eligible(l, ids), `loop “${l.name}”`)
   if (!targets.length) {
     // nothing to type into: still advance the schedule so it does not fire in a burst later
     if (l.trigger.kind === 'schedule') updateLoop(l.id, { lastRunAt: Date.now() })
@@ -255,9 +319,10 @@ async function fire(loopId: string, ids: string[]) {
   }
   busy.add(loopId)
   try {
-    if (l.stop.goal && l.runs > 0) {
+    if (l.stop.goal && l.runs > 0 && (l.stop.goalKind === 'command' || maySpendOn(l.stop.judgeAgent, 'judging whether a loop can stop'))) {
       const verdict = await checkGoal(l, targets).catch((e) => ({ met: false, note: String(e) }))
       updateLoop(l.id, { lastCheck: { at: Date.now(), ...verdict } })
+      journal('loop.goal', `Loop “${l.name}”: goal ${verdict.met ? 'met' : 'not met'} — ${verdict.note}`, { loop: l.id, met: verdict.met })
       if (verdict.met) return retire(l, 'goal', verdict.note)
     }
     const cur = getLoops().find((x) => x.id === loopId)
@@ -270,6 +335,15 @@ async function fire(loopId: string, ids: string[]) {
     }
     const runs = cur.runs + 1
     updateLoop(cur.id, { runs, lastRunAt: now })
+    // nothing changing is a reason to stop, not a reason to prompt again
+    void checkProgress(cur, targets)
+    const names = new Map(allConsoles().map((c) => [c.id, String(c.data.name ?? c.id)]))
+    journal('loop.fire', `Loop “${cur.name}” (run ${runs}) sent its instruction to ${targets.map((id) => names.get(id) ?? id).join(', ')}`, {
+      loop: cur.id,
+      run: runs,
+      instruction: cur.instruction.slice(0, 300),
+      consoles: targets
+    })
     if (cur.stop.afterRuns && runs >= cur.stop.runs) retire({ ...cur, runs }, 'runs')
   } finally {
     busy.delete(loopId)

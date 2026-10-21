@@ -12,6 +12,7 @@ import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
 import { loginEnv } from './env'
 import { ghEnv, run, git as runGit } from './run'
+import { append as journal, answered } from './journal'
 import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
@@ -269,6 +270,12 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
   const how = branchToDelete(deleteBranch, kept)
   if (m.branch && how !== 'keep') await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])
+  journal({
+    kind: 'fleet.remove',
+    text: `${m.name}'s worktree removed${m.branch ? (how === 'keep' ? `, branch ${m.branch} kept` : `, branch ${m.branch} deleted`) : ''}${kept === 'rescued' ? ' (its unreported work was committed first)' : ''}`,
+    project: projectPath,
+    detail: { member: m.name, branch: m.branch, branchDeleted: how !== 'keep', rescued: kept === 'rescued' }
+  })
 }
 
 // ---------------------------------------------------------------- prompts
@@ -439,6 +446,7 @@ function trustTick() {
       if (!trust) continue
       trustAnswered.add(m.id)
       void ctx.ptys.answer(m.id, { option: trust.label }).then((r) => {
+        if (r.ok) answered(`Fleetboard, trusting the folder for ${m.name}`, m.id, trust.label)
         if (!r.ok) trustAnswered.delete(m.id)
       })
     }
@@ -1211,6 +1219,12 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
         if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['merge', '--abort'])
         return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
       }
+      journal({
+        kind: 'fleet.merge',
+        text: `the team's branch ${lead.branch} was merged into ${current.out}`,
+        project: s.projectPath,
+        detail: { branch: lead.branch, into: current.out, commits: s.ready?.commits, files: s.ready?.files.length }
+      })
       await dismissTeam(s, lead, 'merged')
       return { ok: true, into: current.out }
     }
