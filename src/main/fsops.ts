@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
-import { dirs, writeDurable } from './paths'
+import { writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
 import { allowed, grant, outsideMessage } from './roots'
@@ -142,15 +142,10 @@ export function register(ctx: MainContext) {
   ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) =>
     allowed(dir, 'fs:tree') ? tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined) : []
   )
-  ipc.handle('fs:list', (_e, dir: string) => (allowed(dir, 'fs:list') ? tree(dir, 0) : []))
   ipc.handle('fs:read', (_e, file: string) => {
     // already throws for a missing file, so callers handle a throw
     if (!allowed(file, 'fs:read')) throw new Error(outsideMessage(file))
     return fs.readFileSync(file, 'utf8')
-  })
-  ipc.handle('fs:readBase64', (_e, file: string) => {
-    if (!allowed(file, 'fs:readBase64')) throw new Error(outsideMessage(file))
-    return fs.readFileSync(file).toString('base64')
   })
   ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string }) => {
     if (!allowed(file, 'fs:write')) throw new Error(outsideMessage(file))
@@ -176,7 +171,6 @@ export function register(ctx: MainContext) {
       return null
     }
   })
-  ipc.handle('fs:assetsDir', () => dirs.assets)
   // openPath resolves with '' on success or an error string, so a refusal is just that string
   ipc.handle('shell:openPath', (_e, p: string) =>
     !allowed(p, 'shell:openPath') ? outsideMessage(p) : opensSafely(p) ? shell.openPath(p) : (shell.showItemInFolder(p), '')

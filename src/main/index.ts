@@ -213,7 +213,6 @@ function registerCore() {
   ipcMain.handle('win:minimize', () => win?.minimize())
   ipcMain.handle('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
   ipcMain.handle('win:close', () => win?.close())
-  ipcMain.handle('win:devtools', () => win?.webContents.toggleDevTools())
   ipcMain.handle('webview:devtools', (_e, webContentsId: number) => {
     webContents.fromId(webContentsId)?.openDevTools({ mode: 'detach' })
   })
@@ -228,10 +227,6 @@ function registerCore() {
     const fs = await import('node:fs')
     fs.writeFileSync(outPath, pdf)
     return outPath
-  })
-  ipcMain.handle('png:capture', async (_e, rect: { x: number; y: number; width: number; height: number }) => {
-    const img = await win!.webContents.capturePage(rect)
-    return img.toPNG().toString('base64')
   })
 }
 

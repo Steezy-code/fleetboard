@@ -1,3 +1,5 @@
+import { DEFAULT_THEME } from './themes'
+
 // Data model shared by the main process and the renderer.
 // Everything here is persisted as JSON under ~/.fleetboard/.
 
@@ -265,7 +267,7 @@ export const DEFAULT_SETTINGS: Settings = {
     'Milo', 'Ivy', 'Eli', 'Sol', 'Tess', 'Finn', 'Lux', 'Wren', 'Ash'
   ],
   customAgents: [],
-  theme: 'ember',
+  theme: DEFAULT_THEME,
   accent: ''
 }
 
