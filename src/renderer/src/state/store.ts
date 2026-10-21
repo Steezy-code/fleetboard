@@ -13,7 +13,8 @@ import type {
   Workspace
 } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
-import { basename, invoke, uid } from '../lib/api'
+import { invoke, uid } from '../lib/api'
+import { baseName } from '../workbench/paths'
 
 /**
  * Per-window memory that outlives the page (a crash, a reload) but not the app: sessionStorage belongs
@@ -361,7 +362,7 @@ export const useApp = create<AppState>((set, get) => {
         project = {
           schema: SCHEMA_VERSION,
           id,
-          name: basename(path),
+          name: baseName(path),
           path,
           workspaces: [ws],
           activeWorkspaceId: ws.id,

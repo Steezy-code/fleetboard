@@ -4,7 +4,8 @@
 // Console tails share whatever room is left after the rest.
 import type { BoardNode, ConsoleStatus, Workspace } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { invoke, relPath } from '../../lib/api'
+import { invoke } from '../../lib/api'
+import { relativeTo } from '../../workbench/paths'
 import { activeWs, allConsoles, useApp } from '../../state/store'
 import { consoleTail, isLive } from '../../engine/consoles'
 import { activeLead, useFleet } from '../../engine/fleet'
@@ -84,15 +85,15 @@ function nodeLine(n: BoardNode, ws: Workspace, root: string): string | null {
       return d.text?.trim() ? `label: ${clip(d.text, 120)}` : null
     case 'doc': {
       const h1 = /^\s*#\s+(.+)$/m.exec(d.markdown ?? '')?.[1]
-      const title = d.title || h1 || (d.path ? relPath(root, d.path) : '') || 'untitled'
-      return `doc: ${clip(title, 90)}${d.path ? ` (${relPath(root, d.path)})` : ''}`
+      const title = d.title || h1 || (d.path ? relativeTo(root, d.path) : '') || 'untitled'
+      return `doc: ${clip(title, 90)}${d.path ? ` (${relativeTo(root, d.path)})` : ''}`
     }
     case 'web':
       return d.url ? `web tile: ${d.url}` : null
     case 'file':
-      return d.path ? `file tile: ${relPath(root, d.path)}` : null
+      return d.path ? `file tile: ${relativeTo(root, d.path)}` : null
     case 'image':
-      return d.path ? `image: ${relPath(root, d.path)}` : null
+      return d.path ? `image: ${relativeTo(root, d.path)}` : null
     case 'plan':
       return `team plan tile for lead ${nameOf(d.leadId)}`
     case 'orchestrator': {

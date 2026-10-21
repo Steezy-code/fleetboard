@@ -42,7 +42,7 @@ const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
 /** lead id → pending fleet_wait resolver */
-/** this module's timers, so they can be stopped (see initFleet / stopFleetTicks) */
+/** this module's timers, so they can be stopped (see register / stopFleetTicks) */
 const ticks: NodeJS.Timeout[] = []
 const waiters = new Map<string, (events: FleetMessage[]) => void>()
 /** ask id → pending fleet_ask_user resolver */
@@ -1071,7 +1071,7 @@ function memberExited(id: string, code: number | undefined, appClosing: boolean)
   post(s, { from: m.id, to: lead.id, kind: 'report', text: `(blocked) ${m.name}'s console exited${how} before it reported.${work} Start a new ${m.role} if the task still needs doing.` })
 }
 
-export async function initFleet(c: MainContext) {
+export async function register(c: MainContext) {
   ctx = c
   loadAll()
   ctx.ptys.onExit(memberExited)
