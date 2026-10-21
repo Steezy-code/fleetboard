@@ -1,22 +1,11 @@
-# Symvibe teardown → Fleetboard spec
+# Fleetboard feature spec
 
-Personal-use reconstruction of the features advertised by symvibe.com (formerly Hypervibe), rebuilt for Linux.
+What each feature does and looks like. `docs/ARCHITECTURE.md` covers how the code is organized.
 
-## How the evidence was gathered
-
-| Source | What it gave us | Type |
-|---|---|---|
-| `https://www.symvibe.com/` HTML (255 KB) | Every feature heading, FAQ, privacy model, agent catalog | observed (static) |
-| 18 demo videos (`/media/*.mp4`, 1920×1080), sampled into contact sheets | Exact UI layout, panels, flows, wording | observed (recorded runtime) |
-| `/changelog`, `/compare/tmux`, `/features/usage`, `/features/multiple-accounts`, `/tour` | Version history, mechanics of profiles, usage sources, resume | observed (static) |
-| REA `capture_browser_scenario` of `/tour` — evidence `ev_568c894c…2cc8` | Site is a static Vercel page (fonts, two analytics scripts, media). No app code ships to the browser. | observed (controlled replay) |
-
-**Limit:** the app itself is a paid, signed macOS (Apple Silicon) DMG behind an account. No binary was available, so nothing here comes from decompilation. Behavior is inferred from recordings and documentation; implementation choices below are ours.
-
-## Visual language (from video frames)
+## Visual language
 
 - Near-black board (`#0f0d0c`-ish) with a faint dot grid; warm off-white text; **one accent: red-orange** (`#ff4a2b`-ish) used for active tab, primary buttons, selection, status dots.
-- Fonts on the site: Geist (UI), JetBrains Mono (consoles), Fraunces italic (display).
+- Fonts: Geist (UI), JetBrains Mono (consoles), Fraunces italic (display).
 - **Top bar:** `← Back to home` · project selector (`▣ Votelanding ⌄`) · workspace tabs (active tab tinted red with a count badge) · `+` · `× Close` · right side: `● 27 live`, usage pill (`◔ resets 12:39am`), briefcase, settings, avatar.
 - **Left tool rail (vertical):** select (red when active), agent spawn, shapes, web/monitor, `Aa` text, pen/ink, eraser/tag, globe (web tile), image, connector.
 - **Right rail:** layers, checklist, settings/gear, folder (code), doc, markdown, loops.
@@ -27,7 +16,7 @@ Personal-use reconstruction of the features advertised by symvibe.com (formerly 
 
 ## Feature ledger
 
-Each row: what Symvibe does (observed) → how Fleetboard does it.
+Each row: what the feature is → how Fleetboard does it.
 
 ### 01 Board
 - Real PTY terminals (Ctrl-C, vim, htop work) → `node-pty` + xterm.js (WebGL renderer) per console node.
@@ -39,7 +28,7 @@ Each row: what Symvibe does (observed) → how Fleetboard does it.
 - **Git on the board**: card with repo, branch, CHANGES list with per-file status, commit message, `Commit & Push N files`, history, pull/refresh, “Working tree clean”.
 
 ### 02 Voice
-- Push-to-talk (hold Space), transcribed on-device (Symvibe downloads a speech model once from Hugging Face) → Whisper via `@huggingface/transformers` in the renderer.
+- Push-to-talk (hold Space), transcribed on-device → Whisper via `@huggingface/transformers` in the renderer, downloaded once from Hugging Face.
 - Planner turns plain speech + a board snapshot into actions (“spawn 5 claude code agents”, “now spawn 2 codex”, “put an orchestrator wire with group 1”, “delete the group called backend”) → planner runs through **your own `claude -p`** (no API key) returning a JSON plan; a fast local rule parser handles common commands instantly and offline.
 - Spoken replies in a natural voice (“DAX, Maya2, Rafa2, Nova2, about to close 4 consoles, say confirm”) → Kokoro TTS on-device (fallback: system speech).
 - Destructive steps wait for confirmation; dictation only types, Enter is yours.
@@ -69,7 +58,7 @@ Each row: what Symvibe does (observed) → how Fleetboard does it.
 - Auto-approval flags (`--dangerously-skip-permissions`, `--yolo`, etc.) are a global opt-in, off by default.
 - Killing a live console always asks first. Quit with running consoles asks first.
 
-## Deliberate differences
-- Linux-first (Electron) instead of native macOS.
+## Deliberate choices
+- Linux and Windows, on Electron.
 - No account, no credits, no hosted planner: the planner, studios, handoffs and loop judges all run through the CLIs you are already logged into.
 - All state in `~/.fleetboard/`.
