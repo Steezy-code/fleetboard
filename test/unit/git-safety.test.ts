@@ -29,9 +29,13 @@ function hostileRepo(how: 'external' | 'textconv') {
   const sh = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', env: ENV })
   const marker = path.join(repo, 'RAN')
   const script = path.join(repo, 'payload.sh')
+  // git runs these through a shell, including on Windows, where a backslash is an escape rather than
+  // a separator — so the paths an attacker would use here are forward-slashed ones. (This is how the
+  // test told me the hazard is real on Windows too: git tried to run the payload and sh mangled it.)
+  const forSh = (p: string) => p.replace(/\\/g, '/')
   sh('init', '-q', '-b', 'main')
   // a textconv driver has to print the file; an external diff just has to exist
-  fs.writeFileSync(script, `#!/bin/sh\ntouch ${JSON.stringify(marker)}\ncat "$1" 2>/dev/null\nexit 0\n`, { mode: 0o755 })
+  fs.writeFileSync(script, `#!/bin/sh\ntouch ${JSON.stringify(forSh(marker))}\ncat "$1" 2>/dev/null\nexit 0\n`, { mode: 0o755 })
   fs.writeFileSync(path.join(repo, 'a.txt'), 'one\n')
   if (how === 'textconv') fs.writeFileSync(path.join(repo, '.gitattributes'), '*.txt diff=evil\n')
   sh('add', '-A')
@@ -39,19 +43,31 @@ function hostileRepo(how: 'external' | 'textconv') {
   fs.writeFileSync(path.join(repo, 'a.txt'), 'two\n')
   sh('add', '-A')
   sh('commit', '-qm', 'second')
-  sh('config', how === 'external' ? 'diff.external' : 'diff.evil.textconv', script)
+  sh('config', how === 'external' ? 'diff.external' : 'diff.evil.textconv', forSh(script))
   const ran = () => fs.existsSync(marker)
   const reset = () => fs.rmSync(marker, { force: true })
-  const plain = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', env: ENV })
-  return { repo, ran, reset, plain }
+  /**
+   * Run plain git and say whether the repo's payload ran. Not an assertion: if a git cannot host the
+   * payload at all there is no hazard here to refuse, and the tests below would pass for the wrong
+   * reason — better to say so than to claim a guarantee this machine never tested.
+   */
+  const hazard = (...a: string[]) => {
+    try {
+      execFileSync('git', a, { cwd: repo, encoding: 'utf8', env: ENV, stdio: 'pipe' })
+    } catch {
+      /* git itself failing (the driver died) still tells us whether the marker appeared */
+    }
+    const out = ran()
+    reset()
+    return out
+  }
+  return { repo, ran, reset, hazard }
 }
 
-test('an external diff driver named by the repo is never run', async () => {
-  const { repo, ran, reset, plain } = hostileRepo('external')
+test('an external diff driver named by the repo is never run', async (t) => {
+  const { repo, ran, hazard } = hostileRepo('external')
 
-  plain('diff', 'HEAD~1')
-  assert.equal(ran(), true, 'plain `git diff` runs diff.external — if this fails the rest proves nothing')
-  reset()
+  if (!hazard('diff', 'HEAD~1')) return t.skip('this git never ran diff.external, so there is no hazard here to refuse')
 
   // the git drawer's own diff, and the team's Ready diff
   for (const args of [['diff', 'HEAD~1'], ['diff', '--stat', '-p', 'HEAD~1..HEAD'], ['show', '--patch', 'HEAD']]) {
@@ -63,12 +79,10 @@ test('an external diff driver named by the repo is never run', async () => {
   assert.match((await git(repo, ['diff', 'HEAD~1'])).stdout, /^-one$/m)
 })
 
-test('a textconv driver named by the repo is never run — the one that reaches git show', async () => {
-  const { repo, ran, reset, plain } = hostileRepo('textconv')
+test('a textconv driver named by the repo is never run — the one that reaches git show', async (t) => {
+  const { repo, ran, hazard } = hostileRepo('textconv')
 
-  plain('show', 'HEAD')
-  assert.equal(ran(), true, 'plain `git show` runs a textconv driver — this is what --no-ext-diff alone misses')
-  reset()
+  if (!hazard('show', 'HEAD')) return t.skip('this git never ran the textconv driver, so there is no hazard here to refuse')
 
   for (const args of [['show', '--no-color', '--stat', '--patch', 'HEAD'], ['log', '-p', '-1'], ['diff', 'HEAD~1'], ['diff', '--cached']]) {
     const r = await git(repo, args)
