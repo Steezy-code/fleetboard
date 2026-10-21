@@ -482,7 +482,9 @@
 .it-claim.warn svg {
   color: var(--warn-text);
 }
-.it-claim.note svg {
+/* not `.note`: that is the board's sticky note (content.css), and a bare one here inherits its
+   position: absolute and tears the row out of the card */
+.it-claim.risk svg {
   color: var(--text-3, var(--text-2));
 }
 .it-claim-what {
