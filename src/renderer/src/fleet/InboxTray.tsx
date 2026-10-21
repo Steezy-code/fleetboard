@@ -129,11 +129,15 @@ function readyMeta(i: Extract<InboxItem, { kind: 'ready' }>) {
 /** 1.2M, 48k, 900 — a size, not an exact count; the point is which member was expensive. */
 const tokens = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
 
+/** enough to see the shape of it; the rest is a count, and the diff is a click away */
+const MAX_FLAGS = 4
+
 function Review({ review, spend }: { review: MergeReview | null; spend: Record<string, Spent | null> }) {
   if (!review) return null
-  const { claims, unowned, risks } = review
-  if (!claims.length && !unowned.length && !risks.length) return null
-  const outside = unowned.slice(0, 2).join(', ') + (unowned.length > 2 ? ` +${unowned.length - 2}` : '')
+  const { claims, flags } = review
+  if (!claims.length && !flags.length) return null
+  const shown = flags.slice(0, MAX_FLAGS)
+  const rest = flags.length - shown.length
   return (
     <div className="it-review">
       {claims.map((c, i) => {
@@ -149,22 +153,21 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
           </div>
         )
       })}
-      {unowned.length > 0 && (
-        <div className="it-claim warn">
-          <ArrowUpRight size={12} />
-          <span className="it-claim-what mono">{outside}</span>
-          <span className="it-claim-ev">
-            outside what {claims.length === 1 ? 'it was' : 'the team was'} granted
+      {shown.map((f) => (
+        <div key={f.path} className={`it-claim ${f.outside ? 'warn' : 'risk'}`}>
+          {f.outside ? <ArrowUpRight size={12} /> : <ShieldAlert size={12} />}
+          <span className="it-claim-what mono">{f.path}</span>
+          <span className="it-claim-ev it-claim-why">{[f.outside ? `outside ${claims.length === 1 ? 'its' : 'the team’s'} scope` : '', f.why].filter(Boolean).join(' · ')}</span>
+        </div>
+      ))}
+      {rest > 0 && (
+        <div className="it-claim risk">
+          <ShieldAlert size={12} />
+          <span className="it-claim-what">
+            {rest} more file{rest === 1 ? '' : 's'} worth a look
           </span>
         </div>
       )}
-      {risks.map((x) => (
-        <div key={x.path} className="it-claim risk">
-          <ShieldAlert size={12} />
-          <span className="it-claim-what mono">{x.path}</span>
-          <span className="it-claim-ev">{x.why}</span>
-        </div>
-      ))}
     </div>
   )
 }

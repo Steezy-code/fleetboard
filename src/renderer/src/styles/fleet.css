@@ -516,6 +516,11 @@
 .it-claim.warn .it-claim-ev {
   color: var(--warn-text);
 }
+/* a flag's reason is short and categorical and the path is long and already in the file list
+   above, so this is the half of the row that should survive: the path truncates, not the reason */
+.it-claim-why {
+  max-width: 64%;
+}
 .it-foot {
   display: flex;
   align-items: center;

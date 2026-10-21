@@ -48,13 +48,48 @@ test('ownedBy: Windows separators and stray trailing slashes still match', () =>
   assert.equal(ownedBy('src/main/git.ts', ['./src/main']), true)
 })
 
-test('a file nobody was granted is reported as unowned', () => {
+test('a file nobody was granted is flagged as outside the scope', () => {
   const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['src/main/ratelimit.ts'], doneWhen: 'npm test passes', report: '9 tests pass' })], {
     files: ['src/main/ratelimit.ts', 'package.json']
   })
   const r = reviewReady(s)!
-  assert.deepEqual(r.unowned, ['package.json'])
+  assert.deepEqual(r.flags, [{ path: 'package.json', outside: true, why: 'changes dependencies' }])
   assert.equal(r.clean, false)
+})
+
+test('a file that is both outside the scope and sensitive is one flag, not two', () => {
+  const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['src/main'], doneWhen: 'ok', report: 'ok' })], {
+    files: ['src/main/a.ts', 'package.json', '.github/workflows/release.yml']
+  })
+  const r = reviewReady(s)!
+  assert.equal(r.flags.length, 2)
+  assert.deepEqual(
+    r.flags.map((f) => f.path),
+    ['package.json', '.github/workflows/release.yml']
+  )
+  assert.deepEqual(r.flags[0], { path: 'package.json', outside: true, why: 'changes dependencies' })
+})
+
+test('outside-the-scope files sort ahead of the merely sensitive ones', () => {
+  const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['package.json', 'src'], doneWhen: 'ok', report: 'ok' })], {
+    // package.json is granted (sensitive only); the workflow is not (outside, and sensitive)
+    files: ['package.json', '.github/workflows/release.yml']
+  })
+  const r = reviewReady(s)!
+  assert.deepEqual(
+    r.flags.map((f) => [f.path, f.outside]),
+    [
+      ['.github/workflows/release.yml', true],
+      ['package.json', false]
+    ]
+  )
+})
+
+test('a sensitive file somebody was granted does not make the review unclean', () => {
+  const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['package.json'], doneWhen: 'ok', report: 'ok' })], { files: ['package.json'] })
+  const r = reviewReady(s)!
+  assert.deepEqual(r.flags, [{ path: 'package.json', outside: false, why: 'changes dependencies' }])
+  assert.equal(r.clean, true)
 })
 
 test('a diff entirely inside the granted scope, with every claim merged, is clean', () => {
@@ -62,7 +97,7 @@ test('a diff entirely inside the granted scope, with every claim merged, is clea
     files: ['src/main/ratelimit.ts', 'test/unit/ratelimit.test.ts']
   })
   const r = reviewReady(s)!
-  assert.deepEqual(r.unowned, [])
+  assert.deepEqual(r.flags, [])
   assert.equal(r.clean, true)
   assert.deepEqual(
     r.claims.map((c) => [c.who, c.proven]),
@@ -96,11 +131,11 @@ test('sensitive paths are flagged whoever owns them', () => {
     files: ['package.json', '.github/workflows/release.yml', 'db/migrations/003_add.sql', 'src/plain.ts']
   })
   const r = reviewReady(s)!
-  assert.deepEqual(r.unowned, []) // granted, and still flagged
-  assert.deepEqual(r.risks, [
-    { path: 'package.json', why: 'changes dependencies' },
-    { path: '.github/workflows/release.yml', why: 'changes CI' },
-    { path: 'db/migrations/003_add.sql', why: 'looks like a database migration' }
+  assert.deepEqual(r.flags, [
+    // all granted, so none is outside — and still worth a look
+    { path: 'package.json', outside: false, why: 'changes dependencies' },
+    { path: '.github/workflows/release.yml', outside: false, why: 'changes CI' },
+    { path: 'db/migrations/003_add.sql', outside: false, why: 'looks like a database migration' }
   ])
 })
 
@@ -108,7 +143,7 @@ test('a team that granted nothing is not reported as reaching outside its scope'
   // a lone lead with no crew owns nothing on paper; every file would otherwise read as unowned
   const s = fleet([], { files: ['src/a.ts', 'src/b.ts'] })
   const r = reviewReady(s)!
-  assert.deepEqual(r.unowned, [])
+  assert.deepEqual(r.flags, [])
   assert.deepEqual(r.claims, [])
   assert.equal(r.clean, true)
 })
