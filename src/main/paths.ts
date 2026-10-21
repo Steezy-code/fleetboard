@@ -47,7 +47,7 @@ function syncDir(dir: string) {
  * loses up to five minutes of work for a write that had already "succeeded" — and a file in the
  * user's own project has no snapshot to fall back to at all.
  */
-export function writeDurable(file: string, text: string, mode?: number, tmp = `${file}.${process.pid}.tmp`) {
+export function writeDurable(file: string, text: string | Uint8Array, mode?: number, tmp = `${file}.${process.pid}.tmp`) {
   try {
     const fd = fs.openSync(tmp, 'w', mode ?? 0o666)
     try {

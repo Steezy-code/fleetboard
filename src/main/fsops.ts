@@ -94,7 +94,16 @@ export function writeText(file: string, content: string, base?: string): WriteRe
     }
     if (current !== base) return { ok: false, reason: 'changed', current }
   }
-  // a symlinked file (dotfiles) is written where it points, not replaced by a plain file
+  writeResolved(file, content)
+  return { ok: true }
+}
+
+/**
+ * Write a file the user owns: through the symlink if it is one (a dotfile linked out to ~/dotfiles is
+ * written where it points, not replaced by a plain file), keeping its permissions, atomically and
+ * durably.
+ */
+function writeResolved(file: string, content: string | Uint8Array) {
   let target = file
   try {
     target = fs.realpathSync(file)
@@ -106,7 +115,6 @@ export function writeText(file: string, content: string, base?: string): WriteRe
   // hidden, and beside the target: this one lands in the user's own project folder
   const tmp = path.join(path.dirname(target), `.${path.basename(target)}.fleetboard-${process.pid}-${Date.now()}.tmp`)
   writeDurable(target, content, mode === undefined ? undefined : mode & 0o7777, tmp)
-  return { ok: true }
 }
 
 export function register(ctx: MainContext) {
@@ -153,9 +161,9 @@ export function register(ctx: MainContext) {
   })
   ipc.handle('fs:writeBase64', (_e, file: string, b64: string) => {
     if (!allowed(file, 'fs:writeBase64')) throw new Error(outsideMessage(file))
-    // unlike writeText this replaces a symlink with a plain file; left as it was, noted for later
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, Buffer.from(b64, 'base64'))
+    // the same write as fs:write: it used to truncate the target in place, so a write that ran out of
+    // room destroyed whatever was there, and it replaced a symlink with a plain file
+    writeResolved(file, Buffer.from(b64, 'base64'))
   })
   ipc.handle('fs:exists', (_e, p: string) => allowed(p, 'fs:exists') && fs.existsSync(p))
   ipc.handle('fs:mkdir', (_e, p: string) => {
