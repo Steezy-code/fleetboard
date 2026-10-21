@@ -4,6 +4,7 @@ import {
   Bot,
   Brain,
   Calendar,
+  CheckCheck,
   CheckSquare,
   Eraser,
   FileText,
@@ -26,8 +27,8 @@ import {
   Spline,
   StickyNote,
   Type,
-  Workflow,
-  Wand2
+  Wand2,
+  Workflow
 } from 'lucide-react'
 import { invoke, fileUrl } from '../lib/api'
 import { useApp, type Tool } from '../state/store'
@@ -171,6 +172,9 @@ export function RightRail() {
             </button>
             <button className="menu-item" onClick={() => drawer('chat')}>
               <MessagesSquare size={14} className="ic" /> Chat
+            </button>
+            <button className="menu-item" onClick={() => drawer('journal')}>
+              <CheckCheck size={14} className="ic" /> Night log
             </button>
             <div className="menu-sep" />
             <button className="menu-item" onClick={() => open('settings')}>
