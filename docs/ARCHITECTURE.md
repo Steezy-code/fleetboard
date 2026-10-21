@@ -142,6 +142,15 @@ src/renderer/src/
   `Math.random`), `argv-safety.test.ts` (every `headless` definition in the AGENTS catalogue wraps its
   prompt in `promptArg`), `fleet-roles.test.ts` (`callTool` consults `toolDenial` before the first tool
   runs). When you add an agent, a panel that renders HTML, or a fleet tool, these are what will fail.
-- Races show up under load: run the e2e suite several files at a time (`--test-concurrency=4` instead of 1)
-  now and then. That found a note opening as an empty editor, which one at a time never showed.
-- CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.
+- Races show up under load, so CI runs the suite three files at a time (`FB_E2E_JOBS=3 npm run test:e2e`;
+  the default is 1, which is what to use when reproducing a failure). That found a note opening as an
+  empty editor, which one at a time never showed. `npm run test:e2e:one -- test/e2e/<file>.test.ts`
+  runs a single file against the current build.
+- CI (.github/workflows/ci.yml) runs typecheck (twice: `tsconfig.json` and `tsconfig.strict.json`),
+  the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests
+  and the Windows-specific e2e files on Windows. It runs on a pull request and on a push to master —
+  a branch with a pull request open would otherwise run all of it twice. The Windows installer is
+  built only for master and tags, since nothing consumes it otherwise and release.yml builds it again
+  from scratch on a tag.
+- `FB_E2E_HEADLESS=1` skips Xvfb entirely (`--ozone-platform=headless`), which is how to run the e2e
+  suite on a machine without it.

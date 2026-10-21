@@ -16,7 +16,8 @@
     "postinstall": "node scripts/postinstall.mjs",
     "app": "bin/fleetboard --rebuild",
     "test": "node scripts/test-unit.mjs",
-    "test:e2e": "electron-vite build && xvfb-run -a -s '-screen 0 1600x1000x24' node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1 'test/e2e/**/*.test.ts'",
+    "test:e2e": "electron-vite build && xvfb-run -a -s '-screen 0 1600x1000x24' node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=${FB_E2E_JOBS:-1} 'test/e2e/**/*.test.ts'",
+    "test:e2e:one": "xvfb-run -a -s '-screen 0 1600x1000x24' node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1",
     "dist:win": "electron-vite build && electron-builder --win --x64 --publish never",
     "dist:linux": "electron-vite build && electron-builder --linux AppImage --publish never"
   },
