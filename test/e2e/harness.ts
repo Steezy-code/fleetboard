@@ -184,6 +184,27 @@ export class App {
     }
   }
 
+  /**
+   * Start the app, retrying ETXTBSY.
+   *
+   * "Text file busy" from execve means some process holds that binary open for writing. Nothing in
+   * this suite writes Electron, so I do not know what did — it appeared in CI once the suite started
+   * running three files at a time, and I have not reproduced it locally at three or four. What is
+   * certain is that it is a transient condition on starting the process, not something the app did:
+   * every one of those failures was this spawn, before the app existed. So: try again, a few times,
+   * briefly. If it ever stops being transient this will fail with the same error it always did.
+   */
+  private static async launchRetrying(start: () => ReturnType<typeof spawn>): Promise<ReturnType<typeof spawn>> {
+    for (let i = 0; ; i++) {
+      try {
+        return start()
+      } catch (e: any) {
+        if (e?.code !== 'ETXTBSY' || i >= 5) throw e
+        await new Promise((r) => setTimeout(r, 150 * (i + 1)))
+      }
+    }
+  }
+
   static async launch(opts: LaunchOptions = {}): Promise<App> {
     if (!fs.existsSync(path.join(ROOT, 'out/main/index.js'))) throw new Error('build the app first: npx electron-vite build')
     const sb = opts.sandbox ?? makeSandbox()
@@ -209,7 +230,8 @@ export class App {
     const inspect = opts.mainInspector ? ['--inspect=0'] : []
     // FB_E2E_HEADLESS=1: no window on screen (Chromium's headless platform), for running without a virtual display
     const headless = process.env.FB_E2E_HEADLESS ? ['--ozone-platform=headless'] : []
-    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...headless, ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const args = ['--no-sandbox', '--remote-debugging-port=0', ...headless, ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')]
+    const proc = await App.launchRetrying(() => spawn(ELECTRON, args, { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }))
     let output = ''
     const wsUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`app did not start:\n${output.slice(-3000)}`)), 30_000)
