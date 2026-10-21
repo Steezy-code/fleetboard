@@ -1,4 +1,5 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, OctagonAlert, ShieldQuestion, TerminalSquare } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import type { MergeReview } from '@shared/mergeReview'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
 import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleInbox, useInbox, type InboxItem } from './inboxModel'
@@ -121,6 +122,51 @@ function readyMeta(i: Extract<InboxItem, { kind: 'ready' }>) {
   return [mins ? `${mins < 60 ? `${mins} min` : `${Math.round(mins / 6) / 10} h`}` : '', i.workers ? `${i.workers} worker${i.workers === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
 }
 
+// What the team was told to do, next to what it actually did. It only ever annotates: a legitimate
+// out-of-scope change is common enough that a gate here would teach you to click through it, and
+// then it would be guarding nothing. Merge stays enabled; the flags are for reading first.
+/** 1.2M, 48k, 900 — a size, not an exact count; the point is which member was expensive. */
+const tokens = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
+
+function Review({ review, spend }: { review: MergeReview | null; spend: Record<string, { total: number } | null> }) {
+  if (!review) return null
+  const { claims, unowned, risks } = review
+  if (!claims.length && !unowned.length && !risks.length) return null
+  const outside = unowned.slice(0, 2).join(', ') + (unowned.length > 2 ? ` +${unowned.length - 2}` : '')
+  return (
+    <div className="it-review">
+      {claims.map((c, i) => {
+        const spent = spend[c.cwd]?.total
+        return (
+          <div key={i} className={`it-claim ${c.proven ? 'ok' : 'warn'}`}>
+            {c.proven ? <Check size={12} /> : <TriangleAlert size={12} />}
+            <span className="it-claim-who">{c.who}</span>
+            <span className="it-claim-what">{c.doneWhen}</span>
+            {spent ? <span className="it-claim-spend">{tokens(spent)}</span> : null}
+            <span className="it-claim-ev">{c.proven ? c.report?.split('\n')[0] ?? 'merged' : c.gap}</span>
+          </div>
+        )
+      })}
+      {unowned.length > 0 && (
+        <div className="it-claim warn">
+          <ArrowUpRight size={12} />
+          <span className="it-claim-what mono">{outside}</span>
+          <span className="it-claim-ev">
+            outside what {claims.length === 1 ? 'it was' : 'the team was'} granted
+          </span>
+        </div>
+      )}
+      {risks.map((x) => (
+        <div key={x.path} className="it-claim note">
+          <ShieldAlert size={12} />
+          <span className="it-claim-what mono">{x.path}</span>
+          <span className="it-claim-ev">{x.why}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function Body({ item }: { item: InboxItem }) {
   switch (item.kind) {
     case 'approval': {
@@ -206,6 +252,7 @@ function Body({ item }: { item: InboxItem }) {
               )}
             </div>
           )}
+          <Review review={item.review} spend={item.spend} />
           <div className="it-foot">
             {r.verified && (
               <span className="it-verified">

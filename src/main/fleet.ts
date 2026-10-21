@@ -1095,6 +1095,7 @@ export async function initFleet(c: MainContext) {
     return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
   })
   ipc.handle('fleet:mergeReady', (_e, projectId: string) => mergeReady(projectId))
+  ipc.handle('fleet:revertMerge', (_e, projectId: string, commit: string) => revertMerge(projectId, String(commit)))
   /** Push the team's branch and open a draft PR whose description is the lead's summary. */
   ipc.handle('fleet:openPr', async (_e, projectId: string) => {
     const s = states.get(projectId)
@@ -1174,7 +1175,7 @@ async function unfinishedOperation(cwd: string): Promise<string | null> {
 const merging = new Set<string>()
 
 /** Merge the Ready work into the user's checkout (whatever branch it is on now), then close the team. */
-export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string }> {
+export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string; commit?: string }> {
   const s = states.get(projectId)
   if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
   // the desktop and the phone can both press Merge
@@ -1195,14 +1196,40 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
         if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['merge', '--abort'])
         return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
       }
+      // the merge commit, so the Ready card can offer to undo it while it is still the tip
+      const commit = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out.trim()
       await dismissTeam(s, lead, 'merged')
-      return { ok: true, into: current.out }
+      return { ok: true, into: current.out, ...(commit ? { commit } : {}) }
     }
     await dismissTeam(s, lead, 'keep')
     return { ok: true, into: '' }
   } finally {
     merging.delete(projectId)
   }
+}
+
+/**
+ * Undo a merge this app just made, as a fresh revert commit.
+ *
+ * The sha arrives over IPC, so it is matched against a plain hex shape before it reaches git: a
+ * `--flag`, a path or a `a..b` range is refused rather than passed through. It also only runs while
+ * that merge is still HEAD — once anything is committed on top, reverting it here would quietly
+ * undo a merge in the middle of the user's history, so they are told to do it themselves.
+ */
+export async function revertMerge(projectId: string, commit: string): Promise<{ ok: boolean; error?: string }> {
+  if (!/^[0-9a-f]{7,40}$/.test(commit)) return { ok: false, error: 'That is not a commit id.' }
+  const s = states.get(projectId)
+  if (!s) return { ok: false, error: 'That project is not open.' }
+  const busy = await unfinishedOperation(s.projectPath)
+  if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then undo the merge.` }
+  const head = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out.trim()
+  if (head !== commit) return { ok: false, error: 'Your checkout has moved on since that merge, so undoing it here would bury the commits made since. Revert it yourself.' }
+  const r = await git(s.projectPath, ['revert', '-m', '1', '--no-edit', commit])
+  if (!r.ok) {
+    if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['revert', '--abort'])
+    return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
+  }
+  return { ok: true }
 }
 
 /** A project's team state, if it has one. */
