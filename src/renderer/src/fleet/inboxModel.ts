@@ -10,6 +10,8 @@ import { ciItems, fixCi, useCi, type CiItem } from '../workbench/ciStore'
 import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
 import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
+import { reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
+import type { Spent } from '@shared/spend'
 
 // The Inbox, as one ordered list: what blocks an agent first (its permission prompts, then the
 // Lead's questions), then finished work, then notices (red CI, review comments). The tray on the
@@ -42,7 +44,7 @@ interface Base {
 export type InboxItem =
   | (Base & { kind: 'approval'; approval: Approval | null; context: string[]; note: string | null })
   | (Base & { kind: 'ask'; ask: FleetAsk; progress: string })
-  | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number })
+  | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number; review: MergeReview | null; spend: Record<string, Spent | null> })
   | (Base & { kind: 'stopped' })
   | (Base & { kind: 'notice'; tone: 'danger' | 'info'; head: string; lines: string[] })
 
@@ -51,11 +53,19 @@ interface InboxUi {
   /** key of the item in front (kept across refreshes) */
   front: string | null
   open: boolean
+  /**
+   * The card is folded to its one-line header. It stays folded until the user unfolds it, across
+   * new items too — someone who folded it away is not asking to be shown the next one in full.
+   *
+   * ponytail: in memory, so a reload starts unfolded. Keep it in a global (store:setGlobal) only
+   * if that turns out to be the wrong default.
+   */
+  folded: boolean
   /** when the front item came into view: number keys and Enter wait a moment, so a new card is never answered by a key meant for something else */
   shownAt: number
 }
 
-export const useInbox = create<InboxUi>(() => ({ items: [], front: null, open: false, shownAt: 0 }))
+export const useInbox = create<InboxUi>(() => ({ items: [], front: null, open: false, folded: false, shownAt: 0 }))
 
 const firstSeen = new Map<string, number>()
 const dismissed = new Set<string>()
@@ -88,6 +98,9 @@ export function cycleFront(dir: 1 | -1) {
 }
 
 export const toggleInbox = () => useInbox.setState((s) => ({ open: !s.open }))
+
+/** Fold the card away to its header, or bring it back. Folding also closes the list under it. */
+export const toggleFolded = () => useInbox.setState((s) => (s.folded ? { folded: false } : { folded: true, open: false }))
 
 /** A key or Enter can answer the front card only once it has been on screen a moment. */
 export const settled = () => Date.now() - useInbox.getState().shownAt > 600
@@ -154,11 +167,64 @@ export function openConsole(id: string) {
   window.setTimeout(() => useApp.getState().enterFocus(id), 80)
 }
 
+/**
+ * The merge this app made last, while undoing it is still a one-click job. It is dropped after
+ * UNDO_WINDOW because a Ready card that never leaves the inbox is just chrome, and by then the
+ * answer to "did that merge go in cleanly" is no longer in front of you.
+ *
+ * ponytail: module state, so it goes when the window reloads — which is the right lifetime for an
+ * offer to undo something that happened minutes ago. Persist it only if undo-after-restart is asked
+ * for, and then check it is still HEAD before offering (revertMerge already refuses otherwise).
+ */
+const UNDO_WINDOW = 15 * 60_000
+let lastMerge: { commit: string; into: string; at: number } | null = null
+
 async function mergeReady(projectId: string) {
   const app = useApp.getState()
-  const r = await invoke<{ ok: boolean; into?: string; error?: string }>('fleet:mergeReady', projectId)
-  if (r.ok) app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
-  else app.toast(`Merge failed: ${r.error}`, 'error')
+  const r = await invoke<{ ok: boolean; into?: string; error?: string; commit?: string }>('fleet:mergeReady', projectId)
+  if (r.ok) {
+    app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
+    lastMerge = r.commit ? { commit: r.commit, into: r.into ?? '', at: Date.now() } : null
+    refreshInbox()
+  } else app.toast(`Merge failed: ${r.error}`, 'error')
+}
+
+async function undoMerge(projectId: string, m: { commit: string; into: string }) {
+  const app = useApp.getState()
+  if (!(await app.confirm({ title: `Undo the merge into ${m.into}?`, body: 'Adds a commit that reverses everything the team merged. Its branches and worktrees are already gone, so this cannot be re-merged with one click.', confirm: 'Undo the merge', danger: true }))) return
+  const r = await invoke<{ ok: boolean; error?: string }>('fleet:revertMerge', projectId, m.commit)
+  if (r.ok) {
+    app.toast(`Reverted. ${m.into} is back where it was.`, 'ok')
+    lastMerge = null
+    refreshInbox()
+  } else app.toast(r.error ?? 'Could not undo the merge', 'error')
+}
+
+/**
+ * What each member's worktree cost, fetched once per Ready card and then read straight out of here
+ * by build(). Only Claude Code files its logs per cwd, so members on other CLIs stay absent and
+ * their row simply shows no figure (see spentIn in main/usage.ts).
+ */
+let spend: Record<string, Spent | null> = {}
+let spendKey = ''
+
+function fetchSpend(key: string, cwds: string[]) {
+  if (spendKey === key) return
+  spendKey = key
+  if (!cwds.length) return
+  invoke<Record<string, Spent | null>>('usage:spentIn', cwds).then(
+    (r) => {
+      spend = r
+      refreshInbox()
+    },
+    () => undefined
+  )
+}
+
+/** Ask a member that has gone quiet for a status, in its own console. */
+const nudge = (id: string, who: string) => {
+  invoke('fleet:userMessage', id, `${who}, where are you up to? Reply with what is done, what is left, and anything you are stuck on.`)
+  useApp.getState().toast(`Asked ${who} for a status`, 'ok')
 }
 
 async function openPr(projectId: string, ready: FleetReady) {
@@ -263,6 +329,8 @@ function build() {
     const key = `ready:${ready.leadId}:${ready.at}`
     const lead = fleet?.members[ready.leadId]
     const workers = Object.values(fleet?.members ?? {}).filter((m) => m.leadId === ready.leadId && m.role === 'worker').length
+    const review = fleet ? reviewReady(fleet) : null
+    fetchSpend(key, review?.claims.map((c) => c.cwd) ?? [])
     const closeOnly = !ready.branch || ready.commits === 0 || !!ready.prUrl
     const actions: InboxAction[] = closeOnly
       ? [{ label: 'Done', primary: true, run: () => invoke('fleet:done', project.id) }]
@@ -281,6 +349,8 @@ function build() {
       ready,
       lead,
       workers,
+      review,
+      spend,
       actions,
       replyTo: lead ? { label: lead.name, send: (text: string) => invoke('fleet:userMessage', lead.id, text) } : undefined
     })
@@ -294,6 +364,20 @@ function build() {
     const failing = item.pr?.checks.filter((c) => c.state === 'failing').map((c) => c.name) ?? []
     items.push(ciNotice(key, item, failing))
   }
+  // members that have been going a long time and said nothing yet
+  for (const x of fleet ? stalled(fleet, Date.now()) : []) {
+    const key = `stalled:${x.consoleId}`
+    if (dismissed.has(key)) continue
+    items.push(stalledNotice(key, x))
+  }
+
+  // the merge that just happened, while undoing it is still one click
+  if (lastMerge && Date.now() - lastMerge.at < UNDO_WINDOW) {
+    const m = lastMerge
+    const key = `merged:${m.commit}`
+    if (!dismissed.has(key)) items.push(mergedNotice(key, m, project.id))
+  }
+
   const fb = useFeedback.getState().result
   for (const pr of fb?.ok ? fb.prs : []) {
     const fresh = unsent(pr)
@@ -324,6 +408,42 @@ function ciNotice(key: string, item: CiItem, failing: string[]): InboxItem {
       { label: 'Fix it', primary: true, run: () => fixCi(item) },
       { label: 'Details', keeps: true, run: () => useApp.getState().openDrawer('ci') },
       { label: 'Dismiss', tone: 'deny', run: () => undefined }
+    ]
+  }
+}
+
+function stalledNotice(key: string, x: Stall): InboxItem {
+  const h = Math.floor(x.minutes / 60)
+  return {
+    kind: 'notice',
+    tone: 'info',
+    key,
+    who: x.who,
+    sub: 'Working',
+    head: `has been going ${h ? `${h} h ${x.minutes % 60} min` : `${x.minutes} min`} without reporting`,
+    lines: ['It may be deep in a long task, or it may be waiting on something it cannot ask you about.'],
+    since: seen(key),
+    actions: [
+      { label: 'Ask for a status', primary: true, run: () => nudge(x.consoleId, x.who) },
+      { label: 'Open its console', keeps: true, run: () => openConsole(x.consoleId) },
+      { label: 'Dismiss', tone: 'deny', run: () => undefined }
+    ]
+  }
+}
+
+function mergedNotice(key: string, m: { commit: string; into: string }, projectId: string): InboxItem {
+  return {
+    kind: 'notice',
+    tone: 'info',
+    key,
+    who: 'Fleetboard',
+    sub: m.commit.slice(0, 8),
+    head: `merged the team's work into ${m.into || 'your checkout'}`,
+    lines: ['Nothing is pushed. If it turns out wrong, undoing it now is one commit.'],
+    since: seen(key),
+    actions: [
+      { label: 'Looks right', primary: true, run: () => undefined },
+      { label: 'Undo the merge', tone: 'deny', run: () => undoMerge(projectId, m) }
     ]
   }
 }

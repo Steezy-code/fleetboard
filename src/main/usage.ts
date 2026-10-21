@@ -707,8 +707,47 @@ function limits(agent: UsageAgent): UsageLimits {
   }
 }
 
+/**
+ * Claude Code's slug for a working directory: it keeps one log folder per cwd under
+ * `<config>/projects/`, named after the path with every non-alphanumeric run turned into a dash
+ * (`C:\Users\me\app` becomes `C--Users-me-app`).
+ */
+export const projectSlug = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
+
+/**
+ * What was spent inside each of these working directories — a team member's worktree, in practice,
+ * which is how its cost is told apart from everything else running at the same time.
+ *
+ * Claude Code only: it files its logs per cwd, so the attribution is exact. Codex and Gemini
+ * partition by date with no cwd in the path, so there is nothing here to key on and those members
+ * get null rather than a number built from somebody else's session.
+ */
+export async function spentIn(cwds: string[]): Promise<Record<string, Tot | null>> {
+  await scan(false)
+  const out: Record<string, Tot | null> = {}
+  for (const cwd of cwds) {
+    const slug = projectSlug(cwd)
+    const seen = new Set<string>()
+    let tot: Tot | null = null
+    for (const [file, f] of cache) {
+      if (f.agent !== 'claude' || path.basename(path.dirname(file)) !== slug) continue
+      for (const e of f.events) {
+        // resumed sessions replay their history into a new file; count each message once
+        if (e[7] !== ':') {
+          if (seen.has(e[7])) continue
+          seen.add(e[7])
+        }
+        add((tot ??= zero()), e)
+      }
+    }
+    out[cwd] = tot
+  }
+  return out
+}
+
 export function register(ctx: MainContext) {
   emit = ctx.emit
+  ctx.ipc.handle('usage:spentIn', (_e, cwds: string[]) => spentIn((Array.isArray(cwds) ? cwds : []).map(String).slice(0, 32)))
   ctx.ipc.handle('usage:tokens', async (_e, opts?: { force?: boolean }) => {
     await scan(!!opts?.force)
     return buildReport()
