@@ -11,6 +11,7 @@ import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedbac
 import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
 import { reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
+import type { Spent } from '@shared/spend'
 
 // The Inbox, as one ordered list: what blocks an agent first (its permission prompts, then the
 // Lead's questions), then finished work, then notices (red CI, review comments). The tray on the
@@ -43,7 +44,7 @@ interface Base {
 export type InboxItem =
   | (Base & { kind: 'approval'; approval: Approval | null; context: string[]; note: string | null })
   | (Base & { kind: 'ask'; ask: FleetAsk; progress: string })
-  | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number; review: MergeReview | null; spend: Record<string, { total: number } | null> })
+  | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number; review: MergeReview | null; spend: Record<string, Spent | null> })
   | (Base & { kind: 'stopped' })
   | (Base & { kind: 'notice'; tone: 'danger' | 'info'; head: string; lines: string[] })
 
@@ -193,14 +194,14 @@ async function undoMerge(projectId: string, m: { commit: string; into: string })
  * by build(). Only Claude Code files its logs per cwd, so members on other CLIs stay absent and
  * their row simply shows no figure (see spentIn in main/usage.ts).
  */
-let spend: Record<string, { total: number } | null> = {}
+let spend: Record<string, Spent | null> = {}
 let spendKey = ''
 
 function fetchSpend(key: string, cwds: string[]) {
   if (spendKey === key) return
   spendKey = key
   if (!cwds.length) return
-  invoke<Record<string, { total: number } | null>>('usage:spentIn', cwds).then(
+  invoke<Record<string, Spent | null>>('usage:spentIn', cwds).then(
     (r) => {
       spend = r
       refreshInbox()

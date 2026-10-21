@@ -1,5 +1,6 @@
 import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
 import type { MergeReview } from '@shared/mergeReview'
+import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
 import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleInbox, useInbox, type InboxItem } from './inboxModel'
@@ -128,7 +129,7 @@ function readyMeta(i: Extract<InboxItem, { kind: 'ready' }>) {
 /** 1.2M, 48k, 900 — a size, not an exact count; the point is which member was expensive. */
 const tokens = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
 
-function Review({ review, spend }: { review: MergeReview | null; spend: Record<string, { total: number } | null> }) {
+function Review({ review, spend }: { review: MergeReview | null; spend: Record<string, Spent | null> }) {
   if (!review) return null
   const { claims, unowned, risks } = review
   if (!claims.length && !unowned.length && !risks.length) return null
@@ -136,7 +137,8 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
   return (
     <div className="it-review">
       {claims.map((c, i) => {
-        const spent = spend[c.cwd]?.total
+        const s = spend[c.cwd]
+        const spent = s ? billed(s) : 0
         return (
           <div key={i} className={`it-claim ${c.proven ? 'ok' : 'warn'}`}>
             {c.proven ? <Check size={12} /> : <TriangleAlert size={12} />}
@@ -157,7 +159,7 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
         </div>
       )}
       {risks.map((x) => (
-        <div key={x.path} className="it-claim note">
+        <div key={x.path} className="it-claim risk">
           <ShieldAlert size={12} />
           <span className="it-claim-what mono">{x.path}</span>
           <span className="it-claim-ev">{x.why}</span>
