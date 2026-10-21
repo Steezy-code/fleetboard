@@ -3,7 +3,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import os from 'node:os'
-import { execFile } from 'node:child_process'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
 import { emptyFleet } from '@shared/fleet'
@@ -12,6 +11,7 @@ import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
 import { loginEnv } from './env'
+import { ghEnv, run, git as runGit } from './run'
 import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
@@ -125,15 +125,14 @@ function findMember(s: FleetState, ref: string): FleetMember | undefined {
 
 // ---------------------------------------------------------------- git
 
-function git(cwd: string, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
-  return loginEnv().then(
-    (env) =>
-      new Promise((resolve) => {
-        execFile('git', args, { cwd, env: { ...env, GIT_TERMINAL_PROMPT: '0' }, maxBuffer: 8 * 1024 * 1024, timeout: 120_000 }, (e, out, err) =>
-          resolve({ ok: !e, out: String(out).trim(), err: String(err || e?.message || '').trim() })
-        )
-      })
-  )
+/**
+ * A merge or a worktree add can take a while, hence the long timeout. The hardened environment comes
+ * with it now: this module parses --numstat and --stat output, which LC_ALL=C exists to keep stable,
+ * and it used to set GIT_TERMINAL_PROMPT alone.
+ */
+async function git(cwd: string, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+  const r = await runGit(cwd, args, { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 })
+  return { ok: r.code === 0, out: r.stdout.trim(), err: r.stderr.trim() }
 }
 
 const slugify = (t: string) =>
@@ -1123,14 +1122,14 @@ export async function initFleet(c: MainContext) {
     const summary = s.ready.summary.trim()
     const title = ((summary.split('\n')[0] ?? '').replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
     const body = `${summary}\n\n---\nGoal: ${lead.task ?? ''}\n\nBuilt by a Fleetboard team (${lead.name} and ${Object.values(s.members).filter((x) => x.leadId === lead.id).length} helpers). ${s.ready.commits} commits, ${s.ready.files.length} files.`
-    const env = await loginEnv()
-    const r = await new Promise<{ ok: boolean; out: string; err: string }>((resolve) =>
-      execFile('gh', ['pr', 'create', '--draft', '--base', base, '--head', lead.branch!, '--title', title, '--body', body], { cwd: lead.cwd, env: { ...env, GH_PROMPT_DISABLED: '1' }, timeout: 60_000 }, (e, out, err) =>
-        resolve({ ok: !e, out: String(out).trim(), err: String(err || e?.message || '').trim() })
-      )
-    )
-    if (!r.ok) return { ok: false, error: `gh pr create failed: ${r.err.slice(0, 400)}` }
-    const url = r.out.split('\n').find((l) => l.startsWith('http')) ?? r.out
+    const r = await run('gh', ['pr', 'create', '--draft', '--base', base, '--head', lead.branch, '--title', title, '--body', body], {
+      cwd: lead.cwd,
+      env: await ghEnv(),
+      timeout: 60_000
+    })
+    if (r.code !== 0) return { ok: false, error: `gh pr create failed: ${r.stderr.trim().slice(0, 400)}` }
+    const out = r.stdout.trim()
+    const url = out.split('\n').find((l) => l.startsWith('http')) ?? out
     s.ready.prUrl = url
     changed(s)
     return { ok: true, url }
