@@ -76,3 +76,25 @@ test('the contents reach the disk, not just the directory entry', () => {
   }
   assert.equal(fs.readFileSync(f, 'utf8'), 'export const x = 1\n')
 })
+
+test('a PNG export is written the same careful way, through a symlink and without truncating', async () => {
+  // fs:writeBase64 (diagram export) used to be a bare writeFileSync: it truncated the target in place,
+  // so a write that ran out of room destroyed what was there, and it turned a symlink into a plain
+  // file — the one thing writeText goes out of its way not to do.
+  const { ipcMain } = await import('../support/electron-stub')
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-b64-'))
+  process.env.FLEETBOARD_HOME = dir2
+  const roots = await import('../../src/main/roots')
+  const fsops = await import('../../src/main/fsops')
+  fsops.register({ ipc: ipcMain as never, win: () => null, ptys: null as never, settings: (() => ({})) as never, emit: () => {} })
+  roots.grant(dir2)
+
+  const real = path.join(dir2, 'real.png')
+  const link = path.join(dir2, 'link.png')
+  fs.writeFileSync(real, 'old')
+  fs.symlinkSync(real, link)
+  await ipcMain.invoke('fs:writeBase64', link, Buffer.from('new bytes').toString('base64'))
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'still a link')
+  assert.equal(fs.readFileSync(real, 'utf8'), 'new bytes', 'written where it points')
+  assert.deepEqual(fs.readdirSync(dir2).filter((f) => f.includes('fleetboard-')), [], 'no temporary file left behind')
+})
