@@ -104,13 +104,35 @@ export function checkRequest(req: { method?: string; headers: http.IncomingHttpH
   return null
 }
 
-/** Too many wrong secrets: slow down guessing (a 192-bit secret is not guessable, but be polite about it). */
-const failures: number[] = []
-const lockedOut = () => {
-  const now = Date.now()
-  while ((failures[0] ?? Infinity) < now - 60_000) failures.shift()
-  return failures.length >= 30
+/**
+ * Too many wrong secrets from one peer: slow down guessing. A 192-bit secret is not guessable, but be
+ * polite about it.
+ *
+ * Per peer, and cleared by a request that got through. One shared counter turned the politeness into
+ * a way to switch the feature off: anyone who could reach the port — and the page and its script are
+ * served without a token, so the port announces itself — could send thirty wrong tokens a minute and
+ * every /api/ request answered 429, the user's own phone included, for as long as they kept it up. A
+ * success never cleared it either.
+ */
+const WINDOW_MS = 60_000
+const MAX_WRONG = 30
+const PEERS = 1000
+const failures = new Map<string, number[]>()
+
+function recent(peer: string): number[] {
+  const live = (failures.get(peer) ?? []).filter((t) => t > Date.now() - WINDOW_MS)
+  if (live.length) failures.set(peer, live)
+  else failures.delete(peer)
+  return live
 }
+export const lockedOut = (peer: string) => recent(peer).length >= MAX_WRONG
+export function wrongSecret(peer: string) {
+  // a flood of peers must not grow this without end; the ones already counted keep being counted
+  if (!failures.has(peer) && failures.size >= PEERS) return
+  failures.set(peer, [...recent(peer), Date.now()])
+}
+/** This peer knows the secret, so it is the user: forget what it got wrong on the way. */
+export const authorized = (peer: string) => void failures.delete(peer)
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -184,13 +206,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
   const host = `${bound.address}:${bound.port}`
   const url = new URL(req.url ?? '/', `http://${host}`)
   const api = url.pathname.startsWith('/api/')
-  if (api && lockedOut()) return send(res, 429, { error: 'too many attempts, wait a minute' })
+  const peer = req.socket.remoteAddress ?? 'unknown'
+  if (api && lockedOut(peer)) return send(res, 429, { error: 'too many attempts, wait a minute' })
   const refused = checkRequest(req, host, config.token, api)
   if (refused) {
-    if (refused === 401) failures.push(Date.now())
+    if (refused === 401) wrongSecret(peer)
     req.resume()
     return send(res, refused, { error: 'refused' })
   }
+  if (api) authorized(peer)
   if (req.method === 'GET' && url.pathname === '/') return send(res, 200, PAGE_HTML, 'text/html; charset=utf-8')
   if (req.method === 'GET' && url.pathname === '/app.js') return send(res, 200, PAGE_JS, 'text/javascript; charset=utf-8')
   if (req.method === 'GET' && url.pathname === '/app.css') return send(res, 200, PAGE_CSS, 'text/css; charset=utf-8')
