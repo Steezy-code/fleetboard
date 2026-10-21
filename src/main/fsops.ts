@@ -81,10 +81,12 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
 /**
  * Write a file the user edits. With `base` (what the editor loaded or last saved), only while the file
  * still holds exactly that: an agent's change made meanwhile is never overwritten; the caller gets what
- * is there now (null: the file is gone). Written through writeDurable, so neither a crash nor a power
- * loss can leave it half written or empty; its permissions are kept.
+ * is there now (null: the file is gone). `base: null` means "only if it is not there" — which is what
+ * creating a file is, and is why creating one is not an exists-check followed by a write. Written
+ * through writeDurable, so neither a crash nor a power loss can leave it half written or empty; its
+ * permissions are kept.
  */
-export function writeText(file: string, content: string, base?: string): WriteResult {
+export function writeText(file: string, content: string, base?: string | null): WriteResult {
   if (base !== undefined) {
     let current: string | null = null
     try {
@@ -155,7 +157,7 @@ export function register(ctx: MainContext) {
     if (!allowed(file, 'fs:read')) throw new Error(outsideMessage(file))
     return fs.readFileSync(file, 'utf8')
   })
-  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string }) => {
+  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string | null }) => {
     if (!allowed(file, 'fs:write')) throw new Error(outsideMessage(file))
     return writeText(file, content, opts?.base)
   })

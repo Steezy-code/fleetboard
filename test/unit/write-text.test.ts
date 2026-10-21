@@ -98,3 +98,19 @@ test('a PNG export is written the same careful way, through a symlink and withou
   assert.equal(fs.readFileSync(real, 'utf8'), 'new bytes', 'written where it points')
   assert.deepEqual(fs.readdirSync(dir2).filter((f) => f.includes('fleetboard-')), [], 'no temporary file left behind')
 })
+
+test('creating a file is "only if it is not there", not a look followed by a write', () => {
+  // Both studios used to ask fs:exists and then write. Between those two calls an agent writing the
+  // same path lost everything it had put there, because the write that followed had no base.
+  const f = path.join(dir, 'new.ts')
+  assert.deepEqual(writeText(f, 'mine\n', null), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'mine\n')
+
+  // someone got there first (or we are asked again): refused, with what is actually there
+  assert.deepEqual(writeText(f, 'mine again\n', null), { ok: false, reason: 'changed', current: 'mine\n' })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'mine\n', 'untouched')
+
+  // and it is a different question from an ordinary unconditional write
+  assert.deepEqual(writeText(f, 'replaced\n'), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'replaced\n')
+})
