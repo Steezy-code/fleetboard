@@ -1,9 +1,9 @@
-import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
 import type { MergeReview } from '@shared/mergeReview'
 import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
-import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleInbox, useInbox, type InboxItem } from './inboxModel'
+import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
 
 // The Inbox, docked on top of the command bar: the front item in full, the rest a click (or Ctrl+I)
 // away. Number keys, Tab and Enter in the bar answer it (CommandBar.tsx); voice too (planner.ts).
@@ -21,7 +21,8 @@ const blocks = (i: InboxItem) => i.kind === 'approval' || i.kind === 'ask' || i.
 
 export function InboxTray({ floating }: { floating?: boolean }) {
   const items = useInbox((s) => s.items)
-  const open = useInbox((s) => s.open) && !floating
+  const folded = useInbox((s) => s.folded)
+  const open = useInbox((s) => s.open) && !floating && !folded
   useInbox((s) => s.front)
   const item = frontItem()
   if (!item) return null
@@ -54,11 +55,14 @@ export function InboxTray({ floating }: { floating?: boolean }) {
             </button>
           </>
         )}
-        {!floating && n > 1 && (
+        {!floating && n > 1 && !folded && (
           <button className="btn sm ghost it-all" title="Ctrl+I" onClick={toggleInbox}>
             {open ? <ChevronDown size={13} /> : <ChevronUp size={13} />} {open ? 'Collapse' : 'Show all'}
           </button>
         )}
+        <button className="icon-btn sm" title={folded ? 'Unfold the card' : 'Fold the card away'} aria-expanded={!folded} onClick={toggleFolded}>
+          {folded ? <ChevronUp size={14} /> : <Minus size={14} />}
+        </button>
       </div>
 
       {open && (
@@ -78,8 +82,9 @@ export function InboxTray({ floating }: { floating?: boolean }) {
         </div>
       )}
 
-      <div className="it-card" key={item.key} data-kind={item.kind}>
-        <div className="it-head">
+      <div className={`it-card ${folded ? 'folded' : ''}`} key={item.key} data-kind={item.kind}>
+        {/* folded, the header is the whole card, so clicking it is the obvious way back */}
+        <div className="it-head" onClick={folded ? toggleFolded : undefined}>
           <span className={`it-av ${tone}`}>
             <Icon size={15} />
           </span>
@@ -100,6 +105,9 @@ export function InboxTray({ floating }: { floating?: boolean }) {
             </button>
           )}
         </div>
+        {/* not `hidden`: .it-body sets display:flex, which outranks the UA's [hidden] rule, so the
+            body would keep its height and fold nothing */}
+        {!folded && (
         <div className="it-body">
           <Body item={item} />
           {item.kind !== 'ask' && (
@@ -112,6 +120,7 @@ export function InboxTray({ floating }: { floating?: boolean }) {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )
