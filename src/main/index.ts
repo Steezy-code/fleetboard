@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { PtyManager } from './pty'
+import { describeAnswer } from '@shared/prompt'
 import { startHookServer } from './hooks'
 import * as store from './store'
 import * as fsops from './fsops'
@@ -21,6 +22,7 @@ import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
 import { appPermission, mediaTypesOf, webPermission } from './permissions'
+import * as journal from './journal'
 import { allowed, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
 
@@ -174,7 +176,11 @@ function registerCore() {
   ipcMain.handle('pty:buffer', (_e, id: string) => ptys.buffer(id))
   ipcMain.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
   ipcMain.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
-  ipcMain.handle('pty:answer', (_e, id: string, answer) => ptys.answer(id, answer))
+  ipcMain.handle('pty:answer', async (_e, id: string, answer) => {
+    const r = await ptys.answer(id, answer)
+    if (r.ok) journal.answered('you, on the board', id, describeAnswer(answer))
+    return r
+  })
   ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
 
@@ -283,7 +289,7 @@ app.whenReady().then(async () => {
   if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal, ci]) m.register(ctx)
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal, ci, journal]) m.register(ctx)
   sweep.register(ctx)
   await initFleet(ctx)
   await remote.register(ctx)
