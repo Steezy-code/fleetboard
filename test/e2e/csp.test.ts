@@ -25,7 +25,8 @@ test('the microphone tap loads as a file, and a script built from a string does 
       const out: Record<string, string> = {}
       try {
         await ctx.audioWorklet.addModule(`assets/${name}`)
-        out.file = new AudioWorkletNode(ctx, 'fb-tap') ? 'loaded' : 'no node'
+        const node = new AudioWorkletNode(ctx, 'fb-tap')
+        out.file = node.numberOfOutputs >= 0 ? 'loaded' : 'no node'
       } catch (e: any) {
         out.file = `refused: ${e?.message ?? e}`
       }

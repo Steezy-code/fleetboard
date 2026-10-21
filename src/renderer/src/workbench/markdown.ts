@@ -141,7 +141,7 @@ export function renderMarkdown(src: string, opts: MdOptions = {}): string {
   try {
     const html = md.parse(src ?? '', { async: false }) as string
     return sanitizeHtml(html)
-  } catch (e) {
+  } catch {
     return `<pre>${escapeHtml(String(src ?? ''))}</pre>`
   } finally {
     current = {}

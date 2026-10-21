@@ -96,8 +96,10 @@ src/renderer/src/
 - **Style**: dark warm palette, single red-orange accent (`var(--accent)`), Geist UI font, JetBrains Mono for
   code/consoles, Fraunces italic for display headings. Reuse classes in theme.css. Put feature CSS in
   `src/renderer/src/styles/<area>.css` and import it from your feature entry file (`features/<area>.ts`).
-- Do not add npm dependencies. Available: react, zustand, lucide-react, @xterm/*, marked, highlight.js,
-  nanoid, @huggingface/transformers, kokoro-js.
+- Do not add npm dependencies **that ship with the app**. Available: react, zustand, lucide-react,
+  @xterm/*, marked, highlight.js, @huggingface/transformers, kokoro-js. A devDependency is a smaller
+  promise — it is not in anyone's install — but still a promise: oxlint and the build chain are the
+  only ones, and a new one needs the same argument as a runtime one.
 - **Console state comes from the screen.** Read what a console shows with `ptys.screen(id)` / `pty:prompt`
   and `pty:tail` (rendered text, not the raw stream). Answer a question with `pty:answer` (it re-reads the
   live screen and refuses if the question changed); never type option digits blindly.
@@ -108,7 +110,9 @@ src/renderer/src/
 - **HTML from a repo, a model or a web page goes through `sanitizeHtml`** (`workbench/markdown.ts`), and a URL
   out of it or out of the board file goes through `safeUrl`. `marked` has no sanitizer of its own, so only that
   module and `studios/docs/render.ts` may import it — `test/unit/html-safety.test.ts` enforces both rules.
-- Verify with `npx tsc --noEmit -p tsconfig.json`, `npm test` and `npm run test:e2e` (see Testing).
+- Verify with `npm run typecheck`, `npm run lint`, `npm test` and `npm run test:e2e` (see Testing).
+  `npm run lint` is oxlint, errors only; its warnings (the React Compiler rules, exhaustive-deps) are
+  there to read, not to gate.
 
 ## Testing
 

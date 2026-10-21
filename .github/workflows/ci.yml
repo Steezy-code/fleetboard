@@ -43,6 +43,12 @@ jobs:
       - name: Typecheck (noUncheckedIndexedAccess, migrated directories)
         run: npm run typecheck:strict
 
+      # errors only. The React Compiler rules and exhaustive-deps are warnings on purpose: this project
+      # does not use the compiler, and every one of those findings needs a judgement a linter cannot
+      # make. A gate that cries wolf is one people learn to ignore.
+      - name: Lint
+        run: npm run lint
+
       - name: Unit tests
         run: npm test
 

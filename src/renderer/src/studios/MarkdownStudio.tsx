@@ -244,7 +244,7 @@ export default function MarkdownStudio(props: { path?: string }) {
         onDisk.current.set(path, fresh)
         if (currentRef.current === path) setText(fresh)
         setNotes((m) => new Map(m).set(path, fresh))
-      } catch (e: any) {
+      } catch {
         if (cached == null) setText('')
         toast(`Could not open ${baseName(path)}; it will not be saved over until it reads`, 'error')
       }

@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["react", "typescript", "unicorn", "oxc"],
+  "categories": { "correctness": "error" },
+  "rules": {
+    "react-hooks/exhaustive-deps": "warn",
+    "react/react-in-jsx-scope": "off",
+    "no-unused-expressions": "off",
+    "no-control-regex": "off",
+    "unicorn/no-new-array": "off",
+    "react/set-state-in-effect": "warn",
+    "react/purity": "warn",
+    "react/refs": "warn",
+    "react/immutability": "warn",
+    "react/static-components": "warn",
+    "react/preserve-manual-memoization": "warn"
+  },
+  "ignorePatterns": ["out", "dist", "release", "node_modules", "test/fixtures"]
+}
