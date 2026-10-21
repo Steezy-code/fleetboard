@@ -10,7 +10,6 @@ import type {
   Project,
   ProjectMeta,
   Settings,
-  Wire,
   Workspace
 } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'

@@ -46,7 +46,7 @@ function RailButton({ icon: Icon, title, active, onClick }: { icon: any; title: 
 export function addNodeOfType(type: NodeType, extra: Record<string, any> = {}) {
   const def = NODE_DEFS[type]
   const app = useApp.getState()
-  const id = app.addNode({ type, w: def.defaultSize.w, h: def.defaultSize.h, data: { ...(def.create?.() ?? {}), ...extra } })
+  const id = app.addNode({ type, w: def.defaultSize.w, h: def.defaultSize.h, data: { ...def.create?.(), ...extra } })
   app.setSelection([id])
   return id
 }

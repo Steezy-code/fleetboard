@@ -390,6 +390,7 @@ async function scan(force = false) {
       for (const f of out) files.push({ agent: r.agent, file: f })
     }
     const live = new Set(files.map((f) => f.file))
+    // eslint-disable-next-line unicorn/no-useless-spread -- a copy, because the loop deletes as it goes
     for (const k of [...cache.keys()]) if (!live.has(k)) (cache.delete(k), (cacheDirty = true))
 
     const todo: { agent: UsageAgent; file: string; mtime: number; size: number }[] = []

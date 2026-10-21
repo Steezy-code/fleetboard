@@ -15,7 +15,7 @@ import type { AgentDef } from './types'
  *
  * Claude Code does not need it (cli.ts sends its prompt on stdin), but it costs nothing there.
  */
-export const promptArg = (p: string) => (/^-/.test(p) ? ' ' + p : p)
+export const promptArg = (p: string) => (p.startsWith('-') ? ' ' + p : p)
 
 export const AGENTS: AgentDef[] = [
   {

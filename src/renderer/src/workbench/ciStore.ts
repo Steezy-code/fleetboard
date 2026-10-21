@@ -5,7 +5,7 @@ import { allConsoles, useApp } from '../state/store'
 import { sendToConsole, spawnConsoles } from '../engine/consoles'
 import { maySpendOn } from '../engine/guards'
 import { ownerOf, refreshFeedback, setBranchAgent, useFeedback } from './prFeedback'
-import type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
+import type { CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
 export type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
