@@ -21,8 +21,15 @@ const ROOT = path.resolve(import.meta.dirname, '../..')
  */
 const ELECTRON: string = (() => {
   const pkg = path.dirname(require.resolve('electron/package.json'))
-  const bin = path.join(pkg, 'dist', fs.readFileSync(path.join(pkg, 'path.txt'), 'utf8').trim())
-  if (!fs.existsSync(bin)) throw new Error(`Electron is not installed (looked for ${bin}). Run \`npm ci\` before the end-to-end tests.`)
+  // path.txt is written by the install, so its absence means the same thing as a missing binary
+  const bin = (() => {
+    try {
+      return path.join(pkg, 'dist', fs.readFileSync(path.join(pkg, 'path.txt'), 'utf8').trim())
+    } catch {
+      return ''
+    }
+  })()
+  if (!bin || !fs.existsSync(bin)) throw new Error(`Electron is not installed in ${pkg}. Run \`npm ci\` (its postinstall fetches it) before the end-to-end tests.`)
   return bin
 })()
 export const FAKE_CLAUDE = path.join(ROOT, 'test/fake-agent/claude.mjs')

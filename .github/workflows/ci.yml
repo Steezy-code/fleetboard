@@ -67,11 +67,6 @@ jobs:
         if: always()
         run: npm audit || true
 
-      # Once, here, rather than from three test processes at a time: the electron package installs
-      # itself on first require, and three of those extracting into one folder corrupt it.
-      - name: Electron binary present
-        run: node -e "console.log(require('electron'))"
-
       - name: Display server for the end-to-end tests
         run: sudo apt-get update -q && sudo apt-get install -yq xvfb
 
