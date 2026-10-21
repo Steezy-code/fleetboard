@@ -231,7 +231,17 @@ export function register(ctx: MainContext) {
     declareProject(p)
     return projectIdFor(p)
   })
-  ipc.handle('store:loadProject', (_e, id: string) => loadProject(id))
+  ipc.handle('store:loadProject', (_e, id: string) => {
+    // A board this build must not touch is not the same answer as "there is no board yet", and the
+    // renderer used to get null for both: it then made an empty board *with the same id*, which every
+    // save refused, so the user was left looking at a blank board that could never keep anything.
+    const schema = schemaOf(projectFile(String(id)))
+    if (tooNew(schema))
+      throw new Error(
+        `This board was saved by a newer version of Fleetboard (board format ${schema}; this one reads ${SCHEMA_VERSION}). It was left untouched and not opened. Update Fleetboard to open it.`
+      )
+    return loadProject(String(id))
+  })
   ipc.handle('store:saveProject', (_e, p: Project) => saveProject(p))
   ipc.handle('store:forgetProject', (_e, id: string) => {
     app.projects = app.projects.filter((m) => m.id !== id)

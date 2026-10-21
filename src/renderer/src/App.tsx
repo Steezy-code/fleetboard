@@ -85,7 +85,7 @@ export function App() {
         useApp
           .getState()
           .toast(
-            `This board was saved by a newer version of Fleetboard (board format ${r.tooNew}; this one reads ${SCHEMA_VERSION}). It was left untouched and an empty board opened instead. Update Fleetboard to open it.`,
+            `This board was saved by a newer version of Fleetboard (board format ${r.tooNew}; this one reads ${SCHEMA_VERSION}). It was left untouched and not opened. Update Fleetboard to open it.`,
             'warn'
           )
         return

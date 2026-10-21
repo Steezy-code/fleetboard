@@ -356,7 +356,15 @@ export const useApp = create<AppState>((set, get) => {
 
     openProject: async (path) => {
       const id = await invoke<string>('store:projectId', path)
-      let project = await invoke<Project | null>('store:loadProject', id)
+      // null means there is no board for this folder yet. A *refusal* means there is one and this
+      // build must not touch it — opening a blank board over that id would be a board that can never
+      // save, so stay where we are and say why.
+      const loaded = await invoke<Project | null>('store:loadProject', id).catch((e) => {
+        get().toast(String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'warn')
+        return undefined
+      })
+      if (loaded === undefined) return
+      let project = loaded
       if (!project) {
         const ws = newWorkspace('Workspace 1')
         project = {
