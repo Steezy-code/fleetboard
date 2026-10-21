@@ -458,6 +458,79 @@
   min-width: 34px;
   text-align: right;
 }
+/* Folded: the card is its header and nothing else, so the board behind it is usable again. The
+   header keeps the who / what / how-long line, which is what tells you whether to unfold it. */
+.it-card.folded .it-head {
+  cursor: pointer;
+  padding-bottom: 0;
+}
+.it-card.folded .it-head:hover .it-headtext {
+  color: var(--text);
+}
+
+/* Pre-merge review: each claim beside its evidence, and the diff beside the scope it was granted. */
+.it-review {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.it-claim {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.it-claim svg {
+  flex: none;
+  align-self: center;
+}
+.it-claim.ok svg {
+  color: var(--ok-text);
+}
+.it-claim.warn svg {
+  color: var(--warn-text);
+}
+/* not `.note`: that is the board's sticky note (content.css), and a bare one here inherits its
+   position: absolute and tears the row out of the card */
+.it-claim.risk svg {
+  color: var(--text-3, var(--text-2));
+}
+.it-claim-what {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.it-claim-who {
+  flex: none;
+  color: var(--text);
+}
+.it-claim-spend {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-2);
+  opacity: 0.8;
+}
+.it-claim-ev {
+  flex: none;
+  max-width: 48%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.it-claim.warn .it-claim-ev {
+  color: var(--warn-text);
+}
+/* a flag's reason is short and categorical and the path is long and already in the file list
+   above, so this is the half of the row that should survive: the path truncates, not the reason */
+.it-claim-why {
+  max-width: 64%;
+}
 .it-foot {
   display: flex;
   align-items: center;
