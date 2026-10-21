@@ -1,33 +1,22 @@
-# Symvibe teardown → Fleetboard spec
+# Fleetboard feature spec
 
-Personal-use reconstruction of the features advertised by symvibe.com (formerly Hypervibe), rebuilt for Linux.
+What each feature does and looks like. `docs/ARCHITECTURE.md` covers how the code is organized.
 
-## How the evidence was gathered
+## Visual language
 
-| Source | What it gave us | Type |
-|---|---|---|
-| `https://www.symvibe.com/` HTML (255 KB) | Every feature heading, FAQ, privacy model, agent catalog | observed (static) |
-| 18 demo videos (`/media/*.mp4`, 1920×1080), sampled into contact sheets | Exact UI layout, panels, flows, wording | observed (recorded runtime) |
-| `/changelog`, `/compare/tmux`, `/features/usage`, `/features/multiple-accounts`, `/tour` | Version history, mechanics of profiles, usage sources, resume | observed (static) |
-| REA `capture_browser_scenario` of `/tour` — evidence `ev_568c894c…2cc8` | Site is a static Vercel page (fonts, two analytics scripts, media). No app code ships to the browser. | observed (controlled replay) |
-
-**Limit:** the app itself is a paid, signed macOS (Apple Silicon) DMG behind an account. No binary was available, so nothing here comes from decompilation. Behavior is inferred from recordings and documentation; implementation choices below are ours.
-
-## Visual language (from video frames)
-
-- Near-black board (`#0f0d0c`-ish) with a faint dot grid; warm off-white text; **one accent: red-orange** (`#ff4a2b`-ish) used for active tab, primary buttons, selection, status dots.
-- Fonts on the site: Geist (UI), JetBrains Mono (consoles), Fraunces italic (display).
-- **Top bar:** `← Back to home` · project selector (`▣ Votelanding ⌄`) · workspace tabs (active tab tinted red with a count badge) · `+` · `× Close` · right side: `● 27 live`, usage pill (`◔ resets 12:39am`), briefcase, settings, avatar.
+- Near-black board (`#0f0d0c`) with a faint dot grid; warm off-white text; **one accent: red-orange** (`#ff4a2b`) used for active tab, primary buttons, selection, status dots.
+- Fonts: Geist (UI), JetBrains Mono (consoles), Fraunces italic (display).
+- **Top bar:** `← Back to home` · project selector (`▣ <project> ⌄`) · workspace tabs (active tab tinted red with a count badge) · `+` · `× Close` · right side: `● N live`, usage pill (`◔ resets <time>`), briefcase, settings, avatar.
 - **Left tool rail (vertical):** select (red when active), agent spawn, shapes, web/monitor, `Aa` text, pen/ink, eraser/tag, globe (web tile), image, connector.
 - **Right rail:** layers, checklist, settings/gear, folder (code), doc, markdown, loops.
-- **Bottom center:** chip row `New console · Spawn 4 · Group · Presets · Pause all · Resume all · Memory`, then a pill command bar with an orb icon: “Hold space to speak · @ to direct…”, chevron, stop, mic. Hint pill above: `Try "pass this task to codex"`. While listening: `● listening ▮▮▮` with live transcript caption below.
-- **Bottom left:** git branch `⎇ main 11`. **Bottom right:** zoom `− 78% +`.
+- **Bottom center:** chip row `New console · Spawn N · Group · Presets · Pause all · Resume all · Memory`, then a pill command bar with an orb icon: “Hold space to speak · @ to direct…”, chevron, stop, mic. Hint pill above: `Try "pass this task to codex"`. While listening: `● listening ▮▮▮` with live transcript caption below.
+- **Bottom left:** git branch `⎇ main N`. **Bottom right:** zoom `− N% +`.
 - **Console node:** title bar with colored agent dot + name (`Maya 2`), status pill (`● WORKING` red, `READY`, `YOLO`), buttons (duplicate, maximize, close). Body is the real terminal.
-- **Group frame:** dashed/rounded frame with header `● REVIEWERS 4 · idle ⌄`, tinted by role. Wires (curved red lines with dots) connect the Orchestrator node to groups.
+- **Group frame:** dashed/rounded frame with header `● REVIEWERS N · idle ⌄`, tinted by role. Wires (curved red lines with dots) connect the Orchestrator node to groups.
 
 ## Feature ledger
 
-Each row: what Symvibe does (observed) → how Fleetboard does it.
+Each row: what the feature is → how Fleetboard does it.
 
 ### 01 Board
 - Real PTY terminals (Ctrl-C, vim, htop work) → `node-pty` + xterm.js (WebGL renderer) per console node.
@@ -39,7 +28,7 @@ Each row: what Symvibe does (observed) → how Fleetboard does it.
 - **Git on the board**: card with repo, branch, CHANGES list with per-file status, commit message, `Commit & Push N files`, history, pull/refresh, “Working tree clean”.
 
 ### 02 Voice
-- Push-to-talk (hold Space), transcribed on-device (Symvibe downloads a speech model once from Hugging Face) → Whisper via `@huggingface/transformers` in the renderer.
+- Push-to-talk (hold Space), transcribed on-device → Whisper via `@huggingface/transformers` in the renderer, downloaded once from Hugging Face.
 - Planner turns plain speech + a board snapshot into actions (“spawn 5 claude code agents”, “now spawn 2 codex”, “put an orchestrator wire with group 1”, “delete the group called backend”) → planner runs through **your own `claude -p`** (no API key) returning a JSON plan; a fast local rule parser handles common commands instantly and offline.
 - Spoken replies in a natural voice (“DAX, Maya2, Rafa2, Nova2, about to close 4 consoles, say confirm”) → Kokoro TTS on-device (fallback: system speech).
 - Destructive steps wait for confirmation; dictation only types, Enter is yours.
@@ -47,7 +36,7 @@ Each row: what Symvibe does (observed) → how Fleetboard does it.
 ### 03 Orchestration
 - Status per console: working / resting (idle) / needs you, driven by CLI hooks → Claude Code hooks via a per-console settings file, plus output heuristics for every other CLI (activity timing + prompt patterns).
 - **Mission map** modal: filter chips (All, Working, Needs you, Idle, Done), search, tree Orchestrator → Teams → consoles, side panel with Fleet counts (Working/Needs you/Idle/Done; Orchestrators/Teams/Consoles/Active loops), selection details with `Go to the console`, Pause, Kill.
-- **Orchestrator** panel: “21 agents · 3 groups”, list with live status, `Command 21 agents…` input; it types the command into the named consoles and submits.
+- **Orchestrator** panel: “N agents · M groups”, list with live status, `Command N agents…` input; it types the command into the named consoles and submits.
 - **Teams**: groups with roles (Frontend, Backend, Testers, Reviewers, Design, Docs, Security, General) and tints.
 - **Composer**: up to 12 slots, per-slot agent, “Fill all” with an agent, `Spawn N`.
 - **Handoff**: “pass this task to codex” → outgoing scrollback summarized by a CLI, brief typed into the new agent.
@@ -69,7 +58,7 @@ Each row: what Symvibe does (observed) → how Fleetboard does it.
 - Auto-approval flags (`--dangerously-skip-permissions`, `--yolo`, etc.) are a global opt-in, off by default.
 - Killing a live console always asks first. Quit with running consoles asks first.
 
-## Deliberate differences
-- Linux-first (Electron) instead of native macOS.
+## Deliberate choices
+- Linux and Windows, on Electron.
 - No account, no credits, no hosted planner: the planner, studios, handoffs and loop judges all run through the CLIs you are already logged into.
 - All state in `~/.fleetboard/`.

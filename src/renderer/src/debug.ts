@@ -12,7 +12,7 @@ import { markdownToHtmlDocument } from './workbench/pdf'
 import { renderMarkdown, sanitizeHtml } from './workbench/markdown'
 import { renderMarkdown as renderDocMarkdown } from './studios/docs/render'
 import { handoff } from './engine/handoff'
-import { sendGoal } from './engine/fleet'
+import { sendGoal, useFleet } from './engine/fleet'
 import { useCi, applyCiStatus, ciItems, fixCi } from './workbench/ciStore'
 import { useFeedback, applyFeedback, routeFeedback } from './workbench/prFeedback'
 import { boardContext } from './voice/helm/context'
@@ -35,6 +35,9 @@ if ((window as any).fb?.devtools === true) {
     markdown: { renderMarkdown, sanitizeHtml, renderDocMarkdown },
     handoff,
     sendGoal,
+    // the board's mirror of the team. Writable, so a Ready card can be put up without running a
+    // team: useFleet.setState({ state }) and the Inbox rebuilds from it.
+    useFleet,
     NODE_DEFS,
     PANELS,
     DRAWERS,

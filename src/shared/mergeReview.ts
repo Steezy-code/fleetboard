@@ -1,0 +1,148 @@
+// What the team actually did, held against what it was told to do — read just before the user merges.
+//
+// Everything here is derived from fleet state alone: at fleet_finish the crew is still in
+// s.members (dismissTeam only runs once the user merges), so each worker's owns/doneWhen/report
+// are all still there to check the lead's Ready card against.
+
+import type { FleetMember, FleetState } from './fleet'
+
+/** A worker's done_when, and whether its own report backs it up. */
+export interface Claim {
+  who: string
+  /** its worktree — the join key for what it spent getting here */
+  cwd: string
+  /** the check the lead promised would prove this task done */
+  doneWhen: string
+  /** the worker's own words on what it ran, when it got that far */
+  report?: string
+  /** it reported done and the lead merged it */
+  proven: boolean
+  /** why it isn't proven, for the ones that aren't */
+  gap?: 'never reported' | 'reported but not merged' | 'still working' | 'blocked or stopped'
+}
+
+/**
+ * A changed file worth a second look, and every reason it is. One entry per file: a file that is
+ * both outside the granted scope and sensitive says so once, rather than being listed under two
+ * headings.
+ */
+export interface FileFlag {
+  path: string
+  /** no member was granted this file */
+  outside: boolean
+  /** why it is worth a look whoever owns it */
+  why?: string
+}
+
+export interface MergeReview {
+  /** outside-the-scope files first, then the merely sensitive ones */
+  flags: FileFlag[]
+  claims: Claim[]
+  /** every file in the diff was inside someone's owns, and every claim is proven */
+  clean: boolean
+}
+
+/** Paths worth a second look whoever changed them, matched against the diff. */
+const RISKS: { why: string; hit: (p: string) => boolean }[] = [
+  { why: 'changes dependencies', hit: (p) => /(^|\/)package(-lock)?\.json$/.test(p) },
+  { why: 'changes the build or packaging', hit: (p) => /(^|\/)(electron-builder\.yml|electron\.vite\.config\.ts)$/.test(p) },
+  { why: 'changes CI', hit: (p) => p.startsWith('.github/') },
+  { why: 'relaxes or tightens typechecking', hit: (p) => /(^|\/)tsconfig[^/]*\.json$/.test(p) },
+  { why: 'looks like a database migration', hit: (p) => /migrat/i.test(p) },
+  { why: 'looks like a credential', hit: (p) => /(^|\/)\.env($|\.)|\.(pem|key|p12|pfx)$/i.test(p) }
+]
+
+/** git reports forward slashes; `owns` comes from an agent and may not. */
+const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+
+/**
+ * Is `file` inside one of `owns`? An entry is either the file itself, a folder containing it, or a
+ * trailing-`*` prefix.
+ *
+ * ponytail: exact / folder-prefix / trailing-star only, no real globbing. If agents start writing
+ * `src/**\/*.ts` in owns, swap the body for a glob matcher — the callers don't change.
+ */
+export function ownedBy(file: string, owns: string[] | undefined): boolean {
+  const f = norm(file)
+  return (owns ?? []).some((raw) => {
+    const o = norm(raw)
+    if (!o) return false
+    if (o.endsWith('*')) return f.startsWith(o.slice(0, -1))
+    return f === o || f.startsWith(`${o}/`)
+  })
+}
+
+const gapOf = (m: FleetMember): Claim['gap'] | undefined => {
+  if (m.status === 'merged') return undefined
+  if (m.status === 'working' || m.status === 'starting') return m.report ? 'reported but not merged' : 'still working'
+  if (m.status === 'reported') return 'reported but not merged'
+  return m.report ? 'blocked or stopped' : 'never reported'
+}
+
+/**
+ * The crew under this lead, oldest first. Reviewers get no owns/done_when when they are spawned, so
+ * they carry no claim and own nothing — they are left out of both halves of the review.
+ */
+const crewOf = (s: FleetState, leadId: string) =>
+  Object.values(s.members)
+    .filter((m) => m.leadId === leadId && m.role === 'worker')
+    .sort((a, b) => a.createdAt - b.createdAt)
+
+/** null when there is nothing to review (no Ready card, or one with no diff behind it). */
+export function reviewReady(s: FleetState): MergeReview | null {
+  const r = s.ready
+  if (!r) return null
+  const crew = crewOf(s, r.leadId)
+  const lead = s.members[r.leadId]
+
+  const claims: Claim[] = crew
+    .filter((m) => m.doneWhen)
+    .map((m) => {
+      const gap = gapOf(m)
+      return {
+        who: m.name,
+        cwd: m.cwd,
+        doneWhen: m.doneWhen!,
+        ...(m.report ? { report: m.report } : {}),
+        proven: !gap,
+        ...(gap ? { gap } : {})
+      }
+    })
+
+  // The lead's own worktree is where integration commits land, so anything it owns counts as granted
+  // too; in a one-member team that is the whole diff.
+  const granted = [...crew.flatMap((m) => m.owns ?? []), ...(lead?.owns ?? [])]
+
+  const flags: FileFlag[] = []
+  for (const f of r.files) {
+    const outside = granted.length > 0 && !ownedBy(f, granted)
+    const rule = RISKS.find((x) => x.hit(norm(f)))
+    if (outside || rule) flags.push({ path: f, outside, ...(rule ? { why: rule.why } : {}) })
+  }
+  // reaching outside the brief is the thing to read first; a sensitive file somebody owns is a note
+  flags.sort((a, b) => Number(b.outside) - Number(a.outside))
+
+  return { flags, claims, clean: !flags.some((f) => f.outside) && claims.every((c) => c.proven) }
+}
+
+export interface Stall {
+  who: string
+  consoleId: string
+  minutes: number
+}
+
+/**
+ * Members that have been going a long time without reporting.
+ *
+ * ponytail: measured from createdAt, because FleetMember records no last-activity time — so a
+ * genuinely long task trips this as readily as a wedged one. That is why it only ever annotates,
+ * never blocks. To make it mean "idle" rather than "old", stamp a lastActivityAt on the member when
+ * its console produces output and measure from that instead.
+ */
+export function stalled(s: FleetState, now: number, afterMinutes = 45): Stall[] {
+  return Object.values(s.members)
+    .filter((m) => (m.status === 'working' || m.status === 'starting') && !m.report)
+    .map((m) => ({ who: m.name, consoleId: m.id, minutes: Math.round((now - m.createdAt) / 60000) }))
+    .filter((x) => x.minutes >= afterMinutes)
+    .sort((a, b) => b.minutes - a.minutes)
+}
