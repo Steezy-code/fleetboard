@@ -41,17 +41,22 @@ test('a console starting, and a prompt answered for you, are both in the night l
     // and it is readable in the app, which is where it will actually be read
     await app.eval(() => (window as any).__fleetboard.useApp.getState().openDrawer('journal'))
     await app.waitFor(async () => (await app.texts('.journal-row')).some((t) => /answered "Yes"/.test(t)), { label: 'the drawer shows it' })
-    const decisions = await app.eval(async () => {
-      const seg = [...document.querySelectorAll('.drawer .seg button')].find((b) => b.textContent === 'Decisions') as HTMLButtonElement
-      seg.click()
-      await new Promise((r) => setTimeout(r, 50))
-      return [...document.querySelectorAll('.journal-row')].map((r) => r.textContent ?? '')
-    })
+    await app.click('.drawer .seg button', 'Decisions')
+    // Narrowing the list is a re-render, so wait for the console rows to go rather than give React a
+    // fixed 50 ms to have done it — which is a race, and the one timing assumption left in this file.
+    const decisions = await app.waitFor(
+      async () => {
+        const rows = await app.texts('.journal-row')
+        // an empty array is a result, not "not yet": a filter that drops everything should fail
+        // the assertion below by name rather than time out here
+        return rows.some((t) => /started in/.test(t)) ? null : rows
+      },
+      { label: 'Decisions drops the rest' }
+    )
     assert.ok(
       decisions.some((t: string) => /answered "Yes"/.test(t)),
       'Decisions keeps what was decided for you'
     )
-    assert.ok(!decisions.some((t: string) => /started in/.test(t)), 'and drops the rest')
     assert.deepEqual(app.rendererErrors, [])
   } finally {
     await app.close()
