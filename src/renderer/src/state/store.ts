@@ -116,6 +116,8 @@ interface AppState {
   removeWire: (id: string) => void
   addInk: (items: InkItem[]) => void
   updateInk: (id: string, patch: Partial<InkItem>) => void
+  mutateWsById: (wsId: string, fn: (ws: Workspace) => Workspace) => void
+  mutateEveryWs: (fn: (ws: Workspace) => Workspace) => void
   removeInk: (ids: string[]) => void
 
   // view
@@ -285,6 +287,21 @@ export const useApp = create<AppState>((set, get) => {
     if (!p) return
     const workspaces = mapWorkspaces(p, (w) => (w.id === p.activeWorkspaceId ? fn(w) : w))
     const project = { ...p, workspaces }
+    set({ project })
+    scheduleSave(project)
+  }
+  /**
+   * Apply a change to one workspace by id — the active one or any other — and persist.
+   *
+   * Without this there was no way to change a workspace that is not the active one, and four places
+   * invented their own: a bare useApp.setState, which changes live state and schedules nothing. Two
+   * of them then wrote a junk `fleetTouched` timestamp into every saved board to trigger the save;
+   * the other two scheduled nothing at all.
+   */
+  const mutateWsById = (wsId: string, fn: (ws: Workspace) => Workspace) => {
+    const p = get().project
+    if (!p) return
+    const project = { ...p, workspaces: mapWorkspaces(p, (w) => (w.id === wsId ? fn(w) : w)) }
     set({ project })
     scheduleSave(project)
   }
@@ -497,6 +514,8 @@ export const useApp = create<AppState>((set, get) => {
     removeWire: (id) => mutateWs((ws) => ({ ...ws, wires: ws.wires.filter((w) => w.id !== id) })),
     addInk: (items) => mutateWs((ws) => ({ ...ws, ink: [...ws.ink, ...items] })),
     updateInk: (id, patch) => mutateWs((ws) => ({ ...ws, ink: ws.ink.map((i) => (i.id === id ? { ...i, ...patch } : i)) })),
+    mutateWsById,
+    mutateEveryWs: (fn) => mutateProject((p) => ({ ...p, workspaces: mapWorkspaces(p, fn) })),
     removeInk: (ids) => {
       const s = new Set(ids)
       mutateWs((ws) => ({ ...ws, ink: ws.ink.filter((i) => !s.has(i.id)) }))
