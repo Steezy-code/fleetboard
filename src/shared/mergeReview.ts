@@ -21,16 +21,23 @@ export interface Claim {
   gap?: 'never reported' | 'reported but not merged' | 'still working' | 'blocked or stopped'
 }
 
-export interface RiskFlag {
+/**
+ * A changed file worth a second look, and every reason it is. One entry per file: a file that is
+ * both outside the granted scope and sensitive says so once, rather than being listed under two
+ * headings.
+ */
+export interface FileFlag {
   path: string
-  why: string
+  /** no member was granted this file */
+  outside: boolean
+  /** why it is worth a look whoever owns it */
+  why?: string
 }
 
 export interface MergeReview {
+  /** outside-the-scope files first, then the merely sensitive ones */
+  flags: FileFlag[]
   claims: Claim[]
-  /** changed files that no member was granted */
-  unowned: string[]
-  risks: RiskFlag[]
   /** every file in the diff was inside someone's owns, and every claim is proven */
   clean: boolean
 }
@@ -105,15 +112,17 @@ export function reviewReady(s: FleetState): MergeReview | null {
   // The lead's own worktree is where integration commits land, so anything it owns counts as granted
   // too; in a one-member team that is the whole diff.
   const granted = [...crew.flatMap((m) => m.owns ?? []), ...(lead?.owns ?? [])]
-  const unowned = granted.length === 0 ? [] : r.files.filter((f) => !ownedBy(f, granted))
 
-  const risks: RiskFlag[] = []
+  const flags: FileFlag[] = []
   for (const f of r.files) {
+    const outside = granted.length > 0 && !ownedBy(f, granted)
     const rule = RISKS.find((x) => x.hit(norm(f)))
-    if (rule) risks.push({ path: f, why: rule.why })
+    if (outside || rule) flags.push({ path: f, outside, ...(rule ? { why: rule.why } : {}) })
   }
+  // reaching outside the brief is the thing to read first; a sensitive file somebody owns is a note
+  flags.sort((a, b) => Number(b.outside) - Number(a.outside))
 
-  return { claims, unowned, risks, clean: unowned.length === 0 && claims.every((c) => c.proven) }
+  return { flags, claims, clean: !flags.some((f) => f.outside) && claims.every((c) => c.proven) }
 }
 
 export interface Stall {
