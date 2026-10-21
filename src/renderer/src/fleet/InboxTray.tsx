@@ -1,7 +1,9 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, OctagonAlert, ShieldQuestion, TerminalSquare } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import type { MergeReview } from '@shared/mergeReview'
+import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
-import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleInbox, useInbox, type InboxItem } from './inboxModel'
+import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
 
 // The Inbox, docked on top of the command bar: the front item in full, the rest a click (or Ctrl+I)
 // away. Number keys, Tab and Enter in the bar answer it (CommandBar.tsx); voice too (planner.ts).
@@ -19,7 +21,8 @@ const blocks = (i: InboxItem) => i.kind === 'approval' || i.kind === 'ask' || i.
 
 export function InboxTray({ floating }: { floating?: boolean }) {
   const items = useInbox((s) => s.items)
-  const open = useInbox((s) => s.open) && !floating
+  const folded = useInbox((s) => s.folded)
+  const open = useInbox((s) => s.open) && !floating && !folded
   useInbox((s) => s.front)
   const item = frontItem()
   if (!item) return null
@@ -52,11 +55,14 @@ export function InboxTray({ floating }: { floating?: boolean }) {
             </button>
           </>
         )}
-        {!floating && n > 1 && (
+        {!floating && n > 1 && !folded && (
           <button className="btn sm ghost it-all" title="Ctrl+I" onClick={toggleInbox}>
             {open ? <ChevronDown size={13} /> : <ChevronUp size={13} />} {open ? 'Collapse' : 'Show all'}
           </button>
         )}
+        <button className="icon-btn sm" title={folded ? 'Unfold the card' : 'Fold the card away'} aria-expanded={!folded} onClick={toggleFolded}>
+          {folded ? <ChevronUp size={14} /> : <Minus size={14} />}
+        </button>
       </div>
 
       {open && (
@@ -76,8 +82,9 @@ export function InboxTray({ floating }: { floating?: boolean }) {
         </div>
       )}
 
-      <div className="it-card" key={item.key} data-kind={item.kind}>
-        <div className="it-head">
+      <div className={`it-card ${folded ? 'folded' : ''}`} key={item.key} data-kind={item.kind}>
+        {/* folded, the header is the whole card, so clicking it is the obvious way back */}
+        <div className="it-head" onClick={folded ? toggleFolded : undefined}>
           <span className={`it-av ${tone}`}>
             <Icon size={15} />
           </span>
@@ -98,6 +105,9 @@ export function InboxTray({ floating }: { floating?: boolean }) {
             </button>
           )}
         </div>
+        {/* not `hidden`: .it-body sets display:flex, which outranks the UA's [hidden] rule, so the
+            body would keep its height and fold nothing */}
+        {!folded && (
         <div className="it-body">
           <Body item={item} />
           {item.kind !== 'ask' && (
@@ -110,6 +120,7 @@ export function InboxTray({ floating }: { floating?: boolean }) {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   )
@@ -119,6 +130,55 @@ const progressOf = (i: Extract<InboxItem, { kind: 'ask' }>) => i.progress
 function readyMeta(i: Extract<InboxItem, { kind: 'ready' }>) {
   const mins = i.lead ? Math.max(1, Math.round((i.ready.at - i.lead.createdAt) / 60000)) : 0
   return [mins ? `${mins < 60 ? `${mins} min` : `${Math.round(mins / 6) / 10} h`}` : '', i.workers ? `${i.workers} worker${i.workers === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
+}
+
+// What the team was told to do, next to what it actually did. It only ever annotates: a legitimate
+// out-of-scope change is common enough that a gate here would teach you to click through it, and
+// then it would be guarding nothing. Merge stays enabled; the flags are for reading first.
+/** 1.2M, 48k, 900 — a size, not an exact count; the point is which member was expensive. */
+const tokens = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
+
+/** enough to see the shape of it; the rest is a count, and the diff is a click away */
+const MAX_FLAGS = 4
+
+function Review({ review, spend }: { review: MergeReview | null; spend: Record<string, Spent | null> }) {
+  if (!review) return null
+  const { claims, flags } = review
+  if (!claims.length && !flags.length) return null
+  const shown = flags.slice(0, MAX_FLAGS)
+  const rest = flags.length - shown.length
+  return (
+    <div className="it-review">
+      {claims.map((c, i) => {
+        const s = spend[c.cwd]
+        const spent = s ? billed(s) : 0
+        return (
+          <div key={i} className={`it-claim ${c.proven ? 'ok' : 'warn'}`}>
+            {c.proven ? <Check size={12} /> : <TriangleAlert size={12} />}
+            <span className="it-claim-who">{c.who}</span>
+            <span className="it-claim-what">{c.doneWhen}</span>
+            {spent ? <span className="it-claim-spend">{tokens(spent)}</span> : null}
+            <span className="it-claim-ev">{c.proven ? c.report?.split('\n')[0] ?? 'merged' : c.gap}</span>
+          </div>
+        )
+      })}
+      {shown.map((f) => (
+        <div key={f.path} className={`it-claim ${f.outside ? 'warn' : 'risk'}`}>
+          {f.outside ? <ArrowUpRight size={12} /> : <ShieldAlert size={12} />}
+          <span className="it-claim-what mono">{f.path}</span>
+          <span className="it-claim-ev it-claim-why">{[f.outside ? `outside ${claims.length === 1 ? 'its' : 'the team’s'} scope` : '', f.why].filter(Boolean).join(' · ')}</span>
+        </div>
+      ))}
+      {rest > 0 && (
+        <div className="it-claim risk">
+          <ShieldAlert size={12} />
+          <span className="it-claim-what">
+            {rest} more file{rest === 1 ? '' : 's'} worth a look
+          </span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 function Body({ item }: { item: InboxItem }) {
@@ -206,6 +266,7 @@ function Body({ item }: { item: InboxItem }) {
               )}
             </div>
           )}
+          <Review review={item.review} spend={item.spend} />
           <div className="it-foot">
             {r.verified && (
               <span className="it-verified">
