@@ -719,7 +719,6 @@ export function register(ctx: MainContext) {
     if (agent) return limits(agent)
     return USAGE_AGENTS.map(limits)
   })
-  ctx.ipc.handle('usage:scanning', () => !!scanning)
   // warm the cache in the background shortly after launch
   setTimeout(() => scan(false).catch(() => {}), 2500)
 }

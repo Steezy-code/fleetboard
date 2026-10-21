@@ -437,7 +437,6 @@ const safe =
 export function register(ctx: MainContext) {
   const { ipc } = ctx
   ipc.handle('git:isRepo', async (_e, cwd: string) => (validCwd(cwd) ? (await repoRoot(cwd)) !== null : false))
-  ipc.handle('git:root', async (_e, cwd: string) => (validCwd(cwd) ? repoRoot(cwd) : null))
   ipc.handle(
     'git:init',
     safe(async (cwd: string) => {
@@ -454,16 +453,6 @@ export function register(ctx: MainContext) {
   ipc.handle('git:push', safe(push))
   ipc.handle('git:pull', safe(pull))
   ipc.handle('git:fetch', safe(fetch))
-  ipc.handle(
-    'git:commitAndPush',
-    safe(async (cwd: string, message: string, files?: { path: string; from?: string }[] | null) => {
-      const c = await commit(cwd, message, files)
-      if (!c.ok) return { ...c, committed: false, pushed: false }
-      const p = await push(cwd)
-      if (!p.ok) return { ok: false as const, error: `Committed ${c.hash}, but push failed: ${p.error}`, committed: true, pushed: false, hash: c.hash }
-      return { ok: true as const, committed: true, pushed: true, hash: c.hash }
-    })
-  )
   ipc.handle('git:branches', safe(branches))
   ipc.handle('git:checkout', safe(checkout))
   ipc.handle('git:remote', safe(remote))

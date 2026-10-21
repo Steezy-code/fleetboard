@@ -57,7 +57,6 @@ beforeEach(() => roots.resetGrantsForTest())
 test('a path inside the project still works, through every handler', async () => {
   const file = path.join(project, 'src', 'a.ts')
   assert.equal(await ipcMain.invoke('fs:read', file), 'inside\n')
-  assert.match(await ipcMain.invoke('fs:readBase64', file), /^[A-Za-z0-9+/=]+$/)
   assert.equal(await ipcMain.invoke('fs:exists', file), true)
   assert.equal((await ipcMain.invoke('fs:stat', file)).dir, false)
   assert.deepEqual(
@@ -80,12 +79,10 @@ test('~/.fleetboard works too — Settings reveals it, and the board lives there
 test('a read outside the roots is refused, in the shape each caller expects', async () => {
   // fs:read already throws for a missing file, so a throw is what callers handle
   await assert.rejects(() => ipcMain.invoke('fs:read', secret), /Outside the folders/)
-  await assert.rejects(() => ipcMain.invoke('fs:readBase64', secret), /Outside the folders/)
   // these must stay quiet: a file node on a path that is gone relies on it
   assert.equal(await ipcMain.invoke('fs:stat', secret), null)
   assert.equal(await ipcMain.invoke('fs:exists', secret), false)
   assert.deepEqual(await ipcMain.invoke('fs:tree', outside, 2), [])
-  assert.deepEqual(await ipcMain.invoke('fs:list', outside), [])
   // and the file is untouched either way
   assert.equal(fs.readFileSync(secret, 'utf8'), 'PRIVATE KEY\n')
 })

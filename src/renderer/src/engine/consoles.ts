@@ -1,6 +1,6 @@
 import type { BoardNode, ConsoleData, Role } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { invoke, on, uid } from '../lib/api'
+import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 
 // Console lifecycle shared by the board, the composer, the orchestrator, voice and loops.
@@ -206,7 +206,6 @@ export function resolveTargets(word: string): string[] {
   return byAgent.map((c) => c.id)
 }
 
-export const newConsoleId = () => uid('con')
 
 // One listener for all PTY output, fanned out by console id.
 const dataSubs = new Map<string, Set<(d: string) => void>>()
