@@ -1,8 +1,8 @@
-import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import type { MainContext } from './context'
-import { loginEnv, which } from './env'
+import { which } from './env'
+import { ghEnv, run, git as runGit, type GitOpts, type RunOut } from './run'
 
 // Git card / GitHub panel IPC. Every handler resolves to { ok: true, ... } or { ok: false, error }.
 
@@ -72,32 +72,8 @@ export interface GitPr {
   updatedAt: string
 }
 
-interface RunOut {
-  code: number
-  stdout: string
-  stderr: string
-}
-
-async function git(cwd: string, args: string[], opts: { timeout?: number; input?: string } = {}): Promise<RunOut> {
-  const env = { ...(await loginEnv()), GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', GIT_PAGER: 'cat' }
-  return new Promise((resolve) => {
-    const child = execFile(
-      'git',
-      args,
-      { cwd, env, timeout: opts.timeout ?? 20000, maxBuffer: 64 * 1024 * 1024 },
-      (err: any, stdout, stderr) => {
-        const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-        let se = String(stderr ?? '')
-        if (err && !se && !String(stdout ?? '').trim()) se = err.killed ? 'git timed out' : err.code === 'ENOENT' ? 'git is not installed' : String(err.message ?? err)
-        resolve({ code, stdout: String(stdout ?? ''), stderr: se })
-      }
-    )
-    if (opts.input != null) {
-      child.stdin?.write(opts.input)
-      child.stdin?.end()
-    }
-  })
-}
+// a diff of a large working tree is the reason for the generous buffer
+const git = (cwd: string, args: string[], opts: GitOpts = {}) => runGit(cwd, args, { maxBuffer: 64 * 1024 * 1024, ...opts })
 
 /** The useful part of git's stderr (drops hints and blank lines). */
 function cleanErr(r: RunOut, fallback = 'git failed') {
@@ -263,8 +239,8 @@ async function diff(cwd: string, file: string, opts: { untracked?: boolean; stag
     }
   }
   const hasHead = (await git(root, ['rev-parse', '--verify', '-q', 'HEAD'])).code === 0
-  const args = opts.staged ? ['diff', '--cached'] : hasHead ? ['diff', 'HEAD'] : ['diff', '--cached']
-  const r = await git(root, ['--literal-pathspecs', ...args, '--no-color', '--no-ext-diff', '-M', '--', file])
+  const against = opts.staged || !hasHead ? ['--cached'] : ['HEAD']
+  const r = await git(root, ['diff', ...against, '--no-color', '-M', '--', file], { gitOpts: ['--literal-pathspecs'] })
   if (r.code !== 0) return fail(cleanErr(r))
   let out = r.stdout
   const binary = /^Binary files .* differ$/m.test(out)
@@ -434,22 +410,17 @@ async function prList(cwd: string): Promise<GitResult<{ prs: GitPr[] }>> {
   if (!validCwd(cwd)) return fail('Folder not found')
   const gh = await which('gh')
   if (!gh) return fail('GitHub CLI (gh) is not installed')
-  const env = { ...(await loginEnv()), GH_PROMPT_DISABLED: '1', NO_COLOR: '1' }
-  return new Promise((resolve) => {
-    execFile(
-      gh,
-      ['pr', 'list', '--limit', '20', '--json', 'number,title,headRefName,url,isDraft,author,updatedAt'],
-      { cwd, env, timeout: 20000, maxBuffer: 8 * 1024 * 1024 },
-      (err: any, stdout, stderr) => {
-        if (err) return resolve(fail(String(stderr || err.message).trim().split('\n')[0] || 'gh failed'))
-        try {
-          resolve({ ok: true, prs: JSON.parse(String(stdout)) })
-        } catch {
-          resolve(fail('Unexpected gh output'))
-        }
-      }
-    )
+  const r = await run(gh, ['pr', 'list', '--limit', '20', '--json', 'number,title,headRefName,url,isDraft,author,updatedAt'], {
+    cwd,
+    env: await ghEnv(),
+    maxBuffer: 8 * 1024 * 1024
   })
+  if (r.code !== 0) return fail(r.stderr.trim().split('\n')[0] || 'gh failed')
+  try {
+    return { ok: true, prs: JSON.parse(r.stdout) }
+  } catch {
+    return fail('Unexpected gh output')
+  }
 }
 
 /** Never let an exception escape as a rejected invoke: the renderer always gets { ok:false, error }. */
