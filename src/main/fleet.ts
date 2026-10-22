@@ -270,7 +270,7 @@ export function leadPrompt(m: FleetMember) {
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
     '6. Once everything is merged, start one reviewer with fleet_spawn_reviewer to check the combined work against the goal and run the checks. Send any findings to the worker that owns the code (fleet_send), wait, merge again.',
     '7. Ask the user only for real decisions, with fleet_ask_user and 2-4 short options, each with a one-line trade-off in notes and the one you recommend. Make reasonable choices yourself otherwise.',
-    '8. If your goal comes with assumptions, "Do not touch" or "Done when", the user has already confirmed them: they are not yours to reinterpret or widen. If the job looks wrong, ask with fleet_ask_user rather than deciding.',
+    '8. Your goal as given, and any assumptions, "Do not touch" or "Done when" that come with it, are what the user confirmed: not yours to reinterpret or widen. If the job looks wrong, ask with fleet_ask_user rather than deciding.',
     '9. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
     'Keep your own messages short: one-line progress updates.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
