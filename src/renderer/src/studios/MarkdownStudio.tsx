@@ -79,6 +79,8 @@ export default function MarkdownStudio(props: { path?: string }) {
   /** what each note held on disk when last read or saved: a save goes only over that (an agent may write it too) */
   const onDisk = useRef(new Map<string, string>())
   const asking = useRef(false)
+  /** notes we have already said we cannot save over, so every keystroke does not toast again */
+  const noBaseTold = useRef(new Set<string>())
   const currentRef = useRef<string | null>(null)
   currentRef.current = current
   const readingRef = useRef<HTMLDivElement>(null)
@@ -107,8 +109,13 @@ export default function MarkdownStudio(props: { path?: string }) {
     const entries = await Promise.all(
       list.map(async (p) => {
         try {
-          return [p, await invoke<string>('fs:read', p)] as const
+          const text = await invoke<string>('fs:read', p)
+          // this read is a base: without it a save over one of these notes would have nothing to
+          // compare against, and fs:write would overwrite it unconditionally
+          onDisk.current.set(p, text)
+          return [p, text] as const
         } catch {
+          // shown as empty, but nothing is recorded as its contents on disk: we did not read it
           return [p, ''] as const
         }
       })
@@ -135,11 +142,23 @@ export default function MarkdownStudio(props: { path?: string }) {
     window.clearTimeout(saveTimer.current)
     const p = pending.current
     if (!p || asking.current) return
+    const base = onDisk.current.get(p.path)
+    if (base === undefined) {
+      // Never read successfully, so there is nothing to compare against and no idea what is in it.
+      // A read can fail transiently (no permission, locked on Windows, removed between the tree read
+      // and the open) and the editor then shows the empty fallback — writing that would replace the
+      // real file, or an agent's work, with nothing. Keep the edit in hand instead.
+      setSave('error')
+      if (!noBaseTold.current.has(p.path)) {
+        noBaseTold.current.add(p.path)
+        toast(`${baseName(p.path)} could not be read, so it is not saved over. Open it again to edit it.`, 'error')
+      }
+      return
+    }
     pending.current = null
     setSave('saving')
     try {
-      const base = onDisk.current.get(p.path)
-      const r = await invoke<WriteResult>('fs:write', p.path, p.text, base === undefined ? undefined : { base })
+      const r = await invoke<WriteResult>('fs:write', p.path, p.text, { base })
       if (!r.ok) {
         // changed on disk since we read it: never overwrite that silently
         pending.current ??= p
@@ -149,11 +168,20 @@ export default function MarkdownStudio(props: { path?: string }) {
           const app = useApp.getState()
           const disk = r.current
           if (await app.confirm({ title: `${baseName(p.path)} changed on disk`, body: `It was ${disk === null ? 'deleted' : 'changed'} while you were editing it, maybe by an agent. Replace it with your version?`, confirm: 'Replace with mine', danger: true })) {
-            const mine = pending.current ?? p
-            await invoke<WriteResult>('fs:write', mine.path, mine.text)
-            onDisk.current.set(mine.path, mine.text)
-            if (pending.current === mine) pending.current = null
-            setSave(pending.current ? 'dirty' : 'saved')
+            // p, not whatever is pending now: the answer is about the note the dialog named. And over
+            // exactly what the user was shown — if it changed again while they read the dialog this
+            // refuses and asks afresh, rather than overwriting a version nobody saw. A deleted file
+            // has no base to give: then "replace with mine" means write it back.
+            const again = await invoke<WriteResult>('fs:write', p.path, p.text, disk === null ? undefined : { base: disk })
+            if (!again.ok) {
+              pending.current ??= p
+              setSave('conflict')
+              toast(`${baseName(p.path)} changed again while you were deciding; your version is still unsaved.`, 'warn')
+            } else {
+              onDisk.current.set(p.path, p.text)
+              if (pending.current?.path === p.path && pending.current.text === p.text) pending.current = null
+              setSave(pending.current ? 'dirty' : 'saved')
+            }
           } else if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your edits since the last save are lost. Otherwise you keep yours, unsaved, and are asked again on the next save.', confirm: 'Load the version on disk', danger: true }))) {
             pending.current = null
             onDisk.current.set(p.path, disk)
@@ -163,6 +191,12 @@ export default function MarkdownStudio(props: { path?: string }) {
           }
         } finally {
           asking.current = false
+          // flush() returns without re-arming while a dialog is up: anything still pending would
+          // otherwise wait for the next keystroke or for unmount
+          if (pending.current) {
+            window.clearTimeout(saveTimer.current)
+            saveTimer.current = window.setTimeout(flushRef.current, 600)
+          }
         }
         return
       }
@@ -175,6 +209,10 @@ export default function MarkdownStudio(props: { path?: string }) {
       toast(`Could not save ${baseName(p.path)}: ${e?.message ?? e}`, 'error')
     }
   }, [])
+
+  // flush re-arms itself after a conflict dialog, which it cannot reference directly
+  const flushRef = useRef(flush)
+  flushRef.current = flush
 
   useEffect(() => () => void flush(), [flush])
 
@@ -206,9 +244,9 @@ export default function MarkdownStudio(props: { path?: string }) {
         onDisk.current.set(path, fresh)
         if (currentRef.current === path) setText(fresh)
         setNotes((m) => new Map(m).set(path, fresh))
-      } catch (e: any) {
+      } catch {
         if (cached == null) setText('')
-        toast(`Could not open ${baseName(path)}`, 'error')
+        toast(`Could not open ${baseName(path)}; it will not be saved over until it reads`, 'error')
       }
       setSave('saved')
       readingRef.current?.scrollTo({ top: 0 })
@@ -256,7 +294,10 @@ export default function MarkdownStudio(props: { path?: string }) {
     if (!isInside(root, path) || !relativeTo(root, path)) return toast('Stay inside the project folder', 'warn')
     if (await invoke<boolean>('fs:exists', path)) return open(path)
     try {
-      await invoke('fs:write', path, `# ${stripExt(baseName(file))}\n\n`)
+      // base: null is "only if it is not there", so a note an agent wrote in the meantime is opened
+      // rather than replaced by this empty stub
+      const made = await invoke<WriteResult>('fs:write', path, `# ${stripExt(baseName(file))}\n\n`, { base: null })
+      if (!made.ok) return open(path)
       const t = await loadTree()
       loadAll(t)
       await open(path, 'source')

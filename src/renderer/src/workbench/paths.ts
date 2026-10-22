@@ -34,7 +34,8 @@ export function dirname(p: string): string {
 
 export const baseName = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
 
-export const stripExt = (name: string) => name.replace(/\.[^./\\]+$/, '')
+/** `file.test.ts` → `file.test`. A dotfile is all name: `.gitignore` kept giving back nothing. */
+export const stripExt = (name: string) => name.replace(/(?!^)\.[^./\\]+$/, '')
 
 /** p relative to root ('' for root itself); p unchanged (forward slashes) when it is outside root. */
 export function relativeTo(root: string, p: string): string {

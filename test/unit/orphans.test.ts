@@ -37,10 +37,31 @@ function hupless(script = `trap '' HUP; sleep 300 & echo $! > ${dir}/child-$$; w
   spawned.push(p.pid!)
   return p.pid!
 }
+/**
+ * The pid of the background child, once the shell has written it.
+ *
+ * Waiting for the file to exist is not the same as waiting for the pid: `> file` creates and
+ * truncates before `echo` writes into it, so a read that wins that race gets '' — and `Number('')`
+ * is 0, which is alive(0) === false and a test that fails on its own precondition. (Caught on CI;
+ * the window is about one first-sighting in three hundred when polled tightly. pty-dispose.test.ts
+ * waits on the contents for the same reason.)
+ */
 const childOf = async (pid: number) => {
   const f = path.join(dir, `child-${pid}`)
-  for (let i = 0; i < 100 && !fs.existsSync(f); i++) await new Promise((r) => setTimeout(r, 20))
-  return Number(fs.readFileSync(f, 'utf8'))
+  for (let i = 0; i < 100; i++) {
+    const child = Number(
+      (() => {
+        try {
+          return fs.readFileSync(f, 'utf8')
+        } catch {
+          return '' // not written yet
+        }
+      })().trim()
+    )
+    if (child > 0) return child
+    await new Promise((r) => setTimeout(r, 20))
+  }
+  throw new Error(`the shell never wrote its child's pid to ${f}`)
 }
 const write = (entries: object) => fs.writeFileSync(file, JSON.stringify(entries))
 

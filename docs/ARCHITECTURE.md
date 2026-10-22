@@ -25,6 +25,10 @@ src/main/                Electron main process
   hooks.ts               receives Claude Code hook events (per-run secret in FB_HOOK_TOKEN)
   localserver.ts         secrets and request checks shared by the local HTTP servers
   remote.ts              the phone Inbox server (off unless enabled in Settings); remote-page.ts is its page
+  run.ts                 the one way a child process is run: run(), gitEnv(), ghEnv(), and git(), which
+                         adds --no-ext-diff --no-textconv so a repo's own config cannot run commands
+  journal.ts             what happened while nobody was watching: ~/.fleetboard/journal/<date>.jsonl
+  permissions.ts         what the app's window and a page in a web tile may ask for
   fleet.ts               Teams: the fleet MCP server (Lead/worker/reviewer tools), worktrees, merges, Ready;
                          every tool call is checked against the caller's role (toolDenial), and a worktree or
                          branch is only removed once nothing uncommitted or unmerged would go with it
@@ -48,14 +52,15 @@ src/shared/approvals.ts  Prompt → Inbox card (title, detail, buttons), for the
 src/shared/qr.ts, ansi.ts  QR encoder (phone link), stripAnsi for matching words in output streams
 src/preload/index.ts     window.fb = { invoke, send, on, pathForFile }
 src/renderer/src/
-  lib/api.ts             invoke(), on(), uid(), runCli(), extractJson(), fileUrl(), basename()
+  lib/api.ts             invoke(), on(), uid(), runCli(), extractJson(), fileUrl(), journal()
+  workbench/paths.ts     the renderer's path maths: joinPath, dirname, baseName, relativeTo, isInside
   state/store.ts         zustand store useApp (project, workspaces, nodes, groups, wires, ink, panels, toasts, confirm)
   engine/consoles.ts     spawnConsoles(), sendToConsole(), killConsoles(), pauseAll/resumeAll, resolveTargets(), consoleTail(), onConsoleData()
   engine/engines.ts      registerEngine(fn) — background engines started once at boot
   board/                 Board (pan/zoom/marquee/drop), NodeFrame, GroupFrame, Wires, InkLayer, BoardOverlays
   nodes/registry.tsx     NODE_DEFS: node type → component; nodes/*Node.tsx
   panels/registry.tsx    PANELS (modals) and DRAWERS (right floating cards); panels/*Panel.tsx, studios/*Studio.tsx
-  chrome/                TopBar, Rails, BottomBar, Home, UsagePill (stub), BranchBadge (stub)
+  chrome/                TopBar, Rails, BottomBar, Home, Minimap, FocusBar, UsagePill, BranchBadge, CiBadge
   voice/CommandBar.tsx   bottom command bar
   features/<area>.ts     side-effect entry per feature area: registerEngine(), BOARD_OVERLAYS.push()
   ui/Modal.tsx           <Modal>, <Drawer>, <Switch>, <Seg>
@@ -96,8 +101,10 @@ src/renderer/src/
 - **Style**: dark warm palette, single red-orange accent (`var(--accent)`), Geist UI font, JetBrains Mono for
   code/consoles, Fraunces italic for display headings. Reuse classes in theme.css. Put feature CSS in
   `src/renderer/src/styles/<area>.css` and import it from your feature entry file (`features/<area>.ts`).
-- Do not add npm dependencies. Available: react, zustand, lucide-react, @xterm/*, marked, highlight.js,
-  nanoid, @huggingface/transformers, kokoro-js.
+- Do not add npm dependencies **that ship with the app**. Available: react, zustand, lucide-react,
+  @xterm/*, marked, highlight.js, @huggingface/transformers, kokoro-js. A devDependency is a smaller
+  promise — it is not in anyone's install — but still a promise: oxlint and the build chain are the
+  only ones, and a new one needs the same argument as a runtime one.
 - **Console state comes from the screen.** Read what a console shows with `ptys.screen(id)` / `pty:prompt`
   and `pty:tail` (rendered text, not the raw stream). Answer a question with `pty:answer` (it re-reads the
   live screen and refuses if the question changed); never type option digits blindly.
@@ -108,7 +115,9 @@ src/renderer/src/
 - **HTML from a repo, a model or a web page goes through `sanitizeHtml`** (`workbench/markdown.ts`), and a URL
   out of it or out of the board file goes through `safeUrl`. `marked` has no sanitizer of its own, so only that
   module and `studios/docs/render.ts` may import it — `test/unit/html-safety.test.ts` enforces both rules.
-- Verify with `npx tsc --noEmit -p tsconfig.json`, `npm test` and `npm run test:e2e` (see Testing).
+- Verify with `npm run typecheck`, `npm run lint`, `npm test` and `npm run test:e2e` (see Testing).
+  `npm run lint` is oxlint, errors only; its warnings (the React Compiler rules, exhaustive-deps) are
+  there to read, not to gate.
 
 ## Testing
 
@@ -138,6 +147,15 @@ src/renderer/src/
   `Math.random`), `argv-safety.test.ts` (every `headless` definition in the AGENTS catalogue wraps its
   prompt in `promptArg`), `fleet-roles.test.ts` (`callTool` consults `toolDenial` before the first tool
   runs). When you add an agent, a panel that renders HTML, or a fleet tool, these are what will fail.
-- Races show up under load: run the e2e suite several files at a time (`--test-concurrency=4` instead of 1)
-  now and then. That found a note opening as an empty editor, which one at a time never showed.
-- CI (.github/workflows/ci.yml) runs typecheck, unit and end-to-end tests on every push.
+- Races show up under load, so CI runs the suite three files at a time (`FB_E2E_JOBS=3 npm run test:e2e`;
+  the default is 1, which is what to use when reproducing a failure). That found a note opening as an
+  empty editor, which one at a time never showed. `npm run test:e2e:one -- test/e2e/<file>.test.ts`
+  runs a single file against the current build.
+- CI (.github/workflows/ci.yml) runs typecheck (twice: `tsconfig.json` and `tsconfig.strict.json`),
+  the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests
+  and the Windows-specific e2e files on Windows. It runs on a pull request and on a push to master —
+  a branch with a pull request open would otherwise run all of it twice. The Windows installer is
+  built only for master and tags, since nothing consumes it otherwise and release.yml builds it again
+  from scratch on a tag.
+- `FB_E2E_HEADLESS=1` skips Xvfb entirely (`--ozone-platform=headless`), which is how to run the e2e
+  suite on a machine without it.

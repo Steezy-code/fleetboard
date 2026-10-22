@@ -1,5 +1,7 @@
 // Speech-to-text: mic capture (16 kHz mono Float32 PCM) + Whisper in a worker, plus the
 // push-to-talk flow (begin → live caption → release → transcribe → route the command).
+import tapUrl from './tap.worklet.js?url'
+import { fb } from '../lib/api'
 import { useApp } from '../state/store'
 import { setVoice, useVoice } from './thread'
 import { runCommand } from './planner'
@@ -117,17 +119,6 @@ let idleTimer: number | undefined
 let peak = 0
 let lastLevelAt = 0
 
-const WORKLET = `
-class Tap extends AudioWorkletProcessor {
-  process(inputs) {
-    const ch = inputs[0] && inputs[0][0]
-    if (ch) this.port.postMessage(ch.slice(0))
-    return true
-  }
-}
-registerProcessor('fb-tap', Tap)
-`
-
 function onPcm(buf: Float32Array) {
   if (!recording) return
   const data = actx && actx.sampleRate !== RATE ? resample(buf, actx.sampleRate, RATE) : buf
@@ -175,15 +166,17 @@ async function openMic() {
   }
   source = actx.createMediaStreamSource(stream)
   try {
-    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }))
-    await actx.audioWorklet.addModule(url)
-    URL.revokeObjectURL(url)
+    await actx.audioWorklet.addModule(tapUrl)
     const node = new AudioWorkletNode(actx, 'fb-tap')
     node.port.onmessage = (e) => onPcm(e.data as Float32Array)
     source.connect(node)
     tap = node
-  } catch {
-    // fallback for environments without AudioWorklet
+  } catch (e) {
+    // Fallback for an environment without AudioWorklet — and the loud part of a quiet failure: if CSP
+    // ever refuses the worklet, push-to-talk keeps working on the deprecated path and nobody finds out
+    // until the main thread starts stuttering. So it says so.
+    console.warn('the audio worklet did not load; falling back to a ScriptProcessorNode', e)
+    fb.send('app:logError', `voice: the audio worklet did not load (${String((e as Error)?.message ?? e)}); using the deprecated ScriptProcessorNode`)
     const sp = actx.createScriptProcessor(2048, 1, 1)
     sp.onaudioprocess = (e) => onPcm(new Float32Array(e.inputBuffer.getChannelData(0)))
     source.connect(sp)

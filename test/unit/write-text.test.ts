@@ -1,5 +1,5 @@
 // Saving a file the user edits: only over what the editor loaded, atomically, keeping permissions and links.
-import { test } from 'node:test'
+import { test, mock } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -40,4 +40,77 @@ test('a new file in a new folder', () => {
   const f = path.join(dir, 'deep', 'er', 'new.md')
   assert.deepEqual(writeText(f, '# new\n'), { ok: true })
   assert.equal(fs.readFileSync(f, 'utf8'), '# new\n')
+})
+
+test('the contents reach the disk, not just the directory entry', () => {
+  // A rename is atomic for the *name*, so a half-written file is never seen under the real one — but
+  // the bytes can still be in the page cache when the power goes, and the file comes back empty. The
+  // board file has snapshots to fall back on; a source file saved from Code studio has nothing.
+  //
+  // syncDir fsyncs the directory too, and the kernel hands the directory the descriptor number the
+  // closed temporary file just gave up — so only an fsync while that file is still open counts.
+  const f = path.join(dir, 'durable.ts')
+  const real = { open: fs.openSync, fsync: fs.fsyncSync, close: fs.closeSync }
+  let tmpFd: number | null = null
+  let fsyncedTmp = false
+  const open = mock.method(fs, 'openSync', ((file: any, ...rest: any[]) => {
+    const fd = (real.open as any)(file, ...rest)
+    if (typeof file === 'string' && file.includes('.fleetboard-')) tmpFd = fd
+    return fd
+  }) as any)
+  const fsync = mock.method(fs, 'fsyncSync', ((fd: number) => {
+    if (fd === tmpFd) fsyncedTmp = true
+    return real.fsync(fd)
+  }) as any)
+  const close = mock.method(fs, 'closeSync', ((fd: number) => {
+    if (fd === tmpFd) tmpFd = null
+    return real.close(fd)
+  }) as any)
+  try {
+    assert.deepEqual(writeText(f, 'export const x = 1\n'), { ok: true })
+    assert.ok(fsyncedTmp, 'the file itself is fsynced before it is renamed into place')
+  } finally {
+    close.mock.restore()
+    fsync.mock.restore()
+    open.mock.restore()
+  }
+  assert.equal(fs.readFileSync(f, 'utf8'), 'export const x = 1\n')
+})
+
+test('a PNG export is written the same careful way, through a symlink and without truncating', async () => {
+  // fs:writeBase64 (diagram export) used to be a bare writeFileSync: it truncated the target in place,
+  // so a write that ran out of room destroyed what was there, and it turned a symlink into a plain
+  // file — the one thing writeText goes out of its way not to do.
+  const { ipcMain } = await import('../support/electron-stub')
+  const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-b64-'))
+  process.env.FLEETBOARD_HOME = dir2
+  const roots = await import('../../src/main/roots')
+  const fsops = await import('../../src/main/fsops')
+  fsops.register({ ipc: ipcMain as never, win: () => null, ptys: null as never, settings: (() => ({})) as never, emit: () => {} })
+  roots.grant(dir2)
+
+  const real = path.join(dir2, 'real.png')
+  const link = path.join(dir2, 'link.png')
+  fs.writeFileSync(real, 'old')
+  fs.symlinkSync(real, link)
+  await ipcMain.invoke('fs:writeBase64', link, Buffer.from('new bytes').toString('base64'))
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'still a link')
+  assert.equal(fs.readFileSync(real, 'utf8'), 'new bytes', 'written where it points')
+  assert.deepEqual(fs.readdirSync(dir2).filter((f) => f.includes('fleetboard-')), [], 'no temporary file left behind')
+})
+
+test('creating a file is "only if it is not there", not a look followed by a write', () => {
+  // Both studios used to ask fs:exists and then write. Between those two calls an agent writing the
+  // same path lost everything it had put there, because the write that followed had no base.
+  const f = path.join(dir, 'new.ts')
+  assert.deepEqual(writeText(f, 'mine\n', null), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'mine\n')
+
+  // someone got there first (or we are asked again): refused, with what is actually there
+  assert.deepEqual(writeText(f, 'mine again\n', null), { ok: false, reason: 'changed', current: 'mine\n' })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'mine\n', 'untouched')
+
+  // and it is a different question from an ordinary unconditional write
+  assert.deepEqual(writeText(f, 'replaced\n'), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'replaced\n')
 })

@@ -73,6 +73,8 @@ export interface MdOptions {
   wikiExists?: (target: string) => boolean
   /** image sources: rewrite relative paths to fbfile:// (default) or leave them */
   localImages?: boolean
+  /** mark "> **NOTE** — …" blockquotes as callouts, so a document can give them their own look */
+  callouts?: boolean
 }
 
 let current: MdOptions = {}
@@ -141,7 +143,7 @@ export function renderMarkdown(src: string, opts: MdOptions = {}): string {
   try {
     const html = md.parse(src ?? '', { async: false }) as string
     return sanitizeHtml(html)
-  } catch (e) {
+  } catch {
     return `<pre>${escapeHtml(String(src ?? ''))}</pre>`
   } finally {
     current = {}
@@ -182,7 +184,8 @@ export function safeUrl(v: string, kind: 'href' | 'src'): string | null {
   return null
 }
 
-export function sanitizeHtml(html: string): string {
+export function sanitizeHtml(html: string, opts?: MdOptions): string {
+  const callouts = opts?.callouts ?? current.callouts
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
   const walk = (el: Element) => {
     for (const child of Array.from(el.children)) {
@@ -217,6 +220,12 @@ export function sanitizeHtml(html: string): string {
       if (tag === 'a') {
         const href = child.getAttribute('href') ?? ''
         if (/^https?:/i.test(href)) child.setAttribute('target', '_blank')
+      }
+      // in the same pass the sanitizer is already making, rather than a second parse of the result
+      if (tag === 'blockquote' && callouts) {
+        const lead = child.querySelector('p > strong:first-child, strong:first-child')?.textContent ?? ''
+        const kind = /^(note|tip|warning|important|caution)\b/i.exec(lead)?.[1]
+        if (kind) child.classList.add('callout', `callout-${kind.toLowerCase()}`)
       }
       walk(child)
     }

@@ -26,11 +26,6 @@ export type Action =
   | { type: 'newWorkspace'; name?: string }
   | { type: 'say'; text: string }
 
-export const ACTION_TYPES = [
-  'spawn', 'send', 'pause', 'resume', 'kill', 'group', 'ungroup', 'deleteTeam', 'wire', 'orchestrator', 'handoff',
-  'openPanel', 'focus', 'zoom', 'newWorkspace', 'say'
-] as const
-
 // ---------------------------------------------------------------- context
 
 /** Consoles the last command touched ("group them", "pause them"). */

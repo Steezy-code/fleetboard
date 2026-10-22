@@ -139,6 +139,7 @@ function kill(runId: string) {
  * its output going nowhere.
  */
 export function killRuns() {
+  // eslint-disable-next-line unicorn/no-useless-spread -- a copy, because kill() deletes from runs
   for (const runId of [...runs.keys()]) kill(runId)
 }
 

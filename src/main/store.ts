@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
 import type { MainContext } from './context'
 import { declareProject, mainOwnedGlobal } from './roots'
 import { dirs, writeJsonAtomic } from './paths'
+import { logError } from './errors'
 
 // State lives on disk as versioned JSON: ~/.fleetboard/app.json (settings, project index, global
 // values) and one file per project. Every few minutes a snapshot goes to history/. A file that
@@ -199,16 +200,35 @@ export function saveProject(p: Project) {
   if (tooNew(onDisk)) throw new Error(`This board was saved by a newer version of Fleetboard (board format ${onDisk}, this one writes ${SCHEMA_VERSION}). Update Fleetboard to open it.`)
   current = p
   p.schema = SCHEMA_VERSION
+  // The board is saved here. Everything after this is bookkeeping — the recent-projects list and a
+  // periodic snapshot — and none of it may be reported as "the board could not be saved", which is
+  // what the caller does with a throw. On a full disk that message was a lie, and it came with the
+  // pruning that would have freed the space never running.
   writeJsonAtomic(projectFile(p.id), p)
-  const consoles = p.workspaces.reduce((n, w) => n + w.nodes.filter((x) => x.type === 'console').length, 0)
-  const meta: ProjectMeta = { id: p.id, name: p.name, path: p.path, lastOpened: p.lastOpened, consoles }
-  app.projects = [meta, ...app.projects.filter((m) => m.id !== p.id)]
-  saveApp()
+  try {
+    const consoles = p.workspaces.reduce((n, w) => n + w.nodes.filter((x) => x.type === 'console').length, 0)
+    const meta: ProjectMeta = { id: p.id, name: p.name, path: p.path, lastOpened: p.lastOpened, consoles }
+    app.projects = [meta, ...app.projects.filter((m) => m.id !== p.id)]
+    saveApp()
+  } catch (e) {
+    logError('store', e)
+  }
   const now = Date.now()
   if (now - (lastSnapshot.get(p.id) ?? 0) > 5 * 60_000) {
+    // recorded even if the copy fails, so a full disk is not retried on every keystroke
     lastSnapshot.set(p.id, now)
-    fs.copyFileSync(projectFile(p.id), path.join(dirs.history, `${p.id}-${now}.json`))
-    prune(p.id, 30)
+    try {
+      fs.copyFileSync(projectFile(p.id), path.join(dirs.history, `${p.id}-${now}.json`))
+    } catch (e) {
+      logError('store', e)
+    }
+    // after the copy and whether or not it worked: this is the step that frees space, so the time it
+    // is needed most is exactly the time the copy just failed
+    try {
+      prune(p.id, 30)
+    } catch (e) {
+      logError('store', e)
+    }
   }
 }
 
@@ -231,7 +251,17 @@ export function register(ctx: MainContext) {
     declareProject(p)
     return projectIdFor(p)
   })
-  ipc.handle('store:loadProject', (_e, id: string) => loadProject(id))
+  ipc.handle('store:loadProject', (_e, id: string) => {
+    // A board this build must not touch is not the same answer as "there is no board yet", and the
+    // renderer used to get null for both: it then made an empty board *with the same id*, which every
+    // save refused, so the user was left looking at a blank board that could never keep anything.
+    const schema = schemaOf(projectFile(String(id)))
+    if (tooNew(schema))
+      throw new Error(
+        `This board was saved by a newer version of Fleetboard (board format ${schema}; this one reads ${SCHEMA_VERSION}). It was left untouched and not opened. Update Fleetboard to open it.`
+      )
+    return loadProject(String(id))
+  })
   ipc.handle('store:saveProject', (_e, p: Project) => saveProject(p))
   ipc.handle('store:forgetProject', (_e, id: string) => {
     app.projects = app.projects.filter((m) => m.id !== id)

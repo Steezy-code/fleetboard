@@ -17,7 +17,6 @@ export const CATEGORY_TINT: Record<MemoryCard['category'], string> = {
   Gotchas: '#f43f5e'
 }
 
-export const repoCards = (): MemoryCard[] => (useApp.getState().project?.extras.memory as MemoryCard[] | undefined) ?? []
 export const setRepoCards = (cards: MemoryCard[]) => useApp.getState().setProjectExtra('memory', cards)
 
 export const loadGlobalCards = async () => ((await invoke<MemoryCard[] | undefined>('store:getGlobal', 'memory')) ?? []) as MemoryCard[]

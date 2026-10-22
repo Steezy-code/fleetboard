@@ -43,7 +43,7 @@ export async function resolve(specifier, context, next) {
 export async function load(url, context, next) {
   if (url.startsWith(STUB)) {
     const spec = url.slice(STUB.length)
-    const body = /\?worker$/.test(spec) ? 'export default class StubWorker {}' : `export default ${JSON.stringify(spec)}`
+    const body = spec.endsWith('?worker') ? 'export default class StubWorker {}' : `export default ${JSON.stringify(spec)}`
     return { format: 'module', source: body, shortCircuit: true }
   }
   if (/\.(ts|tsx)$/.test(url) && url.startsWith('file:') && !url.includes('/node_modules/')) {

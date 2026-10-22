@@ -57,7 +57,7 @@ test('a broken project file is set aside and its newest good snapshot loaded', (
   assert.equal(p?.name, 'newest')
   assert.ok(fs.readdirSync(projects).some((f) => f.startsWith(`${id}.corrupt-`)))
   assert.equal(emitted.at(-1)?.[0], 'store:recovered')
-  assert.deepEqual((emitted.at(-1)?.[1] as any).snapshot, `${id}-9000.json`)
+  assert.deepEqual((emitted.at(-1)![1] as any).snapshot, `${id}-9000.json`)
   // and the next load reads the restored file normally
   assert.equal(store.loadProject(id)?.name, 'newest')
 })

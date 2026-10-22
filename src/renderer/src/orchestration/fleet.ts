@@ -120,7 +120,8 @@ export function useInstalledAgents(): string[] {
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
-export function fmtDuration(ms: number): string {
+/** Live elapsed time, where seconds matter: `12s`, `5m 03s`. continuity/format's is the coarse one. */
+export function fmtElapsed(ms: number): string {
   if (ms < 0) ms = 0
   const s = Math.floor(ms / 1000)
   if (s < 60) return `${s}s`

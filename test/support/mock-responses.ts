@@ -57,7 +57,7 @@ export async function startMockResponses() {
           .slice((lastUser?.at ?? 0) + 1)
           .filter((i) => i?.type === 'tool_search_output')
           .flatMap((i) => (i.tools ?? []).flatMap((t: any) => (t?.type === 'namespace' ? (t.tools ?? []).map((x: any) => `${t.name}/${x.name}`) : [t?.name])))
-        const report = [...tools, ...found].find((t) => /fleet_report$/.test(t ?? ''))
+        const report = [...tools, ...found].find((t) => (t ?? '').endsWith('fleet_report'))
         const searched = input.slice((lastUser?.at ?? 0) + 1).some((i) => i?.type === 'tool_search_output')
         if (results.length === 0) call = { name: 'exec_command', args: { cmd: `printf 'Codex was here\\n' > ${owns}` } }
         else if (results.length === 1 && report) call = { name: report, args: { status: 'done', summary: `Wrote ${owns}.` } }
@@ -146,7 +146,7 @@ export async function startMockGemini() {
       const briefAt = contents.findLastIndex((c: any) => c.role === 'user' && (c.parts ?? []).some((p: any) => /Task from .+ You own: /.test(p.text ?? '')))
       const owns = briefAt >= 0 ? /You own: (.+?)\.(?:\s|$)/.exec(contents[briefAt].parts.map((p: any) => p.text ?? '').join(' '))?.[1]?.split(',')[0]?.trim() : undefined
       const answered = briefAt >= 0 ? contents.slice(briefAt + 1).flatMap((c: any) => (c.parts ?? []).filter((p: any) => p.functionResponse)).length : 0
-      const report = tools.find((t) => /fleet_report$/.test(t))
+      const report = tools.find((t) => t.endsWith('fleet_report'))
       let part: object = { text: `Conversation started with: ${user[0] ?? '(nothing)'}` }
       if (owns && answered === 0) part = { functionCall: { name: 'write_file', args: { file_path: owns, content: 'Gemini was here\n' } } }
       else if (owns && answered === 1 && report) part = { functionCall: { name: report, args: { status: 'done', summary: `Wrote ${owns}.` } } }

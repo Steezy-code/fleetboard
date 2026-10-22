@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { mapWorkspaces, type BoardNode, type ConsoleData } from '@shared/types'
+import type { BoardNode, ConsoleData } from '@shared/types'
 import type { FleetMember, FleetState } from '@shared/fleet'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
@@ -68,37 +68,27 @@ function workspaceOf(nodeId: string) {
 
 /** Add a node to a specific workspace without switching to it. */
 function addNodeTo(wsId: string, node: BoardNode) {
-  const p = useApp.getState().project
-  if (!p) return
-  const workspaces = mapWorkspaces(p, (w) => {
-    if (w.id !== wsId) return w
+  useApp.getState().mutateWsById(wsId, (w) => {
     const z = w.nodes.reduce((m, n) => Math.max(m, n.z), 0) + 1
     return { ...w, nodes: [...w.nodes, { ...node, z }] }
   })
-  useApp.setState({ project: { ...p, workspaces } })
-  useApp.getState().setProjectExtra('fleetTouched', Date.now()) // persists the project
 }
 
 function addWireTo(wsId: string, from: string, to: string) {
-  const p = useApp.getState().project
-  if (!p) return
-  const workspaces = mapWorkspaces(p, (w) =>
-    w.id !== wsId || w.wires.some((x) => x.from === from && x.to === to) ? w : { ...w, wires: [...w.wires, { id: `wire${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, from, to }] }
-  )
-  useApp.setState({ project: { ...p, workspaces } })
+  useApp
+    .getState()
+    .mutateWsById(wsId, (w) =>
+      w.wires.some((x) => x.from === from && x.to === to) ? w : { ...w, wires: [...w.wires, { id: `wire${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, from, to }] }
+    )
 }
 
 function removeEverywhere(ids: string[]) {
-  const p = useApp.getState().project
-  if (!p) return
   const set = new Set(ids)
-  const workspaces = mapWorkspaces(p, (w) => ({
+  useApp.getState().mutateEveryWs((w) => ({
     ...w,
     nodes: w.nodes.filter((n) => !set.has(n.id) && !(n.type === 'plan' && set.has(n.data?.leadId))),
     wires: w.wires.filter((x) => !set.has(x.from) && !set.has(x.to))
   }))
-  useApp.setState({ project: { ...p, workspaces } })
-  useApp.getState().setProjectExtra('fleetTouched', Date.now())
 }
 
 /** Where a new team console goes: leads in free space, workers in a row under their lead. */

@@ -32,7 +32,7 @@ export function resolveMention(word: string): string[] {
 }
 
 // "@word" after a space, comma or bracket; not "@types/node" (a path) and not "bob@example.com"
-const MENTION_RE = /(^|[\s,(])@([\w.\-]+)(?![\w/@])/g
+const MENTION_RE = /(^|[\s,(])@([\w.-]+)(?![\w/@])/g
 
 /**
  * Split a command into the @mentions that name consoles (taken out of the text) and the rest. Any
@@ -44,13 +44,13 @@ export function parseMentions(text: string, isTarget: (word: string) => boolean 
   const unknown: string[] = []
   const body = text
     .replace(MENTION_RE, (whole, pre: string, word: string) => {
-      const clean = word.replace(/[.\-]+$/, '')
+      const clean = word.replace(/[.-]+$/, '')
       if (!clean || !isTarget(clean)) {
         if (clean) unknown.push(clean)
         return whole
       }
       mentions.push(clean)
-      return pre + word.slice(clean.length).replace(/^[.\-]+/, '')
+      return pre + word.slice(clean.length).replace(/^[.-]+/, '')
     })
     .replace(/\s+([,.;:])/g, '$1')
     .replace(/^[\s,:;-]+/, '')

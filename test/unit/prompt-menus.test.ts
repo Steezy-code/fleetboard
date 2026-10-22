@@ -120,7 +120,7 @@ test('shell: y/n questions and a password', async () => {
 
 import '../support/renderer-env'
 import { answerKeys } from '../../src/main/status'
-import { approvalFor } from '../../src/renderer/src/fleet/approvals'
+import { approvalFor } from '../../src/shared/approvals'
 
 const DOWN = '\x1b[B'
 const UP = '\x1b[A'

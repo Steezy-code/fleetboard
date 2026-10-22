@@ -29,3 +29,7 @@ export interface Prompt {
 export type PromptAnswer = { option: string } | { yes: boolean } | { enter: true }
 
 export type AnswerResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'not-live' }
+
+/** What an answer was, in a few words — for the Inbox, a toast, and the journal. */
+export const describeAnswer = (a: PromptAnswer): string =>
+  'option' in a ? a.option : 'yes' in a ? (a.yes ? 'yes' : 'no') : 'enter'
