@@ -412,8 +412,11 @@ function build() {
       : blocked
         ? []
         : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id) }]
+    // a blocked review keeps this on purpose: pushing is not merging, and a draft PR is how a person
+    // other than the user gets to see the file that was ruled out
     if (ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl) actions.push({ label: 'Open draft PR', keeps: true, run: () => openPr(project.id, ready) })
-    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked, keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
+    // primary only where Merge was taken away; with nothing to merge, Done is already the primary
+    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked && !closeOnly, keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
     if (ready.prUrl) actions.push({ label: 'Open PR', keeps: true, run: () => invoke('shell:openExternal', ready.prUrl) })
     actions.push({ label: 'Discard', tone: 'deny', run: () => discardTeam(project.id) })
     items.push({

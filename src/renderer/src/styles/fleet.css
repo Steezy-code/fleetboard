@@ -588,7 +588,8 @@
    done-when command keeps its width and the prose gives way — the command is the half that runs. */
 .ch-one {
   display: flex;
-  align-items: center;
+  /* not centred: a command long enough to wrap would otherwise leave the line it belongs to floating beside it */
+  align-items: flex-start;
   gap: 10px;
   min-width: 0;
   font-size: 13.5px;
@@ -601,11 +602,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* the command keeps its width and wraps rather than ellipsizing anywhere: a later phase runs it on a
+   loop, so a card that cut it in half would be agreeing to something nobody read */
 .ch-done {
   flex: none;
-  max-width: 55%;
+  max-width: 100%;
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 5px;
   padding: 2px 7px;
   border-radius: 7px;
@@ -613,16 +616,22 @@
   background: var(--panel-2);
   font-family: var(--mono);
   font-size: 11.5px;
+  line-height: 1.45;
   color: var(--text-2);
 }
 .ch-done svg {
   flex: none;
+  margin-top: 2px;
   color: var(--muted);
 }
 .ch-done > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* on the glance, the prose is what gives way, and a long command takes a second line instead of ending in an ellipsis */
+.ch-one .ch-done {
+  max-width: 55%;
 }
 .ch-rows {
   display: flex;
@@ -637,9 +646,12 @@
   font-size: 12.5px;
   line-height: 1.5;
 }
+/* with the row's own text, not centred against it: a row of six exclusions is tall, and a centred
+   icon floats away from the label it belongs to */
 .ch-row > svg {
   flex: none;
-  align-self: center;
+  align-self: flex-start;
+  margin-top: 3px;
   color: var(--muted);
 }
 .ch-badge {
@@ -660,12 +672,11 @@
   background: var(--panel-2);
   border-color: var(--line);
 }
+/* an assumption runs to 300 characters, and it is one of the things the card exists to show: it wraps */
 .ch-text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   color: var(--text);
 }
 .ch-from {
@@ -682,10 +693,17 @@
   flex: none;
   color: var(--muted);
 }
+/* one exclusion per line, each wrapping: a merge is refused for these, so none of them is hidden */
 .ch-paths {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   font-family: var(--mono);
   font-size: 11.5px;
   color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 /* the one question, set apart from what was understood: its answers are the card's own buttons */
 .ch-ask {
