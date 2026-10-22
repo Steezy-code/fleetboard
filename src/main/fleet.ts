@@ -544,15 +544,32 @@ export function numstat(out: string): { path: string; add: number; del: number }
     .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
 }
 
+/** The files among `touched` an exclusion covers, each named with the rule it hit. */
+const excludedHits = (touched: string[], wontTouch: string[] | undefined, how: string) =>
+  touched.flatMap((f) => {
+    const rule = excludedBy(f, wontTouch)
+    return rule ? [`${f} (${how} "${rule}")`] : []
+  })
+
+const andMore = (hits: string[]) => (hits.length > 5 ? `, and ${hits.length - 5} more` : '')
+
 /** Why a worker's branch cannot be merged: it changed files the charter's won't-touch list rules out. Null when it can. */
 export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined): string | null {
-  const hits = touched.flatMap((f) => {
-    const rule = excludedBy(f, wontTouch)
-    return rule ? [`${f} (excluded by "${rule}")`] : []
-  })
+  const hits = excludedHits(touched, wontTouch, 'excluded by')
   if (!hits.length) return null
-  const more = hits.length > 5 ? `, and ${hits.length - 5} more` : ''
-  return `Not merged: ${worker} changed ${hits.slice(0, 5).join(', ')}${more}, which the user ruled out. Ask ${worker} to revert ${hits.length === 1 ? 'it' : 'them'} with fleet_send, then merge again.`
+  return `Not merged: ${worker} changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}, which the user ruled out. Ask ${worker} to revert ${hits.length === 1 ? 'it' : 'them'} with fleet_send, then merge again.`
+}
+
+/**
+ * The same refusal for the user's own merge, in their words rather than the Lead's. Said by
+ * mergeReady, which is the one place every client reaches — the Ready card, and the phone's
+ * /api/merge (remote.ts) — so the card hiding its Merge button is the courtesy and this is the rule.
+ * Both clients show it after "Merge failed:", so it does not say that itself.
+ */
+export function excludedMergeRefusal(touched: string[], wontTouch: string[] | undefined): string | null {
+  const hits = excludedHits(touched, wontTouch, 'ruled out by')
+  if (!hits.length) return null
+  return `this work changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}. Tell the Lead to put ${hits.length === 1 ? 'it' : 'them'} back, or discard the team's work.`
 }
 
 const str = (description: string) => ({ type: 'string', description })
@@ -1220,6 +1237,18 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
     const lead = s.members[s.ready.leadId]
     if (!lead) return { ok: false, error: 'The team has no lead to merge from.' }
     if (lead.branch) {
+      // What the user ruled out is enforced here rather than only on the card, because this is the
+      // function every client reaches: the Ready card, and the phone's /api/merge. Checked against
+      // what the merge would actually bring in, not the file list the card was drawn from, which the
+      // Lead may have added to since. -z / --no-renames as in fleet_merge: a quoted name matches no
+      // exclusion, and a move touches the file it left.
+      const wontTouch = s.charter?.wontTouch
+      if (wontTouch?.length) {
+        const d = await git(s.projectPath, ['diff', '--name-only', '-z', '--no-renames', `HEAD...${lead.branch}`])
+        if (!d.ok) return { ok: false, error: `The team's changes could not be checked against what you ruled out: ${d.err.slice(0, 300) || d.out.slice(0, 300)}` }
+        const refusal = excludedMergeRefusal(d.out.split('\0').filter(Boolean), wontTouch)
+        if (refusal) return { ok: false, error: refusal }
+      }
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution

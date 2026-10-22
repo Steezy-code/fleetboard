@@ -11,7 +11,7 @@ import path from 'node:path'
 import type { FleetMember } from '../../src/shared/fleet'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-roles-'))
-const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor, excludedRefusal } = await import('../../src/main/fleet')
+const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor, excludedMergeRefusal, excludedRefusal } = await import('../../src/main/fleet')
 const { charterBrief, coerceCharter } = await import('../../src/shared/charter')
 
 /** Every tool a role is allowed to call, straight from the catalogue the server advertises. */
@@ -269,6 +269,50 @@ test('a refusal names every excluded file up to a few, then counts the rest', ()
   assert.match(why, /f4\.ts/)
   assert.doesNotMatch(why, /f5\.ts/, 'the message stays short')
   assert.match(why, /and 4 more/)
+})
+
+// ---- and the user's own merge, wherever it was pressed from
+
+test("the user's merge is refused in their own words, naming the file and the rule it hit", () => {
+  const why = excludedMergeRefusal(['src/cli/split.ts', 'package.json'], ['package.json'])
+  assert.ok(why)
+  assert.match(why, /package\.json/, 'the file')
+  assert.match(why, /"package\.json"/, 'the exclusion it hit, as the user confirmed it')
+  assert.doesNotMatch(why, /split\.ts/, 'a file that broke no exclusion is not blamed')
+  assert.doesNotMatch(why, /fleet_send/, 'the user is not told to call a tool only the Lead has')
+  assert.match(why, /discard/i, 'and is told what they can do instead')
+})
+
+test('the user merges as before when nothing touched is ruled out, and when nothing is', () => {
+  assert.equal(excludedMergeRefusal(['src/cli/split.ts'], ['src/renderer/']), null)
+  assert.equal(excludedMergeRefusal(['src/renderer/a.ts'], []), null)
+  assert.equal(excludedMergeRefusal(['src/renderer/a.ts'], undefined), null, 'a board with no charter merges as it always did')
+  assert.equal(excludedMergeRefusal([], ['src/renderer/']), null)
+})
+
+test("the user's refusal stays short too, naming a few files and counting the rest", () => {
+  const why = excludedMergeRefusal(Array.from({ length: 9 }, (_, i) => `src/renderer/f${i}.ts`), ['src/renderer'])!
+  assert.match(why, /f4\.ts/)
+  assert.doesNotMatch(why, /f5\.ts/)
+  assert.match(why, /and 4 more/)
+})
+
+// The Ready card leaves Merge off a blocked review, but a button that is not drawn is not a rule:
+// the phone presses Merge through mergeReady as well, and so would any caller added later.
+test('mergeReady checks the exclusions itself, before git merges anything', () => {
+  const body = bodyOf(fleetSrc(), 'export async function mergeReady(')
+  const check = body.indexOf('excludedMergeRefusal(')
+  const merge = body.indexOf("'merge', '--no-ff'")
+  assert.ok(check > 0 && merge > 0 && check < merge, 'the exclusions are checked before git merge runs')
+  assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter, not a verdict the caller passed in")
+  assert.match(body, /HEAD\.\.\.\$\{lead\.branch\}/, 'the diff is what the merge would bring in, not the list the card was drawn from')
+  assert.match(body, /'--name-only', '-z', '--no-renames'/, 'read the way the exclusions are matched')
+})
+
+test('the phone presses Merge through that same function', () => {
+  const remote = fs.readFileSync(new URL('../../src/main/remote.ts', import.meta.url), 'utf8')
+  assert.match(remote, /mergeReady\(body\.projectId\)/, '/api/merge calls mergeReady')
+  assert.doesNotMatch(remote, /\bgit\(/, 'and does not merge on its own')
 })
 
 test('fleet_merge checks the exclusions before it attempts the merge', () => {

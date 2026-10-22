@@ -11,16 +11,21 @@ import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleFol
 
 const KIND_ICON = { charter: ClipboardCheck, approval: ShieldQuestion, ask: MessageCircleQuestion, ready: CircleCheck, stopped: OctagonAlert, notice: CircleX } as const
 
+/** Finished work that cannot be merged is not a finished job: the whole card says so, not only its body. */
+const readyBlocked = (i: InboxItem) => i.kind === 'ready' && !!i.review?.blocked
+
 function iconOf(i: InboxItem) {
   if (i.kind === 'notice' && i.tone === 'info') return MessageSquareText
+  if (readyBlocked(i)) return TriangleAlert
   return KIND_ICON[i.kind]
 }
-const toneOf = (i: InboxItem) => (i.kind === 'approval' || i.kind === 'stopped' ? 'warn' : i.kind === 'ask' || i.kind === 'charter' ? 'accent' : i.kind === 'ready' ? 'ok' : i.tone === 'danger' ? 'danger' : 'info')
+const toneOf = (i: InboxItem) =>
+  readyBlocked(i) || i.kind === 'approval' || i.kind === 'stopped' ? 'warn' : i.kind === 'ask' || i.kind === 'charter' ? 'accent' : i.kind === 'ready' ? 'ok' : i.tone === 'danger' ? 'danger' : 'info'
 function headOf(i: InboxItem): string {
   if (i.kind === 'charter') return i.charter.followUpTo ? 'gets this next' : 'starts with this'
   if (i.kind === 'approval') return i.approval ? 'asks' : 'is waiting for you'
   if (i.kind === 'ask') return 'asks'
-  if (i.kind === 'ready') return 'finished the goal'
+  if (i.kind === 'ready') return readyBlocked(i) ? 'finished, but touched what you ruled out' : 'finished the goal'
   if (i.kind === 'stopped') return 'stopped before finishing'
   return i.head
 }
