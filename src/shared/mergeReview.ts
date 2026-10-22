@@ -88,9 +88,13 @@ export function ownedBy(file: string, owns: string[] | undefined): boolean {
  * everything, refusing a merge over a rule the user was never shown.
  */
 const asExclusion = (raw: string): string | null => {
-  const o = norm(raw)
-    .replace(/^\/+/, '')
-    .replace(/\/\*\*(\/\*)?$/, '/*')
+  // normed again at the end: stripping the leading slash can uncover a `./` the first pass could not
+  // see (`/./*`), and `covers` norms too — so without this the bare `*` rejected below comes back.
+  const o = norm(
+    norm(raw)
+      .replace(/^\/+/, '')
+      .replace(/\/\*\*(\/\*)?$/, '/*')
+  )
   return o && !/^\*+$/.test(o) ? o : null
 }
 
