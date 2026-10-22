@@ -263,7 +263,10 @@ export function CommandInput({
     if (f?.replyTo && !t.startsWith('@')) {
       useThread.getState().add('user', `→ ${f.replyTo.label}: ${t}`, 'typed')
       void f.replyTo.send(t)
-      useApp.getState().toast(`Sent to ${f.replyTo.label}`, 'ok')
+      // only a reply that leaves at once is reported as sent: a charter is edited in front of you,
+      // and work for a team waits at the gate, where the card that comes up is the feedback
+      if (f.kind === 'charter') useApp.getState().toast('The charter now says that', 'ok')
+      else if (f.kind === 'ask') useApp.getState().toast(`Sent to ${f.replyTo.label}`, 'ok')
       return
     }
     runCommand(t, 'typed')

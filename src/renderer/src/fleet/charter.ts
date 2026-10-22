@@ -119,6 +119,17 @@ export function openGate(c: Charter): Promise<Charter | null> {
   })
 }
 
+/**
+ * Let go of every door still waiting, resolving each as dismissed. For a project closed or switched:
+ * the card names a Lead and a repo that are no longer on screen, and nobody left can answer it, so a
+ * promise kept waiting there is one that never settles.
+ */
+export function clearGate() {
+  const abandoned = waiting.splice(0)
+  showFront()
+  for (const w of abandoned) w.settle(null)
+}
+
 /** Which route a request takes. With a team member to receive it, the charter is a follow-up to them and says so. */
 export const gateTarget = (to: FleetMember | undefined): { followUpTo?: string } => (to ? { followUpTo: to.id } : {})
 

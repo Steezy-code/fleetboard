@@ -440,6 +440,12 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* a sentence in a card body that has to wrap; .it-meta is one clipped line */
+.it-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
 .it-files > div {
   display: flex;
   gap: 8px;
@@ -496,6 +502,11 @@
    position: absolute and tears the row out of the card */
 .it-claim.risk svg {
   color: var(--text-3, var(--text-2));
+}
+/* a file the charter ruled out: the one flag that stops the merge rather than annotating it */
+.it-claim.danger svg,
+.it-claim.danger .it-claim-ev {
+  color: var(--danger-text);
 }
 .it-claim-what {
   flex: 1;
@@ -571,6 +582,127 @@
 }
 .it-opt-top .it-rec {
   order: 2;
+}
+
+/* The charter (CharterCard.tsx): the full card's rows, and the one-line glance. In both, the
+   done-when command keeps its width and the prose gives way — the command is the half that runs. */
+.ch-one {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.ch-understood {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-done {
+  flex: none;
+  max-width: 55%;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.ch-done svg {
+  flex: none;
+  color: var(--muted);
+}
+.ch-done > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ch-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.ch-row > svg {
+  flex: none;
+  align-self: center;
+  color: var(--muted);
+}
+.ch-badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ch-badge.known {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.ch-badge.guess {
+  color: var(--muted);
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+.ch-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.ch-from {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.ch-label {
+  flex: none;
+  color: var(--muted);
+}
+.ch-paths {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+/* the one question, set apart from what was understood: its answers are the card's own buttons */
+.ch-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+}
+.ch-gap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--accent-text);
 }
 .cb-reply {
   display: inline-flex;
