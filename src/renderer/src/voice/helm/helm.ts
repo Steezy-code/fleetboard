@@ -14,6 +14,7 @@ import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
 import { routeFeedback, useFeedback } from '../../workbench/prFeedback'
 import { startBrainstorm } from './brainstorm'
+import { CHARTER_FIELDS } from '../../fleet/charter'
 
 // ---------------------------------------------------------------- types / store
 
@@ -34,6 +35,8 @@ export interface HelmOption {
   github?: { do: 'fix-ci' | 'send-feedback'; target: string }
   /** what a brainstorm panel should think about */
   topic?: string
+  /** a team option's charter as the model wrote it; coerced where it is used, so a bad one costs confidence and not the goal */
+  charter?: unknown
 }
 
 export interface HelmResult {
@@ -71,7 +74,7 @@ const AUTO_PLAYBOOKS = ['morning-sweep', 'pr-review', 'db-safety']
 
 // ---------------------------------------------------------------- prompt
 
-function helmPrompt(text: string, board: string): string {
+export function helmPrompt(text: string, board: string): string {
   return `You are Oracle, the router of Fleetboard: a visual board of real AI coding-agent terminals ("consoles": Claude Code, Codex, ...) where a Lead agent can plan work and run workers in git worktrees.
 The user typed or said a request. Read the board snapshot, then answer and/or suggest the 1-3 best routes, best first.
 Reply with ONLY a JSON object, no prose, no code fences:
@@ -79,7 +82,7 @@ Reply with ONLY a JSON object, no prose, no code fences:
 
 Option shapes ("label": button text, 2-5 words; "detail": one line on what it does and why):
 - {"kind":"playbook","label":"...","detail":"...","playbook":{"id":"<playbook id>","inputs":{"<key>":"<value>"}}}  run a playbook; fill its inputs from the request in the user's own words; leave out required inputs you can't fill (the user is asked).
-- {"kind":"team","label":"...","detail":"...","goal":"<clear, self-contained goal for the Lead>"}  custom multi-step work that no playbook fits; goes to the active lead if there is one, otherwise starts a new Lead.
+- {"kind":"team","label":"...","detail":"...","goal":"<clear, self-contained goal for the Lead>","charter":{<the charter, below>}}  custom multi-step work that no playbook fits; goes to the active lead if there is one, otherwise starts a new Lead.
 - {"kind":"send","label":"...","detail":"...","targets":["<exact console name>"],"text":"<message typed into that console>","submit":true}  message an agent already on the board; submit false only types it (the user presses Enter).
 - {"kind":"actions","label":"...","detail":"...","actions":[<board actions>]}  board operations (schema below).
 - {"kind":"github","label":"...","detail":"...","github":{"do":"fix-ci","target":"branch|pr:<number>"}}  send an agent to fix a red CI run on this branch or on a PR, with the failed log (a PR's own agent gets it when it has one).
@@ -89,6 +92,9 @@ Option shapes ("label": button text, 2-5 words; "detail": one line on what it do
 - {"kind":"answer"}  no button: the answer is the reply itself.
 
 ${ACTION_SCHEMA}
+
+Charter, for a team option: what you understood the job to be, which the user confirms before any agent starts. Look in the repo only as far as the request needs.
+${CHARTER_FIELDS}
 
 Rules:
 - reply: plain spoken English, no markdown, lists, ids or file dumps. Say what you found or what you suggest.
@@ -140,7 +146,8 @@ function coerceOption(raw: any): HelmOption | null {
     case 'team': {
       const goal = str(raw.goal ?? raw.text, 4000)
       if (!goal) return null
-      return { kind, label: label || 'Give it to the team', detail: detail || clip(goal, 140), goal }
+      const charter = raw.charter && typeof raw.charter === 'object' && !Array.isArray(raw.charter) ? { charter: raw.charter } : {}
+      return { kind, label: label || 'Give it to the team', detail: detail || clip(goal, 140), goal, ...charter }
     }
     case 'send': {
       const targets = (Array.isArray(raw.targets) ? raw.targets : raw.targets ? [raw.targets] : []).map((t: any) => str(t, 80)).filter(Boolean)
