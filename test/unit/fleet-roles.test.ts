@@ -11,7 +11,7 @@ import path from 'node:path'
 import type { FleetMember } from '../../src/shared/fleet'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-roles-'))
-const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor, excludedMergeRefusal, excludedRefusal } = await import('../../src/main/fleet')
+const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor, excludedMergeRefusal, excludedRefusal, trustedCharter } = await import('../../src/main/fleet')
 const { charterBrief, coerceCharter } = await import('../../src/shared/charter')
 
 /** Every tool a role is allowed to call, straight from the catalogue the server advertises. */
@@ -179,6 +179,31 @@ test('a worker brief without a charter reads as it did before', () => {
   assert.doesNotMatch(briefFor(WORKER, LEAD_MEMBER, []), /Do not touch/)
 })
 
+// `fleet:startLead` arrives from the renderer, which is trusted no further here than it is for a
+// project id. A charter was taken verbatim: a malformed `understood` threw where the goal is
+// composed — after the worktree and console already existed — and a `wontTouch` that is a string has
+// a length, so it got as far as the merge gate it was supposed to be guarding before throwing there.
+test('a charter off the wire is coerced before anything is built from it', () => {
+  const wire = { understood: { oops: true }, assumptions: 'none', wontTouch: 'src/renderer', doneWhen: 7, confidence: 99, request: 'add split to the cli' } as any
+  assert.throws(() => goalMessageFor(wire, 'add split to the cli'), 'an uncoerced charter is what used to throw')
+  const c = trustedCharter(wire, 'add split to the cli')!
+  assert.equal(c.understood, 'add split to the cli', 'an understood that is not text falls back to the request')
+  assert.deepEqual(c.assumptions, [])
+  assert.deepEqual(c.wontTouch, [], 'and a wontTouch that is not a list of paths rules nothing out')
+  assert.equal(c.doneWhen, '')
+  assert.notEqual(c.confidence, 99)
+  assert.match(goalMessageFor(c, 'add split to the cli'), /add split to the cli/, 'the Lead still gets a goal')
+})
+
+test('a coerced charter keeps its own request, so a goal that says more than the request still follows it', () => {
+  const steps = 'Playbook "Hotfix". 1) Reproduce it with a failing test. 2) Fix it.'
+  const c = trustedCharter(CHARTER, steps)!
+  assert.equal(c.request, 'add split to the cli')
+  assert.ok(goalMessageFor(c, steps).endsWith(steps), "the playbook's step list is not mistaken for the request and dropped")
+  assert.equal(trustedCharter({ ...CHARTER, request: '  ' } as any, steps)!.request, steps, 'a charter with no request of its own falls back to the goal')
+  assert.equal(trustedCharter(undefined, steps), undefined, 'and no charter stays no charter')
+})
+
 const HOW = 'Fleetboard was restarted. Your previous conversation was not restored.'
 const TAIL = 'Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.'
 
@@ -224,9 +249,11 @@ const bodyOf = (src: string, head: string) => {
 
 test('startLead keeps the charter and briefs the Lead from it', () => {
   const body = bodyOf(fleetSrc(), 'export async function startLead(')
-  assert.match(body, /s\.charter = opts\.charter\b/, 'the charter is kept on the state, and cleared when a job starts without one')
-  assert.match(body, /kind: 'goal', text: goalMessageFor\(opts\.charter, opts\.goal\)/)
+  assert.match(body, /const charter = trustedCharter\(opts\.charter, opts\.goal\)/, 'what the renderer sent is coerced before anything is built from it')
+  assert.match(body, /s\.charter = charter\b/, 'the charter is kept on the state, and cleared when a job starts without one')
+  assert.match(body, /kind: 'goal', text: goalMessageFor\(charter, opts\.goal\)/)
   assert.doesNotMatch(body, /text: opts\.goal/, 'the typed request must not be what the Lead is handed')
+  assert.doesNotMatch(body, /= opts\.charter\b/, 'and the uncoerced object is not what is stored or briefed from')
 })
 
 test("a restarted Lead is handed the board's charter", () => {
@@ -305,7 +332,30 @@ test('mergeReady checks the exclusions itself, before git merges anything', () =
   const merge = body.indexOf("'merge', '--no-ff'")
   assert.ok(check > 0 && merge > 0 && check < merge, 'the exclusions are checked before git merge runs')
   assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter, not a verdict the caller passed in")
-  assert.match(body, /wouldTouch\(s\.projectPath, lead\.branch\)/, "what the user's own merge would bring in, not the list the card was drawn from")
+  assert.match(body, /wouldTouch\(s\.projectPath, at\)/, "what the user's own merge would bring in, not the list the card was drawn from")
+})
+
+// A worker keeps its shell and is told it may stay alive for follow-ups; the Lead keeps committing
+// too. Reading the branch name once for the check and again for the merge left a window in which a
+// commit made in between — the very thing the exclusions exist for — merged without being checked.
+test('each gate resolves the branch to a commit once, and checks and merges that same commit', () => {
+  const src = fleetSrc()
+  const resolver = bodyOf(src, 'async function commitOf(')
+  assert.match(resolver, /'rev-parse', '--verify'/)
+  assert.match(resolver, /\^\{commit\}/, 'a ref that is not a commit resolves to nothing, rather than to something git will merge')
+  assert.match(resolver, /\[0-9a-f\]/, "and what git printed is checked before it is handed back to git")
+
+  const lead = src.slice(src.indexOf("case 'fleet_merge':"), src.indexOf("case 'fleet_dismiss':"))
+  assert.match(lead, /commitOf\(m\.cwd, w\.branch\)/)
+  assert.match(lead, /wouldTouch\(m\.cwd, at\)/, 'the diff is read for the resolved commit')
+  assert.match(lead, /'merge', '--no-ff', '--no-edit', '-m', `Merge \$\{w\.branch\}`, at\]/, 'and that commit is what is merged, under the name it came from')
+
+  const user = bodyOf(src, 'export async function mergeReady(')
+  assert.match(user, /commitOf\(s\.projectPath, lead\.branch\)/)
+  assert.match(user, /'merge', '--no-ff', '-m', `Merge \$\{lead\.branch\}[^`]*`, at\]/)
+  for (const [where, body] of [['fleet_merge', lead], ['mergeReady', user]] as const) {
+    assert.doesNotMatch(body, /branch\]\)/, `${where} must not hand git a branch name to merge after checking one`)
+  }
 })
 
 // Both gates ask the same question, so they ask it in one place; these are the flags that make the
@@ -313,7 +363,7 @@ test('mergeReady checks the exclusions itself, before git merges anything', () =
 test('what a merge would touch is read once, and read the way the exclusions are matched', () => {
   const body = bodyOf(fleetSrc(), 'async function wouldTouch(')
   assert.match(body, /'--name-only', '-z', '--no-renames'/, 'a quoted name matches no exclusion, and a move touches the file it left')
-  assert.match(body, /HEAD\.\.\.\$\{branch\}/, 'the diff is what the merge would bring in')
+  assert.match(body, /HEAD\.\.\.\$\{commit\}/, 'the diff is what the merge would bring in')
   // --no-renames belongs to this read alone; the other --name-only calls answer different questions
   const readers = fleetSrc().match(/'--no-renames'/g) ?? []
   assert.equal(readers.length, 1, 'one reader, so a flag fixed at one gate cannot be missing at the other')
@@ -336,5 +386,5 @@ test('fleet_merge checks the exclusions before it attempts the merge', () => {
   const merge = body.indexOf("'merge', '--no-ff'")
   assert.ok(check > 0 && merge > 0 && check < merge, 'the exclusions are checked before git merge runs')
   assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter")
-  assert.match(body, /wouldTouch\(m\.cwd, w\.branch\)/, "the diff is what the merge would bring in: the worker's branch since it left the lead's")
+  assert.match(body, /wouldTouch\(m\.cwd, at\)/, "the diff is what the merge would bring in: the worker's branch since it left the lead's")
 })
