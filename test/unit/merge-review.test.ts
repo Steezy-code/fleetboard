@@ -208,7 +208,10 @@ test('a leading slash and a ** tail still exclude the folder they name', () => {
 // The other direction: an exclusion that matches *everything* is not a rule the user read either —
 // a charter carrying it would refuse every merge, over a line one character long.
 test('an exclusion that is nothing but a wildcard excludes nothing at all', () => {
-  for (const entry of ['*', '**', '/*', './*', '/**', '*/'] as const) {
+  // `/./*`, `//./*` and the backslash spelling each reached `covers` as `./*`, which it normed back
+  // to a bare `*`: every path excluded, every merge refused, and no way to edit the charter after a
+  // team has started.
+  for (const entry of ['*', '**', '/*', './*', '/**', '*/', '/./*', '//./*', '\\.\\*', '/.//*'] as const) {
     for (const file of ['src/a.ts', 'package.json', 'docs/deep/x.md']) assert.equal(excludedBy(file, [entry]), null, `${entry} vs ${file}`)
   }
   assert.equal(excludedBy('src/a.ts', ['*', 'src']), 'src', 'a real entry beside it still matches')
