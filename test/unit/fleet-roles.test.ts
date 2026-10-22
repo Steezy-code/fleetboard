@@ -192,6 +192,12 @@ test('a restarted Lead whose conversation is gone is given the charter, not the 
   assert.doesNotMatch(note, /\n/)
 })
 
+test('a restarted Lead whose title ran over several lines is still told on one', () => {
+  const note = leadRestartNote({ how: HOW, team: 'nobody started yet', task: 'Hotfix: the sync\n\nduplicates a row', charter: CHARTER, resume: false })
+  assert.doesNotMatch(note, /[\r\n]/)
+  assert.match(note, /Hotfix: the sync duplicates a row Team: nobody started yet\./)
+})
+
 test('a restarted Lead on a board with no charter reads exactly as it did', () => {
   const note = leadRestartNote({ how: HOW, team: 'Ada (worker): still working', task: 'get to green', charter: undefined, resume: false })
   assert.equal(note, `[Fleet] ${HOW} Your goal: get to green Team: Ada (worker): still working. ${TAIL}`)

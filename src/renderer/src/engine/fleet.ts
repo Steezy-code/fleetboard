@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { mapWorkspaces, type BoardNode, type ConsoleData } from '@shared/types'
 import type { FleetMember, FleetState } from '@shared/fleet'
-import { type Charter, charterBrief } from '@shared/charter'
+import { type Charter, charterMessage } from '@shared/charter'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { draftCharter, gateCharter } from '../fleet/charter'
@@ -45,6 +45,13 @@ export async function confirmTeamFolder(projectPath: string): Promise<boolean> {
   })
 }
 
+/** The card can stay up a while: is the project it was drawn for still the open one? If not, say nothing was sent. */
+export function stillInProject(projectId: string): boolean {
+  if (useApp.getState().project?.id === projectId) return true
+  useApp.getState().toast('The project changed while that charter was open, so nothing was sent', 'warn')
+  return false
+}
+
 /**
  * Give work to the team: message the current lead, or start one. Nothing is sent and nothing starts
  * until the user has seen the charter. Oracle writes one along with the goal it routes here; a goal
@@ -56,15 +63,11 @@ export async function sendGoal(goal: string, charter?: Charter) {
   if (!p) return
   const confirmed = await gateCharter(charter ?? (await draftCharter(goal)), activeLead())
   if (!confirmed) return
-  // the card can stay up a while
-  if (useApp.getState().project?.id !== p.id) {
-    app.toast('The project changed while that charter was open, so nothing was sent', 'warn')
-    return
-  }
+  if (!stillInProject(p.id)) return
   // read again, so a Lead that came or went meanwhile decides the route, not the one the card was drawn for
   const lead = activeLead()
   if (lead) {
-    await invoke('fleet:userMessage', lead.id, charterBrief(confirmed))
+    await invoke('fleet:userMessage', lead.id, charterMessage(confirmed, goal))
     app.toast(`Sent to ${lead.name}`, 'ok')
     return lead
   }

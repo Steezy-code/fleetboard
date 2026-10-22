@@ -2,7 +2,7 @@ import type { FleetMember } from '@shared/fleet'
 import { invoke } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { CONSOLE_H, CONSOLE_W, nextName } from '../engine/consoles'
-import { confirmTeamFolder } from '../engine/fleet'
+import { confirmTeamFolder, stillInProject } from '../engine/fleet'
 import { draftCharter, gateCharter } from '../fleet/charter'
 import { playbookById } from './catalog'
 
@@ -42,10 +42,11 @@ export async function runPlaybook(id: string, inputs: Record<string, string> = {
   const given = pb.inputs.map((i) => values[i.key]).filter((v): v is string => !!v && v !== 'yes')
   const first = given[0]
   const title = first ? `${pb.name}: ${first.length > 70 ? first.slice(0, 68) + '…' : first}` : pb.name
-  // The charter is about what the user asked for, in their words. The playbook's step list is the goal, and
-  // goes to the Lead after the charter because it is not the request.
-  const charter = await gateCharter(await draftCharter(given.length ? `${pb.name}: ${given.join('; ')}` : pb.name))
-  if (!charter) return null
+  // The charter is about what the user asked for, in their words; the step list is the goal, which is not the
+  // request, so it follows the charter to the Lead. The draft is told the procedure, so it is not left to assert a
+  // job the procedure contradicts (a review-only playbook).
+  const charter = await gateCharter(await draftCharter(given.length ? `${pb.name}: ${given.join('; ')}` : pb.name, goal))
+  if (!charter || !stillInProject(p.id)) return null
   if (!(await confirmTeamFolder(p.path))) return null
   app.toast(`${pb.name}: starting a Lead…`)
   const lead = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal, title, charter })

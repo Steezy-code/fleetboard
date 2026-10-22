@@ -162,6 +162,31 @@ test('draftCharter costs one model call and returns the model\'s charter, coerce
   assert.ok((ipc.callsTo('cli:run')[0]?.[0] as any).prompt.includes('"add a json flag"'), 'the request is in the prompt')
 })
 
+test('a draft can be told the procedure the work will follow, in the same single call', async () => {
+  withProject()
+  ipc.handle('cli:run', () => ({ code: 0, text: JSON.stringify({ understood: 'Review the diff against origin/main' }) }))
+  const c = await draftCharter('Database safety pass: origin/main', 'Playbook "DB safety". Review only; change no files.')
+  assert.equal(ipc.callsTo('cli:run').length, 1)
+  const prompt = (ipc.callsTo('cli:run')[0]?.[0] as any).prompt
+  assert.ok(prompt.includes('"Database safety pass: origin/main"'), 'the request is still the user\'s words')
+  assert.match(prompt, /procedure, already chosen by the user/)
+  assert.ok(prompt.includes(JSON.stringify('Playbook "DB safety". Review only; change no files.')), 'and the procedure is in the prompt')
+  assert.equal(c.request, 'Database safety pass: origin/main', 'the request does not become the procedure')
+})
+
+test('a draft with no procedure says nothing about one, and a failed one falls back to the user\'s words', async () => {
+  withProject()
+  ipc.handle('cli:run', () => ({ code: 0, text: JSON.stringify({ understood: 'x' }) }))
+  await draftCharter('fix the login bug')
+  assert.doesNotMatch((ipc.callsTo('cli:run')[0]?.[0] as any).prompt, /procedure/i)
+  ipc.handle('cli:run', () => {
+    throw new Error('spawn claude ENOENT')
+  })
+  const failed = await draftCharter('Database safety pass: origin/main', 'Playbook "DB safety". Review only.')
+  assert.equal(failed.understood, 'Database safety pass: origin/main', 'not the procedure')
+  assert.equal(failed.request, 'Database safety pass: origin/main')
+})
+
 test('a reply with no JSON, or a CLI that fails, costs confidence and never the goal', async () => {
   withProject()
   const fallback = coerceCharter(null, 'fix the login bug')
@@ -332,6 +357,17 @@ describe('the gate', () => {
     await p
   })
 
+  test('a Windows absolute citation is asked as it is, not hung on the end of the project path', async () => {
+    withProject()
+    ipc.handle('fs:exists', (p: string) => p === 'C:/proj/src/a.ts')
+    const p = gateCharter(coerceCharter({ understood: 'u', assumptions: [{ text: 'a', known: true, from: 'C:\\proj\\src\\a.ts' }] }, 'r'))
+    const up = await cardUp()
+    assert.deepEqual(ipc.callsTo('fs:exists').map((a) => a[0]), ['C:/proj/src/a.ts'])
+    assert.equal(up.assumptions[0]?.known, true)
+    useCharter.getState().dismiss()
+    await p
+  })
+
   test('with no project open nothing can be verified, and what claims to be known is a guess', async () => {
     const p = gateCharter(coerceCharter({ understood: 'u', assumptions: [{ text: 'a', known: true, from: 'package.json' }] }, 'r'))
     const up = await cardUp()
@@ -406,6 +442,30 @@ describe('the gate', () => {
     const [to, text] = ipc.callsTo('fleet:userMessage')[0] as [string, string]
     assert.equal(to, 'lead-1')
     assert.match(text, /Also cover the empty list case/, 'what was confirmed is what the Lead is told')
+    assert.equal(text, 'Also cover the empty list case.', 'and a goal that is the request adds nothing to it')
+  })
+
+  test("Oracle's rewrite of a goal reaches a live Lead after the charter, as it reaches a new one", async () => {
+    withProject()
+    withLead()
+    useHelm.setState({
+      card: {
+        id: 'h',
+        request: 'fix the split thing',
+        source: 'typed',
+        reply: 'ok',
+        ran: null,
+        options: [{ kind: 'team', label: 'Do it', detail: 'd', goal: 'Find the split subcommand in src/cli and write one file per page range.', charter: { understood: 'Make split write a file per page range', doneWhen: 'npm test' } }]
+      }
+    })
+    const run = runHelmOption(0)
+    assert.equal((await cardUp()).followUpTo, 'lead-1')
+    useCharter.getState().confirm()
+    await run
+    assert.equal(started().length, 0)
+    const [to, text] = ipc.callsTo('fleet:userMessage')[0] as [string, string]
+    assert.equal(to, 'lead-1')
+    assert.match(text, /^Make split write a file per page range\. Done when: npm test\. Find the split subcommand in src\/cli and write one file per page range\.$/)
   })
 
   test('a follow-up dismissed at the gate reaches nobody', async () => {
@@ -553,7 +613,9 @@ describe('the gate', () => {
     const card = await cardUp()
     await quiet()
     assert.equal(ipc.callsTo('cli:run').length, 1)
-    assert.match((ipc.callsTo('cli:run')[0]?.[0] as any).prompt, /"Hotfix: ledger sync creates a duplicate row"/, "the charter is drafted from what the user asked for, not from the playbook's step list")
+    const prompt = (ipc.callsTo('cli:run')[0]?.[0] as any).prompt
+    assert.match(prompt, /"Hotfix: ledger sync creates a duplicate row"/, 'the charter is drafted from what the user asked for')
+    assert.match(prompt, /Playbook \\"Hotfix\\"/, "with the playbook's step list as the procedure the work will follow")
     assert.equal(card.understood, 'Fix the duplicate ledger row')
     assert.equal(started().length, 0)
     useCharter.getState().confirm()
@@ -566,6 +628,34 @@ describe('the gate', () => {
     assert.equal(started()[0].charter.request, 'Hotfix: ledger sync creates a duplicate row', "the request is the user's words")
     assert.notEqual(started()[0].charter.request, started()[0].goal, "so the playbook's step list is not mistaken for it")
     assert.equal(started()[0].charter.understood, 'Fix the duplicate ledger row')
+  })
+
+  test('a playbook confirmed after the project changed starts nothing in the project the user left', async () => {
+    withProject()
+    drafts({ understood: 'x' })
+    const run = runPlaybook('hotfix', { bug: 'b' })
+    await cardUp()
+    useApp.setState({ project: { ...useApp.getState().project!, id: 'other' } })
+    useCharter.getState().confirm()
+    assert.equal(await run, null)
+    assert.equal(started().length, 0)
+  })
+
+  test('a playbook dismissed at the gate is not reported as opened, but one that opens a panel still is', async () => {
+    withProject()
+    ;(globalThis as any).SpeechSynthesisUtterance ??= class {}
+    const option = (id: string, inputs: Record<string, string>) =>
+      useHelm.setState({ card: { id: 'h', request: 'r', source: 'typed', reply: 'ok', ran: null, options: [{ kind: 'playbook', label: 'Go', detail: 'd', playbook: { id, inputs } }] } })
+    drafts({ understood: 'x' })
+    option('hotfix', { bug: 'b' })
+    const run = runHelmOption(0)
+    await cardUp()
+    useCharter.getState().dismiss()
+    await run
+    assert.ok(!useThread.getState().entries.some((e) => /Opened/.test(e.text)), 'nothing opened')
+    option('morning-sweep', {})
+    await runHelmOption(0)
+    assert.ok(useThread.getState().entries.some((e) => /Opened Morning sweep/.test(e.text)), 'a panel playbook opens its panel')
   })
 
   test('a playbook dismissed at the gate starts nothing', async () => {
