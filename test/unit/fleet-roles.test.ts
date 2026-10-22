@@ -8,9 +8,11 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { FleetMember } from '../../src/shared/fleet'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-roles-'))
-const { toolDenial, toolRoles } = await import('../../src/main/fleet')
+const { toolDenial, toolRoles, goalMessageFor, leadPrompt, briefFor } = await import('../../src/main/fleet')
+const { coerceCharter } = await import('../../src/shared/charter')
 
 /** Every tool a role is allowed to call, straight from the catalogue the server advertises. */
 const LEAD_ONLY = [
@@ -81,4 +83,64 @@ test('callTool enforces the role before it runs anything', () => {
   const firstCase = body.indexOf("case 'fleet_")
   assert.ok(guard > 0, 'callTool must consult toolDenial')
   assert.ok(firstCase > 0 && guard < firstCase, 'the role check must come before the first tool runs')
+})
+
+// ---- the Lead works from the charter the user confirmed, not from the request they typed
+
+const CHARTER = coerceCharter(
+  {
+    understood: 'Add a split subcommand',
+    assumptions: [{ text: 'the CLI lives in src/cli', known: true, from: 'src/cli/index.ts' }],
+    wontTouch: ['the billing module'],
+    doneWhen: 'npm test passes'
+  },
+  'add split to the cli',
+  1
+)
+
+const LEAD_MEMBER: FleetMember = { id: 'con-1', role: 'lead', name: 'Lead', agentId: 'claude', projectId: 'p', cwd: '/repo', branch: 'fleet/x', status: 'working', createdAt: 1 }
+const WORKER: FleetMember = { id: 'con-2', role: 'worker', name: 'Ada', agentId: 'claude', projectId: 'p', leadId: 'con-1', task: 'Write the parser', owns: ['src/cli'], doneWhen: 'npm test', cwd: '/repo/.wt', status: 'working', createdAt: 2 }
+
+test('the Lead is briefed from the charter when there is one', () => {
+  const text = goalMessageFor(CHARTER, 'add split to the cli')
+  assert.match(text, /Add a split subcommand/)
+  assert.match(text, /Done when: npm test passes/)
+  assert.match(text, /Do not touch: the billing module/)
+  assert.doesNotMatch(text, /add split to the cli/, 'the raw request is what the charter replaces')
+})
+
+test('without a charter the Lead still gets the raw goal', () => {
+  // existing boards, the recovery path and callers that skip the gate have no charter
+  assert.equal(goalMessageFor(undefined, 'get to green'), 'get to green')
+})
+
+test('the Lead is told the confirmed brief is the user\'s, and where to take doubt', () => {
+  const rule = leadPrompt(LEAD_MEMBER)
+    .split('\n')
+    .find((l) => /not yours to reinterpret/.test(l))
+  assert.ok(rule, 'the prompt carries a rule about the confirmed brief')
+  assert.match(rule, /Do not touch/)
+  assert.match(rule, /Done when/)
+  // the one route for a brief that looks wrong, so the Lead asks rather than decides
+  assert.match(rule, /fleet_ask_user/)
+})
+
+test('the Lead\'s rules stay numbered in order', () => {
+  const numbers = leadPrompt(LEAD_MEMBER)
+    .split('\n')
+    .map((l) => /^(\d+)\. /.exec(l)?.[1])
+    .filter(Boolean)
+    .map(Number)
+  assert.deepEqual(numbers, numbers.map((_, i) => i + 1))
+})
+
+test('a worker is told what the user said not to touch', () => {
+  const brief = briefFor(WORKER, LEAD_MEMBER, CHARTER.wontTouch)
+  assert.match(brief, /Do not touch: the billing module/)
+  assert.match(brief, /Write the parser/)
+})
+
+test('a worker brief without a charter reads as it did before', () => {
+  assert.doesNotMatch(briefFor(WORKER, LEAD_MEMBER), /Do not touch/)
+  assert.doesNotMatch(briefFor(WORKER, LEAD_MEMBER, []), /Do not touch/)
 })
