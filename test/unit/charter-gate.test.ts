@@ -8,7 +8,8 @@ import { type Charter, FULL_CARD_BELOW, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
 
 const { useApp } = await import('@/state/store')
-const { CHARTER_FIELDS, draftCharter, gateCharter, gateTarget, openGate, useCharter, verifyEvidence } = await import('@/fleet/charter')
+const { CHARTER_FIELDS, DRAFT_TIMEOUT_MS, draftCharter, gateCharter, gateTarget, openGate, useCharter, verifyEvidence } = await import('@/fleet/charter')
+const { useVoice } = await import('@/voice/thread')
 const { autoSafe, coerceResult, helmPrompt, runHelmOption, useHelm } = await import('@/voice/helm/helm')
 const { sendGoal, useFleet } = await import('@/engine/fleet')
 const { runPlaybook } = await import('@/playbooks/run')
@@ -95,18 +96,21 @@ test('the fragment asks for wontTouch in the forms the merge gate matches, and s
 })
 
 // The words alone would survive the sentence being turned round to endorse these forms. What makes the
-// rule protect anything is that it forbids them, and that the forbidden forms really match nothing.
-test('the fragment forbids the forms the merge gate cannot match, and each one really matches nothing', () => {
+// rule protect anything is that it forbids them — and, where the matcher cannot be taught what a form
+// means, that the form really matches nothing rather than seeming to protect something.
+test('the fragment forbids the forms the merge gate cannot match, and a description really matches nothing', () => {
   const rule = CHARTER_FIELDS.split('\n').find((l) => l.startsWith('- wontTouch'))!
   const forbidAt = rule.search(/never write/i)
   assert.ok(forbidAt >= 0, 'the rule says what never to write')
   assert.match(rule, /match nothing/i)
   assert.match(rule, /protect nothing/i)
-  // src/renderer/** is the form a model most often writes; the gate reads it as the prefix "src/renderer/*"
   for (const form of ['the renderer', 'src/renderer/**', 'src/**/*.tsx']) {
     assert.ok(rule.indexOf(`"${form}"`) > forbidAt, `${form} is listed after "never write", not offered as a form to use`)
-    assert.equal(excludedBy('src/renderer/App.tsx', [form]), null, `${form} really excludes nothing`)
   }
+  for (const form of ['the renderer', 'src/**/*.tsx']) assert.equal(excludedBy('src/renderer/App.tsx', [form]), null, `${form} really excludes nothing`)
+  // src/renderer/** is the form a model writes anyway, and it plainly means the folder: the matcher
+  // reads it as that prefix rather than letting the card promise a folder nothing holds anyone to
+  assert.equal(excludedBy('src/renderer/App.tsx', ['src/renderer/**']), 'src/renderer/**')
   assert.match(rule, /single trailing \*/i, 'the only wildcard allowed is stated')
 })
 
@@ -204,6 +208,42 @@ test('with no project open there is nothing to run in, and no call is made', asy
   const c = await draftCharter('fix the login bug')
   assert.equal(c.understood, 'fix the login bug')
   assert.equal(ipc.callsTo('cli:run').length, 0)
+})
+
+// This is the one model call between a click and anything happening: on the playbook door it runs
+// every time, and a CLI that never answers used to swallow the goal with no card and no way out.
+test('a draft that never answers is given up on, the run is cancelled, and the goal still gets a card', async (t) => {
+  withProject()
+  ipc.handle('cli:run', () => new Promise(() => {}))
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const p = draftCharter('fix the login bug')
+  t.mock.timers.tick(DRAFT_TIMEOUT_MS)
+  const c = await p
+  assert.equal(c.understood, 'fix the login bug', 'the goal goes through on the request alone')
+  assert.equal(ipc.callsTo('cli:cancel').length, 1, 'and the run that never answered is not left burning tokens')
+})
+
+test('a draft on screen is a draft that can be stopped, and stopping it costs the charter, never the goal', async () => {
+  withProject()
+  let settle: (r: { code: number; text: string }) => void = () => {}
+  ipc.handle('cli:run', () => new Promise<{ code: number; text: string }>((r) => (settle = r)))
+  const p = draftCharter('fix the login bug')
+  assert.equal(useVoice.getState().phase, 'thinking', 'the wait is on screen while it drafts')
+  assert.ok(useVoice.getState().cancelThinking, 'and the stop button means something')
+  useVoice.getState().cancelThinking!()
+  assert.equal(ipc.callsTo('cli:cancel').length, 1)
+  settle({ code: 143, text: '' })
+  assert.equal((await p).understood, 'fix the login bug')
+  assert.equal(useVoice.getState().phase, 'idle', 'and the orb stops')
+  assert.equal(useVoice.getState().cancelThinking, null)
+})
+
+test('a draft that answers leaves nothing spinning either', async () => {
+  withProject()
+  ipc.handle('cli:run', () => ({ code: 0, text: JSON.stringify({ understood: 'Fix the login bug' }) }))
+  assert.equal((await draftCharter('fix the login bug')).understood, 'Fix the login bug')
+  assert.equal(useVoice.getState().phase, 'idle')
+  assert.equal(useVoice.getState().cancelThinking, null)
 })
 
 // ---------------------------------------------------------------- the gate
@@ -386,6 +426,25 @@ describe('the gate', () => {
     assert.equal((await cardUp()).followUpTo, undefined)
     useCharter.getState().dismiss()
     await q
+  })
+
+  // The team's own charter is what both merge gates read, and a follow-up's exclusions are
+  // deliberately not merged into it — so a "Won't touch" row on a follow-up's card would be a rule
+  // the user agreed to and nothing enforces. Amend-or-replace is the open question; this is not it.
+  test("a follow-up's exclusions do not reach the card, because nothing would enforce them", async () => {
+    const p = gateCharter(coerceCharter({ understood: 'u', wontTouch: ['src/renderer'], doneWhen: 'npm test' }, 'r'), lead as any)
+    const card = await cardUp()
+    assert.deepEqual(card.wontTouch, [])
+    assert.equal(card.followUpTo, 'lead-1')
+    useCharter.getState().confirm()
+    assert.deepEqual((await p)?.wontTouch, [], 'and none reaches the Lead as if it were a rule')
+  })
+
+  test('a charter starting its own team keeps the exclusions it was drafted with', async () => {
+    const p = gateCharter(coerceCharter({ understood: 'u', wontTouch: ['src/renderer'] }, 'r'))
+    assert.deepEqual((await cardUp()).wontTouch, ['src/renderer'])
+    useCharter.getState().dismiss()
+    await p
   })
 
   // ------------------------------------------------------------ door 1: sendGoal
@@ -628,6 +687,29 @@ describe('the gate', () => {
     assert.equal(started()[0].charter.request, 'Hotfix: ledger sync creates a duplicate row', "the request is the user's words")
     assert.notEqual(started()[0].charter.request, started()[0].goal, "so the playbook's step list is not mistaken for it")
     assert.equal(started()[0].charter.understood, 'Fix the duplicate ledger row')
+  })
+
+  // A playbook never sends a follow-up: it always starts its own Lead, and startLead clears the
+  // running team's tasks and Ready card. The card is the one place the user can be told that first.
+  test('a playbook started while a Lead is running says whose team its card replaces', async () => {
+    withProject()
+    withLead()
+    drafts({ understood: 'Fix the duplicate ledger row' })
+    const run = runPlaybook('hotfix', { bug: 'b' })
+    const card = await cardUp()
+    assert.equal(card.followUpTo, undefined, 'it is not a follow-up, whatever a running Lead would make of it')
+    assert.equal(card.replaces, 'Rowan')
+    useCharter.getState().dismiss()
+    assert.equal(await run, null)
+  })
+
+  test('with no team running a playbook card has nothing to replace', async () => {
+    withProject()
+    drafts({ understood: 'x' })
+    const run = runPlaybook('hotfix', { bug: 'b' })
+    assert.equal((await cardUp()).replaces, undefined)
+    useCharter.getState().dismiss()
+    await run
   })
 
   test('a playbook confirmed after the project changed starts nothing in the project the user left', async () => {

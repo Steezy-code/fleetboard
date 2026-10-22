@@ -4,7 +4,7 @@ import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
 import { CharterCard } from './CharterCard'
-import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
+import { ago, charterHead, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
 
 // The Inbox, docked on top of the command bar: the front item in full, the rest a click (or Ctrl+I)
 // away. Number keys, Tab and Enter in the bar answer it (CommandBar.tsx); voice too (planner.ts).
@@ -22,7 +22,7 @@ function iconOf(i: InboxItem) {
 const toneOf = (i: InboxItem) =>
   readyBlocked(i) || i.kind === 'approval' || i.kind === 'stopped' ? 'warn' : i.kind === 'ask' || i.kind === 'charter' ? 'accent' : i.kind === 'ready' ? 'ok' : i.tone === 'danger' ? 'danger' : 'info'
 function headOf(i: InboxItem): string {
-  if (i.kind === 'charter') return i.charter.followUpTo ? 'gets this next' : 'starts with this'
+  if (i.kind === 'charter') return charterHead(i.charter)
   if (i.kind === 'approval') return i.approval ? 'asks' : 'is waiting for you'
   if (i.kind === 'ask') return 'asks'
   if (i.kind === 'ready') return readyBlocked(i) ? 'finished, but touched what you ruled out' : 'finished the goal'
@@ -144,9 +144,11 @@ function readyMeta(i: Extract<InboxItem, { kind: 'ready' }>) {
   return [mins ? `${mins < 60 ? `${mins} min` : `${Math.round(mins / 6) / 10} h`}` : '', i.workers ? `${i.workers} worker${i.workers === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
 }
 
-// What the team was told to do, next to what it actually did. It only ever annotates: a legitimate
-// out-of-scope change is common enough that a gate here would teach you to click through it, and
-// then it would be guarding nothing. Merge stays enabled; the flags are for reading first.
+// What the team was told to do, next to what it actually did. Reaching outside the granted scope
+// only ever annotates: a legitimate out-of-scope change is common enough that a gate here would
+// teach you to click through it, and then it would be guarding nothing — so Merge stays, and the
+// flags are for reading first. A file the user ruled out is the exception: that review is blocked,
+// the card drops Merge (inboxModel) and mergeReady refuses it whoever pressed it.
 /** 1.2M, 48k, 900 — a size, not an exact count; the point is which member was expensive. */
 const tokens = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
 

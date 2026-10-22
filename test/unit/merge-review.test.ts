@@ -194,6 +194,38 @@ test('the exclusion that matched comes back as it was written, whichever entry i
   assert.equal(excludedBy('src/renderer/a.ts', ['docs', './src/renderer/', 'src']), './src/renderer/')
 })
 
+// An exclusion that matches nothing is worse than no exclusion: the card says the folder is out of
+// bounds, the user agrees to that, and nothing holds anyone to it. These two forms are what a model
+// writes when it means the folder, so they are read as the folder rather than failing open.
+test('a leading slash and a ** tail still exclude the folder they name', () => {
+  for (const entry of ['/src/renderer', '//src/renderer', '/src/renderer/', 'src/renderer/**', 'src/renderer/**/*', '/src/renderer/**']) {
+    assert.equal(excludedBy('src/renderer/a.ts', [entry]), entry, `${entry} must exclude a file under it`)
+  }
+  assert.equal(excludedBy('src/renderertop.ts', ['/src/renderer']), null, 'and still not a string prefix')
+  assert.equal(excludedBy('docs/a.md', ['src/renderer/**']), null)
+})
+
+// The other direction: an exclusion that matches *everything* is not a rule the user read either —
+// a charter carrying it would refuse every merge, over a line one character long.
+test('an exclusion that is nothing but a wildcard excludes nothing at all', () => {
+  for (const entry of ['*', '**', '/*', './*', '/**', '*/'] as const) {
+    for (const file of ['src/a.ts', 'package.json', 'docs/deep/x.md']) assert.equal(excludedBy(file, [entry]), null, `${entry} vs ${file}`)
+  }
+  assert.equal(excludedBy('src/a.ts', ['*', 'src']), 'src', 'a real entry beside it still matches')
+})
+
+// None of the above is `owns`: a grant that matches nothing only over-flags, which is the safe way
+// round, and "everything" there plausibly means everything. Changing it would change which files the
+// review calls out of scope.
+test('ownedBy reads the same strings exactly as it did', () => {
+  assert.equal(ownedBy('src/a.ts', ['*']), true)
+  assert.equal(ownedBy('package.json', ['*']), true)
+  assert.equal(ownedBy('src/renderer/a.ts', ['/src/renderer']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**/*']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['**']), false)
+})
+
 test('an excluded file is flagged with its exclusion and blocks the review', () => {
   // the worker owns src, so the file is inside its scope and is not sensitive: the exclusion alone has to raise it
   const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['src'], doneWhen: 'ok', report: 'ok' })], { files: ['src/main/a.ts', 'src/renderer/src/App.tsx'] }, ['src/renderer/'])

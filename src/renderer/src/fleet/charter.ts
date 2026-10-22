@@ -8,6 +8,7 @@ import { type Charter, coerceCharter, scoreConfidence } from '@shared/charter'
 import type { FleetMember } from '@shared/fleet'
 import { norm } from '@shared/mergeReview'
 import { useApp } from '../state/store'
+import { setVoice, useVoice } from '../voice/thread'
 import { extractJson, invoke, runCli } from '../lib/api'
 
 /**
@@ -34,19 +35,43 @@ User request: ${JSON.stringify(request)}${procedure ? `
 The work will follow this procedure, already chosen by the user; the charter must not describe a job it contradicts: ${JSON.stringify(procedure)}` : ''}`
 
 /**
+ * The longest a draft may hold up the goal. This call is all that stands between a click and
+ * anything happening, and a CLI that never answers has no exit of its own, so past this the goal
+ * goes on without a drafted charter.
+ */
+export const DRAFT_TIMEOUT_MS = 40_000
+
+/**
  * A charter from its own model call, for a door that never consults Oracle (a playbook, a
- * brainstorm idea). A bad or missing reply costs confidence, never the goal. `procedure` is how the work
+ * brainstorm idea). A bad, missing or slow reply costs confidence, never the goal. `procedure` is how the work
  * will be done where the user has already chosen that (a playbook's step list): it informs the draft but
  * is not the request, which stays the user's words and is what a failed draft falls back to.
  */
 export async function draftCharter(request: string, procedure?: string): Promise<Charter> {
   const app = useApp.getState()
   if (!app.project) return coerceCharter(null, request)
+  const run = runCli({ prompt: draftPrompt(request, procedure), cwd: app.project.path, agentId: app.settings.plannerAgent || undefined })
+  // the same thinking orb and stop button a planner call gets: this one used to run with nothing on screen
+  setVoice({ phase: 'thinking', cancelThinking: () => run.cancel() })
+  let timer = 0
   try {
-    const res = await runCli({ prompt: draftPrompt(request, procedure), cwd: app.project.path, agentId: app.settings.plannerAgent || undefined }).promise
-    return coerceCharter(extractJson(res.text), request)
-  } catch {
+    const res = await Promise.race([run.promise, new Promise<null>((done) => void (timer = window.setTimeout(() => done(null), DRAFT_TIMEOUT_MS)))])
+    if (!res) {
+      run.cancel()
+      console.warn(`[charter] no draft after ${Math.round(DRAFT_TIMEOUT_MS / 1000)}s; carrying on from the request alone`)
+      return coerceCharter(null, request)
+    }
+    const json = extractJson(res.text)
+    // a prose reply, a missing CLI and a failed login all come out as the same card, so each says which it was
+    if (!json) console.warn(`[charter] no JSON in the draft (exit ${res.code}); carrying on from the request alone:`, res.text.trim().slice(0, 200))
+    return coerceCharter(json, request)
+  } catch (e) {
+    console.warn('[charter] the draft could not run; carrying on from the request alone:', e)
     return coerceCharter(null, request)
+  } finally {
+    window.clearTimeout(timer)
+    // not a blanket reset: a listen that started meanwhile owns the phase now
+    setVoice(useVoice.getState().phase === 'thinking' ? { phase: 'idle', cancelThinking: null } : { cancelThinking: null })
   }
 }
 
@@ -83,7 +108,8 @@ const waiting: { charter: Charter; settle: (c: Charter | null) => void }[] = []
  */
 const recoerced = (c: Charter, patch: CharterEdit = {}): Charter => ({
   ...coerceCharter({ ...c, ...patch }, c.request, c.at),
-  ...(c.followUpTo ? { followUpTo: c.followUpTo } : {})
+  ...(c.followUpTo ? { followUpTo: c.followUpTo } : {}),
+  ...(c.replaces ? { replaces: c.replaces } : {})
 })
 
 const showFront = () => useCharter.setState({ pending: waiting[0]?.charter ?? null })
@@ -150,9 +176,14 @@ async function citedThatExist(c: Charter, root: string | undefined): Promise<Set
 /**
  * The gate every door into the team crosses: what the charter cites is checked against the repo, it
  * is marked a follow-up when it is going to a team member, and nothing happens until the user has seen it.
+ *
+ * A follow-up carries no exclusions. The team's own charter is the one the merge gates read, and a
+ * follow-up's are deliberately not merged into it, so a "Won't touch" row on that card would promise
+ * a rule nothing enforces. Whether a follow-up should amend the team's exclusions or replace them is
+ * the open question; until it is answered, the card does not claim either.
  */
 export async function gateCharter(c: Charter, to?: FleetMember): Promise<Charter | null> {
   const there = await citedThatExist(c, useApp.getState().project?.path)
   const checked = verifyEvidence(c, (p) => there.has(norm(p)))
-  return openGate({ ...checked, followUpTo: undefined, ...gateTarget(to) })
+  return openGate({ ...checked, followUpTo: undefined, ...gateTarget(to), ...(to ? { wontTouch: [] } : {}) })
 }

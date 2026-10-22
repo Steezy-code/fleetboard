@@ -2,7 +2,7 @@ import type { FleetMember } from '@shared/fleet'
 import { invoke } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { CONSOLE_H, CONSOLE_W, nextName } from '../engine/consoles'
-import { confirmTeamFolder, stillInProject } from '../engine/fleet'
+import { activeLead, confirmTeamFolder, stillInProject } from '../engine/fleet'
 import { draftCharter, gateCharter } from '../fleet/charter'
 import { playbookById } from './catalog'
 
@@ -45,7 +45,11 @@ export async function runPlaybook(id: string, inputs: Record<string, string> = {
   // The charter is about what the user asked for, in their words; the step list is the goal, which is not the
   // request, so it follows the charter to the Lead. The draft is told the procedure, so it is not left to assert a
   // job the procedure contradicts (a review-only playbook).
-  const charter = await gateCharter(await draftCharter(given.length ? `${pb.name}: ${given.join('; ')}` : pb.name, goal))
+  const drafted = await draftCharter(given.length ? `${pb.name}: ${given.join('; ')}` : pb.name, goal)
+  // a playbook always starts its own Lead, and startLead clears the running team's tasks and Ready
+  // card, so the card says whose team this takes the place of rather than offering a bare "New team"
+  const running = activeLead()
+  const charter = await gateCharter({ ...drafted, ...(running ? { replaces: running.name } : {}) })
   if (!charter || !stillInProject(p.id)) return null
   if (!(await confirmTeamFolder(p.path))) return null
   app.toast(`${pb.name}: starting a Lead…`)

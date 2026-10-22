@@ -9,7 +9,7 @@ import { coerceCharter, type Charter } from '@shared/charter'
 const { useApp } = await import('@/state/store')
 const { clearGate, openGate, useCharter } = await import('@/fleet/charter')
 const { useFleet } = await import('@/engine/fleet')
-const { fullCard, refreshInbox, runAction, useInbox } = await import('@/fleet/inboxModel')
+const { charterHead, fullCard, refreshInbox, runAction, useInbox } = await import('@/fleet/inboxModel')
 
 const project = { schema: 1, id: 'p', name: 'p', path: '/tmp/p', activeWorkspaceId: 'w', lastOpened: 0, extras: {}, workspaces: [{ id: 'w', name: 'W', nodes: [], groups: [], wires: [], ink: [], camera: { x: 0, y: 0, zoom: 1 }, extras: {} }] }
 
@@ -64,6 +64,24 @@ describe('the charter item', () => {
     fleet({ members: { [lead.id]: lead } })
     void openGate({ ...coerceCharter({ understood: 'u' }, 'also the empty case'), followUpTo: lead.id })
     assert.equal((await charterItem()).who, 'Rowan')
+  })
+
+  // A playbook always starts its own Lead, and startLead clears the running team's tasks and Ready
+  // card. "New team starts with this" made that look like a fresh start beside the running one.
+  test('a charter that will take a running team\'s place says so, and is still one question', async () => {
+    fleet({ members: { [lead.id]: lead } })
+    void openGate({ ...coerceCharter({ understood: 'u' }, 'r'), replaces: 'Rowan' })
+    const item = await charterItem()
+    assert.equal(item.who, 'New team')
+    assert.equal(charterHead(item.charter), 'starts with this, replacing Rowan’s team')
+    assert.deepEqual(labels(item), ['Confirm', 'Dismiss'], 'the warning is copy, not a second thing to answer')
+    useCharter.getState().edit({ understood: 'v' })
+    assert.equal(useCharter.getState().pending?.replaces, 'Rowan', 'and an edit does not lose it')
+  })
+
+  test('with nothing to replace, and for a follow-up, the card reads as it did', () => {
+    assert.equal(charterHead(coerceCharter({ understood: 'u' }, 'r')), 'starts with this')
+    assert.equal(charterHead({ ...coerceCharter({ understood: 'u' }, 'r'), followUpTo: lead.id }), 'gets this next')
   })
 
   test('a long request is clipped on the card', async () => {
@@ -154,10 +172,19 @@ describe('the two renderings', () => {
     assert.equal(fullCard(c), true)
   })
 
-  test('a confident charter is a one-line glance', () => {
+  test('a confident charter that rules nothing out is a one-line glance', () => {
+    const c = at({ understood: 'u', assumptions: [{ text: 'a', known: true, from: 'package.json' }], doneWhen: 'npm test' })
+    assert.equal(c.confidence, 90)
+    assert.equal(fullCard(c), false)
+  })
+
+  // The one-line form shows `understood` and `doneWhen` and has nowhere to put an exclusion. A
+  // charter that scores 100 on all-known assumptions would have gone through as one line with
+  // "src/renderer" on it, unseen — and then refused the user's own merge for touching it.
+  test('an exclusion opens the full card however confident the charter is: it is what a merge is refused for', () => {
     const c = at({ understood: 'u', assumptions: [{ text: 'a', known: true, from: 'package.json' }], wontTouch: ['src/renderer'], doneWhen: 'npm test' })
     assert.equal(c.confidence, 100)
-    assert.equal(fullCard(c), false)
+    assert.equal(fullCard(c), true)
   })
 
   test('a one-line message has nothing to put in a full card, whatever it scores', () => {
