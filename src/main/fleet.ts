@@ -7,6 +7,8 @@ import { execFile } from 'node:child_process'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
 import { emptyFleet } from '@shared/fleet'
+import type { Charter } from '@shared/charter'
+import { charterBrief } from '@shared/charter'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -257,7 +259,7 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
 
 // ---------------------------------------------------------------- prompts
 
-function leadPrompt(m: FleetMember) {
+export function leadPrompt(m: FleetMember) {
   return [
     `You are ${m.name}, the Lead of a Fleetboard team. The user gives you goals; you get them done through workers.`,
     'You have fleet tools (mcp__fleet__*). Rules:',
@@ -268,7 +270,8 @@ function leadPrompt(m: FleetMember) {
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
     '6. Once everything is merged, start one reviewer with fleet_spawn_reviewer to check the combined work against the goal and run the checks. Send any findings to the worker that owns the code (fleet_send), wait, merge again.',
     '7. Ask the user only for real decisions, with fleet_ask_user and 2-4 short options, each with a one-line trade-off in notes and the one you recommend. Make reasonable choices yourself otherwise.',
-    '8. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
+    '8. If your goal comes with assumptions, "Do not touch" or "Done when", the user has already confirmed them: they are not yours to reinterpret or widen. If the job looks wrong, ask with fleet_ask_user rather than deciding.',
+    '9. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
     'Keep your own messages short: one-line progress updates.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
   ].join('\n')
@@ -289,9 +292,11 @@ function workerPrompt(m: FleetMember, lead?: FleetMember) {
   ].join('\n')
 }
 
-function briefFor(m: FleetMember, lead?: FleetMember) {
+/** `wontTouch` is what the user ruled out when they confirmed the charter; a worker cannot read the lead's brief to learn it. */
+export function briefFor(m: FleetMember, lead?: FleetMember, wontTouch: string[] = []) {
   const parts = [`Task from ${lead?.name ?? 'the lead'}: ${m.task}`]
   if (m.owns?.length) parts.push(`You own: ${m.owns.join(', ')}.`)
+  if (wontTouch.length) parts.push(`Do not touch: ${wontTouch.join(', ')}.`)
   if (m.doneWhen) parts.push(`Done when: ${m.doneWhen}.`)
   parts.push(m.role === 'reviewer' ? 'When finished, call fleet_report with your verdict.' : 'When done, call fleet_report.')
   // CLIs without a system-prompt flag get the role rules inline
@@ -477,7 +482,10 @@ function pickName(s: FleetState, wanted?: string) {
   return `Worker ${used.size + 1}`
 }
 
-export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string }): Promise<FleetMember> {
+/** What the Lead is first told: the agreed charter when there is one, otherwise the request as typed. */
+export const goalMessageFor = (charter: Charter | undefined, goal: string) => (charter ? charterBrief(charter) : goal)
+
+export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
   const s = state(opts.projectId, opts.projectPath)
   const id = uid('con')
   const agentId = opts.agentId ?? 'claude'
@@ -510,9 +518,10 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   memberProject.set(id, s.projectId)
   s.ready = null
   s.tasks = []
+  s.charter = opts.charter
   changed(s)
   await startConsole(s, m)
-  post(s, { from: 'user', to: id, kind: 'goal', text: opts.goal })
+  post(s, { from: 'user', to: id, kind: 'goal', text: goalMessageFor(opts.charter, opts.goal) })
   return m
 }
 
@@ -731,7 +740,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
       await startConsole(s, w, { acceptEdits: !reviewer })
-      post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m) })
+      post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m, s.charter?.wontTouch) })
       return text(
         `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
           (ref ? ` On the plan: "${ref.title}".` : '') +
@@ -1019,7 +1028,7 @@ function memberStarted(req: PtySpawnRequest) {
     const goal = req.resume ? '' : ` Your goal: ${m.task}`
     post(s, { from: 'user', to: m.id, kind: 'system', text: `[Fleet] ${how}${goal} Team: ${team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.` })
   } else {
-    post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead)}` })
+    post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead, s.charter?.wontTouch)}` })
   }
 }
 
