@@ -485,6 +485,12 @@ function pickName(s: FleetState, wanted?: string) {
 /** What the Lead is first told: the agreed charter when there is one, otherwise the request as typed. */
 export const goalMessageFor = (charter: Charter | undefined, goal: string) => (charter ? charterBrief(charter) : goal)
 
+/** What a Lead is told when its console comes back. A restored conversation still has its goal, so it is not repeated. */
+export function leadRestartNote(o: { how: string; team: string; task: string; charter: Charter | undefined; resume: boolean }) {
+  const goal = o.resume ? '' : ` Your goal: ${goalMessageFor(o.charter, o.task)}`
+  return `[Fleet] ${o.how}${goal} Team: ${o.team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.`
+}
+
 export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
   const s = state(opts.projectId, opts.projectPath)
   const id = uid('con')
@@ -1025,8 +1031,7 @@ function memberStarted(req: PtySpawnRequest) {
   if (m.role === 'lead') {
     const crew = Object.values(s.members).filter((x) => x.leadId === m.id && x.status !== 'closed')
     const team = crew.length ? crew.map((x) => `${x.name} (${x.role}): ${x.status === 'working' ? 'still working' : x.status}`).join('; ') : 'nobody started yet'
-    const goal = req.resume ? '' : ` Your goal: ${m.task}`
-    post(s, { from: 'user', to: m.id, kind: 'system', text: `[Fleet] ${how}${goal} Team: ${team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.` })
+    post(s, { from: 'user', to: m.id, kind: 'system', text: leadRestartNote({ how, team, task: m.task ?? '', charter: s.charter, resume: !!req.resume }) })
   } else {
     post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead, s.charter?.wontTouch)}` })
   }

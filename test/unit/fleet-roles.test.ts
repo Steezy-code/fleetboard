@@ -11,7 +11,7 @@ import path from 'node:path'
 import type { FleetMember } from '../../src/shared/fleet'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-roles-'))
-const { toolDenial, toolRoles, goalMessageFor, leadPrompt, briefFor } = await import('../../src/main/fleet')
+const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor } = await import('../../src/main/fleet')
 const { coerceCharter } = await import('../../src/shared/charter')
 
 /** Every tool a role is allowed to call, straight from the catalogue the server advertises. */
@@ -143,4 +143,30 @@ test('a worker is told what the user said not to touch', () => {
 test('a worker brief without a charter reads as it did before', () => {
   assert.doesNotMatch(briefFor(WORKER, LEAD_MEMBER), /Do not touch/)
   assert.doesNotMatch(briefFor(WORKER, LEAD_MEMBER, []), /Do not touch/)
+})
+
+const HOW = 'Fleetboard was restarted. Your previous conversation was not restored.'
+const TAIL = 'Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.'
+
+test('a restarted Lead whose conversation is gone is given the charter, not the request', () => {
+  const note = leadRestartNote({ how: HOW, team: 'nobody started yet', task: 'add split to the cli', charter: CHARTER, resume: false })
+  assert.match(note, /Your goal: Add a split subcommand/)
+  assert.match(note, /Do not touch: the billing module/)
+  assert.doesNotMatch(note, /add split to the cli/)
+  // the brief is a paragraph now, so the sentence after it has to start cleanly and the note stay one line
+  assert.match(note, /Done when: npm test passes\. Team: nobody started yet\./)
+  assert.doesNotMatch(note, /\n/)
+})
+
+test('a restarted Lead on a board with no charter reads exactly as it did', () => {
+  const note = leadRestartNote({ how: HOW, team: 'Ada (worker): still working', task: 'get to green', charter: undefined, resume: false })
+  assert.equal(note, `[Fleet] ${HOW} Your goal: get to green Team: Ada (worker): still working. ${TAIL}`)
+})
+
+test('a Lead whose conversation was restored is not told its goal again', () => {
+  for (const charter of [CHARTER, undefined]) {
+    const note = leadRestartNote({ how: HOW, team: 'nobody started yet', task: 'get to green', charter, resume: true })
+    assert.doesNotMatch(note, /Your goal/)
+    assert.equal(note, `[Fleet] ${HOW} Team: nobody started yet. ${TAIL}`)
+  }
 })
