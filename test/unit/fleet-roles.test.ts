@@ -11,7 +11,7 @@ import path from 'node:path'
 import type { FleetMember } from '../../src/shared/fleet'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-roles-'))
-const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor } = await import('../../src/main/fleet')
+const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor, excludedRefusal } = await import('../../src/main/fleet')
 const { coerceCharter } = await import('../../src/shared/charter')
 
 /** Every tool a role is allowed to call, straight from the catalogue the server advertises. */
@@ -201,4 +201,48 @@ test('every worker brief is given the exclusions', () => {
   const calls = fleetSrc().match(/(?<!function )briefFor\([^)]*\)/g) ?? []
   assert.equal(calls.length, 2, 'fleet_spawn_worker and the restart re-brief')
   for (const c of calls) assert.match(c, /, s\.charter\?\.wontTouch\)$/, c)
+})
+
+// ---- a worker that touched what the user ruled out is not merged
+
+test("a merge is refused, naming the file and the exclusion, when the worker touched a won't-touch path", () => {
+  const why = excludedRefusal('Ada', ['src/cli/split.ts', 'src/renderer/src/App.tsx'], ['src/renderer/'])
+  assert.ok(why)
+  assert.match(why, /src\/renderer\/src\/App\.tsx/, 'the file')
+  assert.match(why, /"src\/renderer\/"/, 'the exclusion it hit, as the user confirmed it')
+  assert.doesNotMatch(why, /split\.ts/, 'a file that broke no exclusion is not blamed')
+  assert.match(why, /Ada/)
+  assert.match(why, /revert/)
+  assert.match(why, /fleet_send/, 'the Lead is told how to get it reverted')
+})
+
+test('a merge is allowed when nothing touched is ruled out, and when nothing is', () => {
+  assert.equal(excludedRefusal('Ada', ['src/cli/split.ts'], ['src/renderer/']), null)
+  assert.equal(excludedRefusal('Ada', ['src/mainframe/x.ts'], ['src/main/']), null)
+  assert.equal(excludedRefusal('Ada', ['src/renderer/a.ts'], []), null)
+  assert.equal(excludedRefusal('Ada', ['src/renderer/a.ts'], undefined), null, 'a board with no charter merges as it always did')
+  assert.equal(excludedRefusal('Ada', [], ['src/renderer/']), null)
+})
+
+test('a refusal names every excluded file up to a few, then counts the rest', () => {
+  const touched = Array.from({ length: 9 }, (_, i) => `src/renderer/f${i}.ts`)
+  const why = excludedRefusal('Ada', touched, ['src/renderer'])!
+  assert.match(why, /f0\.ts/)
+  assert.match(why, /f4\.ts/)
+  assert.doesNotMatch(why, /f5\.ts/, 'the message stays short')
+  assert.match(why, /and 4 more/)
+})
+
+test('fleet_merge checks the exclusions before it attempts the merge', () => {
+  // the check is only worth having if it runs first: a merge that has already landed cannot be unmerged
+  // by a refusal, and `git merge --abort` only helps with a conflict
+  const src = fleetSrc()
+  const start = src.indexOf("case 'fleet_merge':")
+  const body = src.slice(start, src.indexOf("case 'fleet_dismiss':", start))
+  assert.ok(start > 0 && body.length > 0, 'fleet_merge is in callTool')
+  const check = body.indexOf('excludedRefusal(')
+  const merge = body.indexOf("'merge', '--no-ff'")
+  assert.ok(check > 0 && merge > 0 && check < merge, 'the exclusions are checked before git merge runs')
+  assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter")
+  assert.match(body, /HEAD\.\.\.\$\{w\.branch\}/, "the diff is what the merge would bring in: the worker's branch since it left the lead's")
 })
