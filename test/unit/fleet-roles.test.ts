@@ -12,7 +12,7 @@ import type { FleetMember } from '../../src/shared/fleet'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-roles-'))
 const { toolDenial, toolRoles, goalMessageFor, leadRestartNote, leadPrompt, briefFor, excludedRefusal } = await import('../../src/main/fleet')
-const { coerceCharter } = await import('../../src/shared/charter')
+const { charterBrief, coerceCharter } = await import('../../src/shared/charter')
 
 /** Every tool a role is allowed to call, straight from the catalogue the server advertises. */
 const LEAD_ONLY = [
@@ -112,6 +112,38 @@ test('the Lead is briefed from the charter when there is one', () => {
 test('without a charter the Lead still gets the raw goal', () => {
   // existing boards, the recovery path and callers that skip the gate have no charter
   assert.equal(goalMessageFor(undefined, 'get to green'), 'get to green')
+})
+
+test('without a charter the goal is posted byte for byte, whatever shape it has', () => {
+  const raw = '  Playbook "Hotfix". Bug: x.\n1) reproduce it\n2) fix it   '
+  assert.equal(goalMessageFor(undefined, raw), raw)
+})
+
+// The charter says what the job is and how it is known to be done. A goal that is more than the request
+// the user typed (a playbook's step list, Oracle's rewrite) says how to go about it, which the charter does not.
+test('a typed goal is the request itself, so the Lead gets the charter alone', () => {
+  assert.equal(goalMessageFor(CHARTER, 'add split to the cli'), charterBrief(CHARTER))
+  assert.equal(goalMessageFor(CHARTER, '  add split to the cli \n'), charterBrief(CHARTER), 'padding is not a different goal')
+})
+
+test("a playbook's step list follows the charter to the Lead", () => {
+  const steps = 'Playbook "Hotfix". Bug: ledger sync duplicates a row. 1) Reproduce it with a failing test. 2) Fix it. Never weaken a test to make it pass.'
+  const charter = coerceCharter({ understood: 'Fix the duplicate ledger row', doneWhen: 'npm test' }, 'Hotfix: ledger sync duplicates a row', 1)
+  const text = goalMessageFor(charter, steps)
+  assert.ok(text.startsWith(charterBrief(charter)), 'the agreed job comes first')
+  assert.ok(text.endsWith(steps), 'and the procedure after it, whole')
+  assert.match(text, /Done when: npm test\. Playbook "Hotfix"/, 'a sentence ends before the procedure starts')
+})
+
+test("Oracle's rewrite of the goal follows the charter too", () => {
+  const charter = coerceCharter({ understood: 'Make split work on the CLI' }, 'fix the split thing', 1)
+  const text = goalMessageFor(charter, 'Find the split subcommand in src/cli and make it write one file per page range.')
+  assert.ok(text.startsWith(charterBrief(charter)))
+  assert.match(text, /one file per page range\.$/)
+})
+
+test('a goal with nothing in it adds nothing after the charter', () => {
+  assert.equal(goalMessageFor(CHARTER, '   '), charterBrief(CHARTER))
 })
 
 test('the Lead is told the confirmed brief is the user\'s, and where to take doubt', () => {

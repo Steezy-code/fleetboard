@@ -483,8 +483,17 @@ function pickName(s: FleetState, wanted?: string) {
   return `Worker ${used.size + 1}`
 }
 
-/** What the Lead is first told: the agreed charter when there is one, otherwise the request as typed. */
-export const goalMessageFor = (charter: Charter | undefined, goal: string) => (charter ? charterBrief(charter) : goal)
+/**
+ * What the Lead is first told: the agreed charter when there is one, otherwise the goal as given. The charter
+ * says what the job is and how it will be known to be done; a goal that is more than the request the user
+ * typed (a playbook's step list, Oracle's rewrite) says how to go about it, so it follows the charter.
+ */
+export function goalMessageFor(charter: Charter | undefined, goal: string): string {
+  if (!charter) return goal
+  const brief = charterBrief(charter)
+  const how = goal.trim()
+  return how && how !== charter.request.trim() ? `${brief} ${how}` : brief
+}
 
 /** What a Lead is told when its console comes back. A restored conversation still has its goal, so it is not repeated. */
 export function leadRestartNote(o: { how: string; team: string; task: string; charter: Charter | undefined; resume: boolean }) {

@@ -39,9 +39,12 @@ export async function runPlaybook(id: string, inputs: Record<string, string> = {
 
   const goal = pb.brief!(values)
   // short title for the Ready card, branch name and merge commit: "Hotfix: wordCount gives 1 for…"
-  const first = pb.inputs.map((i) => values[i.key]).find((v) => v && v !== 'yes')
+  const given = pb.inputs.map((i) => values[i.key]).filter((v): v is string => !!v && v !== 'yes')
+  const first = given[0]
   const title = first ? `${pb.name}: ${first.length > 70 ? first.slice(0, 68) + '…' : first}` : pb.name
-  const charter = await gateCharter(await draftCharter(goal))
+  // The charter is about what the user asked for, in their words. The playbook's step list is the goal, and
+  // goes to the Lead after the charter because it is not the request.
+  const charter = await gateCharter(await draftCharter(given.length ? `${pb.name}: ${given.join('; ')}` : pb.name))
   if (!charter) return null
   if (!(await confirmTeamFolder(p.path))) return null
   app.toast(`${pb.name}: starting a Lead…`)

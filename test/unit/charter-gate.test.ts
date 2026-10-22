@@ -527,6 +527,7 @@ describe('the gate', () => {
     await run
     assert.equal(started()[0].goal, 'Add a --json flag, with tests')
     assert.deepEqual(started()[0].charter.wontTouch, ['src/renderer'])
+    assert.notEqual(started()[0].charter.request, started()[0].goal, "Oracle's rewrite differs from the typed request, so it follows the charter to the Lead")
   })
 
   test("Oracle's team option without a charter is gated on the request, in full, and still costs no second call", async () => {
@@ -552,7 +553,7 @@ describe('the gate', () => {
     const card = await cardUp()
     await quiet()
     assert.equal(ipc.callsTo('cli:run').length, 1)
-    assert.match((ipc.callsTo('cli:run')[0]?.[0] as any).prompt, /Playbook \\"Hotfix\\"/, "the charter is drafted from the playbook's own brief")
+    assert.match((ipc.callsTo('cli:run')[0]?.[0] as any).prompt, /"Hotfix: ledger sync creates a duplicate row"/, "the charter is drafted from what the user asked for, not from the playbook's step list")
     assert.equal(card.understood, 'Fix the duplicate ledger row')
     assert.equal(started().length, 0)
     useCharter.getState().confirm()
@@ -561,6 +562,9 @@ describe('the gate', () => {
     assert.equal(started().length, 1)
     assert.equal(started()[0].title, 'Hotfix: ledger sync creates a duplicate row', "the playbook's own title is kept")
     assert.match(started()[0].goal, /Playbook "Hotfix"/, 'and its brief')
+    // goalMessageFor puts the goal after the charter only when it is not the request itself
+    assert.equal(started()[0].charter.request, 'Hotfix: ledger sync creates a duplicate row', "the request is the user's words")
+    assert.notEqual(started()[0].charter.request, started()[0].goal, "so the playbook's step list is not mistaken for it")
     assert.equal(started()[0].charter.understood, 'Fix the duplicate ledger row')
   })
 
