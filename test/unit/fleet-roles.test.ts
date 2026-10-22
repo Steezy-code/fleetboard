@@ -305,8 +305,18 @@ test('mergeReady checks the exclusions itself, before git merges anything', () =
   const merge = body.indexOf("'merge', '--no-ff'")
   assert.ok(check > 0 && merge > 0 && check < merge, 'the exclusions are checked before git merge runs')
   assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter, not a verdict the caller passed in")
-  assert.match(body, /HEAD\.\.\.\$\{lead\.branch\}/, 'the diff is what the merge would bring in, not the list the card was drawn from')
-  assert.match(body, /'--name-only', '-z', '--no-renames'/, 'read the way the exclusions are matched')
+  assert.match(body, /wouldTouch\(s\.projectPath, lead\.branch\)/, "what the user's own merge would bring in, not the list the card was drawn from")
+})
+
+// Both gates ask the same question, so they ask it in one place; these are the flags that make the
+// answer match what excludedBy can see.
+test('what a merge would touch is read once, and read the way the exclusions are matched', () => {
+  const body = bodyOf(fleetSrc(), 'async function wouldTouch(')
+  assert.match(body, /'--name-only', '-z', '--no-renames'/, 'a quoted name matches no exclusion, and a move touches the file it left')
+  assert.match(body, /HEAD\.\.\.\$\{branch\}/, 'the diff is what the merge would bring in')
+  // --no-renames belongs to this read alone; the other --name-only calls answer different questions
+  const readers = fleetSrc().match(/'--no-renames'/g) ?? []
+  assert.equal(readers.length, 1, 'one reader, so a flag fixed at one gate cannot be missing at the other')
 })
 
 test('the phone presses Merge through that same function', () => {
@@ -326,5 +336,5 @@ test('fleet_merge checks the exclusions before it attempts the merge', () => {
   const merge = body.indexOf("'merge', '--no-ff'")
   assert.ok(check > 0 && merge > 0 && check < merge, 'the exclusions are checked before git merge runs')
   assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter")
-  assert.match(body, /HEAD\.\.\.\$\{w\.branch\}/, "the diff is what the merge would bring in: the worker's branch since it left the lead's")
+  assert.match(body, /wouldTouch\(m\.cwd, w\.branch\)/, "the diff is what the merge would bring in: the worker's branch since it left the lead's")
 })

@@ -544,6 +544,19 @@ export function numstat(out: string): { path: string; add: number; del: number }
     .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
 }
 
+/**
+ * The files merging `branch` into the checkout at `cwd` would bring in — what the exclusions are
+ * matched against, at both gates (the Lead's fleet_merge and the user's mergeReady).
+ *
+ * `-z`: git quotes a non-ASCII name otherwise, and a quoted name matches no exclusion.
+ * `--no-renames`: a move touches the file it left.
+ */
+async function wouldTouch(cwd: string, branch: string): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> {
+  const d = await git(cwd, ['diff', '--name-only', '-z', '--no-renames', `HEAD...${branch}`])
+  if (!d.ok) return { ok: false, error: (d.err || d.out).slice(0, 300) }
+  return { ok: true, files: d.out.split('\0').filter(Boolean) }
+}
+
 /** The files among `touched` an exclusion covers, each named with the rule it hit. */
 const excludedHits = (touched: string[], wontTouch: string[] | undefined, how: string) =>
   touched.flatMap((f) => {
@@ -855,10 +868,9 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       // before the merge, so a refusal leaves the lead's worktree as it was
       const wontTouch = s.charter?.wontTouch
       if (wontTouch?.length) {
-        // -z: git quotes non-ASCII names otherwise, and a quoted name matches no exclusion; --no-renames: a move touches the file it left
-        const d = await git(m.cwd, ['diff', '--name-only', '-z', '--no-renames', `HEAD...${w.branch}`])
-        if (!d.ok) return fail(`Not merged: ${w.name}'s changes could not be checked against what the user ruled out: ${d.err.slice(0, 300)}`)
-        const refusal = excludedRefusal(w.name, d.out.split('\0').filter(Boolean), wontTouch)
+        const d = await wouldTouch(m.cwd, w.branch)
+        if (!d.ok) return fail(`Not merged: ${w.name}'s changes could not be checked against what the user ruled out: ${d.error}`)
+        const refusal = excludedRefusal(w.name, d.files, wontTouch)
         if (refusal) return fail(refusal)
       }
       const r = await git(m.cwd, ['merge', '--no-ff', '--no-edit', w.branch])
@@ -1240,13 +1252,12 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       // What the user ruled out is enforced here rather than only on the card, because this is the
       // function every client reaches: the Ready card, and the phone's /api/merge. Checked against
       // what the merge would actually bring in, not the file list the card was drawn from, which the
-      // Lead may have added to since. -z / --no-renames as in fleet_merge: a quoted name matches no
-      // exclusion, and a move touches the file it left.
+      // Lead may have added to since.
       const wontTouch = s.charter?.wontTouch
       if (wontTouch?.length) {
-        const d = await git(s.projectPath, ['diff', '--name-only', '-z', '--no-renames', `HEAD...${lead.branch}`])
-        if (!d.ok) return { ok: false, error: `The team's changes could not be checked against what you ruled out: ${d.err.slice(0, 300) || d.out.slice(0, 300)}` }
-        const refusal = excludedMergeRefusal(d.out.split('\0').filter(Boolean), wontTouch)
+        const d = await wouldTouch(s.projectPath, lead.branch)
+        if (!d.ok) return { ok: false, error: `The team's changes could not be checked against what you ruled out: ${d.error}` }
+        const refusal = excludedMergeRefusal(d.files, wontTouch)
         if (refusal) return { ok: false, error: refusal }
       }
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])

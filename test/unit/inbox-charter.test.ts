@@ -31,6 +31,7 @@ const charterItem = async () => {
   return i
 }
 const labels = (i: { actions: { label: string }[] }) => i.actions.map((a) => a.label)
+const primaries = (i: { actions: { label: string; primary?: boolean }[] }) => i.actions.filter((a) => a.primary).map((a) => a.label)
 
 beforeEach(() => {
   ipc.reset()
@@ -174,7 +175,7 @@ describe('the two renderings', () => {
 // ---------------------------------------------------------------- the Inbox's own doors
 
 describe('the Ready card', () => {
-  const ready = { leadId: lead.id, branch: 'fleet/x', summary: 'did it', commits: 2, files: ['src/a.ts'], at: 5 }
+  const ready = { leadId: lead.id, branch: 'fleet/x', summary: 'did it', commits: 2, files: ['src/a.ts'], hasRemote: true, at: 5 }
   const readyItem = async () => {
     const i = (await list()).find((x) => x.kind === 'ready')
     assert.ok(i, 'a Ready card is in the Inbox')
@@ -213,8 +214,19 @@ describe('the Ready card', () => {
     const item = await readyItem()
     assert.equal(item.kind === 'ready' && item.review?.blocked, true)
     assert.ok(!labels(item).includes('Merge'), 'Merge is not on offer')
+    assert.deepEqual(primaries(item), ['View diff'], 'reading it is what is left to do')
+    assert.ok(labels(item).includes('Open draft PR'), 'pushing is not merging, and a draft PR is how someone else gets to see the file')
     for (let i = 0; i < item.actions.length; i++) await item.actions[i]!.run()
     assert.equal(ipc.callsTo('fleet:mergeReady').length, 0, 'and nothing on the card merges it')
+  })
+
+  test('a blocked card with nothing to merge still has exactly one primary answer', async () => {
+    // the PR is open, so the card closes the team rather than merging it: Done stays the primary and
+    // View diff must not become a second one
+    fleet({ members: { [lead.id]: { ...lead, owns: ['src'] } }, ready: { ...ready, prUrl: 'https://example.test/pr/1' }, charter: coerceCharter({ understood: 'u', wontTouch: ['src/a.ts'] }, 'r') })
+    const item = await readyItem()
+    assert.equal(item.kind === 'ready' && item.review?.blocked, true)
+    assert.deepEqual(primaries(item), ['Done'])
   })
 
   test('work inside what the charter allowed still merges with one click', async () => {

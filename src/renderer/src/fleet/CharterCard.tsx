@@ -22,7 +22,7 @@ const GAP: Record<Ambiguity, string> = {
  * later phase runs it on a loop, so it is never agreed to unseen.
  */
 const Check = ({ cmd }: { cmd: string }) => (
-  <span className="ch-done">
+  <span className="ch-done" title={cmd}>
     <TerminalSquare size={12} />
     <span>{cmd}</span>
   </span>
@@ -33,7 +33,9 @@ export function CharterCard({ charter: c }: { charter: Charter }) {
   if (!fullCard(c))
     return (
       <div className="ch-one">
-        <span className="ch-understood">{c.understood}</span>
+        <span className="ch-understood" title={c.understood}>
+          {c.understood}
+        </span>
         {c.doneWhen && <Check cmd={c.doneWhen} />}
       </div>
     )
@@ -47,16 +49,26 @@ export function CharterCard({ charter: c }: { charter: Charter }) {
             <div key={i} className="ch-row">
               <span className={`ch-badge ${a.known ? 'known' : 'guess'}`}>{a.known ? 'known' : 'guess'}</span>
               <span className="ch-text">{a.text}</span>
-              {a.from && <span className="ch-from">{a.from}</span>}
+              {a.from && (
+                <span className="ch-from" title={a.from}>
+                  {a.from}
+                </span>
+              )}
             </div>
           ))}
         </div>
       )}
+      {/* one line per exclusion: these are what a merge is refused for, so every one of them is read
+          before it is agreed to, however many the model wrote */}
       {c.wontTouch.length > 0 && (
         <div className="ch-row">
           <Ban size={12} />
           <span className="ch-label">Won’t touch</span>
-          <span className="ch-text ch-paths">{c.wontTouch.join(' · ')}</span>
+          <span className="ch-paths">
+            {c.wontTouch.map((p, i) => (
+              <span key={i}>{p}</span>
+            ))}
+          </span>
         </div>
       )}
       {c.doneWhen && (
