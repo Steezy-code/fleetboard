@@ -119,6 +119,8 @@ test('the Lead is told the confirmed brief is the user\'s, and where to take dou
     .split('\n')
     .find((l) => /not yours to reinterpret/.test(l))
   assert.ok(rule, 'the prompt carries a rule about the confirmed brief')
+  // `understood` has no label in the brief, so the rule has to point at the goal itself to cover it
+  assert.match(rule, /Your goal as given/)
   assert.match(rule, /Do not touch/)
   assert.match(rule, /Done when/)
   // the one route for a brief that looks wrong, so the Lead asks rather than decides
@@ -169,4 +171,34 @@ test('a Lead whose conversation was restored is not told its goal again', () => 
     assert.doesNotMatch(note, /Your goal/)
     assert.equal(note, `[Fleet] ${HOW} Team: nobody started yet. ${TAIL}`)
   }
+})
+
+// startLead needs a worktree and a console, memberStarted a live PTY and a worker spawn a running server,
+// so none of them can be driven from here. These are the places the charter is wired in; like the
+// callTool guard above they pin what the source says, because a revert would leave every test that
+// can run green: the charter would still be stored, composed and prompted for, and never reach anyone.
+const fleetSrc = () => fs.readFileSync(new URL('../../src/main/fleet.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const bodyOf = (src: string, head: string) => {
+  const start = src.indexOf(head)
+  assert.ok(start >= 0, `${head} is in fleet.ts`)
+  return src.slice(start, src.indexOf('\n}\n', start))
+}
+
+test('startLead keeps the charter and briefs the Lead from it', () => {
+  const body = bodyOf(fleetSrc(), 'export async function startLead(')
+  assert.match(body, /s\.charter = opts\.charter\b/, 'the charter is kept on the state, and cleared when a job starts without one')
+  assert.match(body, /kind: 'goal', text: goalMessageFor\(opts\.charter, opts\.goal\)/)
+  assert.doesNotMatch(body, /text: opts\.goal/, 'the typed request must not be what the Lead is handed')
+})
+
+test("a restarted Lead is handed the board's charter", () => {
+  const body = bodyOf(fleetSrc(), 'function memberStarted(')
+  assert.match(body, /leadRestartNote\(\{[^}]*\bcharter: s\.charter\b[^}]*\}\)/)
+})
+
+test('every worker brief is given the exclusions', () => {
+  // the spawn and the restart re-brief: a worker that restarts has lost its conversation, so it needs them again
+  const calls = fleetSrc().match(/(?<!function )briefFor\([^)]*\)/g) ?? []
+  assert.equal(calls.length, 2, 'fleet_spawn_worker and the restart re-brief')
+  for (const c of calls) assert.match(c, /, s\.charter\?\.wontTouch\)$/, c)
 })
