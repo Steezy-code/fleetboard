@@ -171,3 +171,49 @@ test('the summary says when nothing ends a loop', () => {
   assert.doesNotMatch(loops.describeLoop({ ...base, stop: { ...stop, afterRuns: true } }), /no end/)
   assert.doesNotMatch(loops.describeLoop({ ...base, stop: { ...stop, goal: true } }), /no end/)
 })
+
+test('a loop that changes nothing stops itself, and a clock ticking is not a change', async () => {
+  // An idle loop fires every time a console goes working → idle, so an agent with nothing left to do
+  // is re-prompted for ever at full price. The screen is the signal — but an agent TUI redraws its
+  // elapsed counter every second, so "the screen differs" would mean "always".
+  const settle = async () => {
+    await mock.timers.tick(0)
+    for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r))
+  }
+  let seconds = 10
+  ipc.handle('pty:tail', () => `> keep going\n\n✻ Thinking… (${seconds++}s · esc to interrupt)\n`)
+  ipc.handle('journal:append', () => {})
+
+  const l = loops.newLoop({ instruction: 'keep going', target: { kind: 'pick', ids: ['idle1'] } })
+  loops.upsertLoop(l)
+  for (let i = 0; i < 6; i++) {
+    loops.runLoopNow(l.id)
+    await settle()
+  }
+  assert.equal(loop(l.id).ended?.reason, 'stalled', 'the counter was the only thing moving')
+  assert.match(loop(l.id).ended?.note ?? '', /nothing on the targeted consoles changed/)
+  assert.equal(pastes().length, 5, 'it stopped rather than carrying on')
+
+  // and a loop whose console is actually saying new things is left alone
+  let n = 0
+  ipc.handle('pty:tail', () => `> keep going\n\nfixed the ${['parser', 'lexer', 'printer', 'reader', 'writer', 'walker'][n++ % 6]}\n`)
+  const m = loops.newLoop({ instruction: 'keep going', target: { kind: 'pick', ids: ['idle1'] } })
+  loops.upsertLoop(m)
+  for (let i = 0; i < 6; i++) {
+    loops.runLoopNow(m.id)
+    await settle()
+  }
+  assert.equal(loop(m.id).ended, undefined, 'still running')
+
+  // a screen that cannot be read is no information, so it is not evidence of a stall either
+  ipc.handle('pty:tail', () => {
+    throw new Error('not live')
+  })
+  const k = loops.newLoop({ instruction: 'keep going', target: { kind: 'pick', ids: ['idle1'] } })
+  loops.upsertLoop(k)
+  for (let i = 0; i < 6; i++) {
+    loops.runLoopNow(k.id)
+    await settle()
+  }
+  assert.equal(loop(k.id).ended, undefined, 'no verdict without evidence')
+})

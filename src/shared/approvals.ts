@@ -67,7 +67,7 @@ function detailOf(p: Prompt): string | undefined {
     above
       .slice(a + 1, b)
       .map((l) => l.trim())
-      .filter((l) => l && !/^Tip:/.test(l))
+      .filter((l) => l && !l.startsWith('Tip:'))
   // the last two rules, and the one before them when there is one: two is the minimum checked above
   const n = rules.length
   const prev = rules[n - 2]

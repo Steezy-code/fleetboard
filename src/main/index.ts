@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { PtyManager } from './pty'
+import { describeAnswer } from '@shared/prompt'
 import { startHookServer } from './hooks'
 import * as store from './store'
 import * as fsops from './fsops'
@@ -11,15 +12,19 @@ import * as agents from './agents'
 import * as git from './git'
 import * as usage from './usage'
 import * as profiles from './profiles'
+import * as skills from './skills'
 import * as sweep from './sweep'
 import * as ci from './ci'
 import * as goal from './goal'
-import { initFleet, stopFleetTicks } from './fleet'
+import * as fleet from './fleet'
+import { stopFleetTicks } from './fleet'
 import * as remote from './remote'
 import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
+import { appPermission, mediaTypesOf, webPermission } from './permissions'
+import * as journal from './journal'
 import { allowed, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
 
@@ -27,27 +32,6 @@ let win: BrowserWindow | null = null
 
 /** The session web tiles browse in (WebNode's <webview partition>). */
 const WEB_PARTITION = 'persist:fleetboard-web'
-const HARMLESS = new Set(['fullscreen', 'clipboard-sanitized-write', 'pointerLock'])
-function webPermission(permission: string, url: string | undefined) {
-  if (HARMLESS.has(permission)) return true
-  try {
-    return /^(localhost|127\.0\.0\.1|\[::1\])$/.test(new URL(url ?? '').hostname)
-  } catch {
-    return false
-  }
-}
-
-/**
- * What the app's own window may have. Push-to-talk needs the microphone, and in Electron the 'media'
- * permission covers the camera too — granting it outright handed over both. Anything that asks for
- * video is refused; audio-only, and a request that does not say (older Electron, or a check rather
- * than a request), still goes through, because denying those would break push-to-talk.
- */
-export function appPermission(permission: string, mediaTypes?: string[]) {
-  if (permission === 'media') return !mediaTypes?.includes('video')
-  return permission === 'clipboard-read' || permission === 'notifications'
-}
-
 // Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
 app.on('web-contents-created', (_e, contents) => {
   contents.on('will-attach-webview', (_ev, prefs) => {
@@ -59,6 +43,13 @@ app.on('web-contents-created', (_e, contents) => {
   })
 })
 let quitConfirmed = false
+/**
+ * Cleared by app:quitAck. A page that answers the save-and-quit request gets as long as it needs
+ * (the save, and the dialog if the save failed); one that cannot answer at all must not leave the
+ * window unclosable.
+ */
+let quitWatchdog: ReturnType<typeof setTimeout> | undefined
+const QUIT_ACK_MS = 2000
 /** the window was reloaded after its page crashed; the new page says so once */
 let crashRecovered = false
 
@@ -149,9 +140,20 @@ function createWindow() {
     win = null
   })
   win.on('close', (e) => {
-    if (quitConfirmed || ptys.size === 0) return
+    if (quitConfirmed) return
     e.preventDefault()
-    ctx.emit('app:confirmQuit', ptys.size)
+    if (ptys.size) return ctx.emit('app:confirmQuit', ptys.size)
+    // No console to stop, so nothing to confirm — but the board's save is debounced (350 ms, pushed
+    // back by every keystroke), and this was the only path that did not flush it: closing the window
+    // after typing into a note threw away everything since the last pause, and note, text, checklist
+    // and kanban content lives nowhere but the board file. The page saves, then quits.
+    ctx.emit('app:saveAndQuit')
+    clearTimeout(quitWatchdog)
+    quitWatchdog = setTimeout(() => {
+      logError('quit', new Error('the window did not answer the save-and-quit request; closing it anyway'))
+      quitConfirmed = true
+      win?.close()
+    }, QUIT_ACK_MS)
   })
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(path.join(__dirname, '../renderer/index.html'))
@@ -176,7 +178,11 @@ function registerCore() {
   ipcMain.handle('pty:buffer', (_e, id: string) => ptys.buffer(id))
   ipcMain.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
   ipcMain.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
-  ipcMain.handle('pty:answer', (_e, id: string, answer) => ptys.answer(id, answer))
+  ipcMain.handle('pty:answer', async (_e, id: string, answer) => {
+    const r = await ptys.answer(id, answer)
+    if (r.ok) journal.answered('you, on the board', id, describeAnswer(answer))
+    return r
+  })
   ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
 
@@ -193,6 +199,9 @@ function registerCore() {
     win = null
     setTimeout(() => app.exit(0), 300)
   })
+  // "I got the save-and-quit request and I am working on it": stops the watchdog above from
+  // closing the window while the save, or the dialog a failed save opens, is still going.
+  ipcMain.on('app:quitAck', () => clearTimeout(quitWatchdog))
   // the renderer's own stray errors, into the same log as the main process's
   ipcMain.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
 
@@ -206,7 +215,6 @@ function registerCore() {
   ipcMain.handle('win:minimize', () => win?.minimize())
   ipcMain.handle('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
   ipcMain.handle('win:close', () => win?.close())
-  ipcMain.handle('win:devtools', () => win?.webContents.toggleDevTools())
   ipcMain.handle('webview:devtools', (_e, webContentsId: number) => {
     webContents.fromId(webContentsId)?.openDevTools({ mode: 'detach' })
   })
@@ -221,10 +229,6 @@ function registerCore() {
     const fs = await import('node:fs')
     fs.writeFileSync(outPath, pdf)
     return outPath
-  })
-  ipcMain.handle('png:capture', async (_e, rect: { x: number; y: number; width: number; height: number }) => {
-    const img = await win!.webContents.capturePage(rect)
-    return img.toPNG().toString('base64')
   })
 }
 
@@ -257,23 +261,36 @@ app.whenReady().then(async () => {
     if (!allowed(p, 'fbfile')) return new Response('', { status: 403 })
     return net.fetch(pathToFileURL(p).toString())
   })
-  // Microphone for push-to-talk; the camera and everything else stays denied.
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) =>
-    cb(appPermission(permission, (details as { mediaTypes?: string[] }).mediaTypes))
-  )
-  // Web tiles: Electron grants every permission unless told otherwise. Sites get only harmless ones;
-  // the user's own dev servers (localhost) get what they ask for, like in a browser they control.
+  // Microphone for push-to-talk; the camera and everything else stays denied. The *check* handler
+  // matters as much as the request one: without it a check falls through to Electron's own answer,
+  // which is to allow.
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, cb, details) => cb(appPermission(permission, mediaTypesOf(details))))
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) => appPermission(permission, mediaTypesOf(details)))
+  // Web tiles: Electron grants every permission unless told otherwise (see webPermission).
   const web = session.fromPartition(WEB_PARTITION)
-  web.setPermissionRequestHandler((_wc, permission, cb, details) => cb(webPermission(permission, details.requestingUrl)))
-  web.setPermissionCheckHandler((_wc, permission, origin) => webPermission(permission, origin))
+  const told = new Set<string>()
+  const refused = (permission: string) => {
+    // one notice per permission: a page may ask on every frame, and the toasts would bury the board
+    if (told.has(permission) || told.size > 50) return
+    told.add(permission)
+    ctx.emit('app:notice', `A web tile asked for ${permission.replace(/-/g, ' ')} and was refused. Fleetboard allows a page only the microphone and notifications, and only from your own machine.`)
+  }
+  web.setPermissionRequestHandler((_wc, permission, cb, details) => {
+    const ok = webPermission(permission, details.requestingUrl, mediaTypesOf(details))
+    if (!ok) refused(permission)
+    cb(ok)
+  })
+  web.setPermissionCheckHandler((_wc, permission, origin, details) => webPermission(permission, origin, mediaTypesOf(details)))
   // before any console starts: what a run that died left running would otherwise work on unseen
   const orphans = await endOrphans().catch(() => 0)
   if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
   await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
   registerCore()
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, goal, ci]) m.register(ctx)
-  sweep.register(ctx)
-  await initFleet(ctx)
+  // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
+  // be registered from inside profiles, which made its handlers appear to come from nowhere.
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, ci, sweep, journal]) m.register(ctx)
+  // these two start servers, so they are awaited rather than listed
+  await fleet.register(ctx)
   await remote.register(ctx)
   createWindow()
 })

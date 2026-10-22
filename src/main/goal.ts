@@ -4,6 +4,7 @@ import type { MainContext } from './context'
 import { loginEnv } from './env'
 import { IS_WIN, killTree, launchOptions, oneShot } from './platform'
 import { stripAnsi } from '@shared/ansi'
+import { allowed, outsideMessage } from './roots'
 
 // A loop's "stop when this command passes" check: run the command the user wrote in the project, in
 // their login shell, and read its exit code. Not a model asked to run it: that cannot edit the code it
@@ -69,5 +70,12 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
 }
 
 export function register(ctx: MainContext) {
-  ctx.ipc.handle('goal:check', (_e, cwd: string, command: string) => runGoalCheck(String(cwd), String(command)))
+  ctx.ipc.handle('goal:check', (_e, cwd: string, command: string) => {
+    // The command is the user's own — that is what a loop's goal is — but where it runs is not: the
+    // folder arrives over IPC, and a loop lives in the board file. Nothing is lost by requiring it to
+    // be a folder Fleetboard may touch, and this is the sharpest handler on the surface: it runs
+    // `$SHELL -lc <command>` for fifteen minutes.
+    if (!allowed(cwd, 'goal:check')) throw new Error(outsideMessage(cwd))
+    return runGoalCheck(String(cwd), String(command))
+  })
 }

@@ -213,7 +213,7 @@ function layered(spec: DiagramSpec, dir: 'TB' | 'LR'): Layout {
     if (preds.get(v)!.length || !succs.get(v)!.length) continue
     rank.set(v, Math.min(...succs.get(v)!.map((s) => rank.get(s)!)) - 1)
   }
-  const minRank = Math.min(...[...rank.values()])
+  const minRank = Math.min(...rank.values())
   rank.forEach((r, k) => rank.set(k, r - minRank))
 
   // 3. virtual nodes

@@ -1,7 +1,8 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import type { NodeProps } from './types'
-import { basename, fileUrl } from '../lib/api'
+import { fileUrl } from '../lib/api'
+import { baseName } from '../workbench/paths'
 import { safeUrl } from '../workbench/markdown'
 import { useApp } from '../state/store'
 import { startNodeDrag } from '../board/NodeFrame'
@@ -38,7 +39,7 @@ export default function ImageNode({ node, selected }: NodeProps) {
       {src && !failed ? (
         <img
           src={src}
-          alt={node.data.path ? basename(node.data.path) : 'image'}
+          alt={node.data.path ? baseName(node.data.path) : 'image'}
           draggable={false}
           onError={() => setFailed(true)}
           onLoad={(e) => {
@@ -50,7 +51,7 @@ export default function ImageNode({ node, selected }: NodeProps) {
       ) : (
         <div className="img-missing">
           <ImageOff size={22} />
-          <span>{node.data.path ? basename(node.data.path) : 'No image'}</span>
+          <span>{node.data.path ? baseName(node.data.path) : 'No image'}</span>
           {node.data.path && <span className="dim small">File not found</span>}
         </div>
       )}

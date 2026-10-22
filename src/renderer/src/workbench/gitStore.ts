@@ -37,7 +37,7 @@ export function refreshGit(cwd: string | null | undefined): Promise<void> {
   const cur = useGitStore.getState().repos[cwd]
   if (!cur?.status) patch(cwd, { loading: true })
   const p = invoke<GitResult<{ status: GitStatus }>>('git:status', cwd)
-    .then((r) => {
+    .then(async (r) => {
       if (r.ok) {
         const json = JSON.stringify(r.status)
         const prev = useGitStore.getState().repos[cwd] ?? EMPTY
@@ -49,8 +49,10 @@ export function refreshGit(cwd: string | null | undefined): Promise<void> {
         patch(cwd, { status: r.status, isRepo: true, error: null, loading: false, version: prev.version + 1 })
       } else {
         lastJson.delete(cwd)
-        const notRepo = /not a git repository|folder not found/i.test(r.error)
         const prev = useGitStore.getState().repos[cwd] ?? EMPTY
+        // ask, rather than matching the English of a message cleanErr is free to reword. On a failure
+        // only, so the common path is still one call. If even this fails, keep what we believed.
+        const notRepo = await invoke<boolean>('git:isRepo', cwd).then((is) => !is, () => !prev.isRepo)
         patch(cwd, { status: notRepo ? null : prev.status, isRepo: notRepo ? false : prev.isRepo, error: r.error, loading: false, version: prev.version + (notRepo && prev.status ? 1 : 0) })
       }
     })

@@ -209,7 +209,12 @@ export default function CodeStudio(props: { path?: string }) {
         await invoke('fs:mkdir', path)
         setExpanded((s) => new Set([...s, path]))
         setSelectedDir(path)
-      } else await invoke('fs:write', path, '')
+      } else {
+        // not an exists-check and then a write: between the two, an agent writing that same path
+        // would have had its file truncated to nothing by this one
+        const r = await invoke<WriteResult>('fs:write', path, '', { base: null })
+        if (!r.ok) return toast(`${name} already exists`, 'warn')
+      }
       await loadTree()
       if (c.kind === 'file') open(path, true)
     } catch (e: any) {

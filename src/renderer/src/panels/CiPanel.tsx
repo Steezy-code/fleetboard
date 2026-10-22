@@ -5,7 +5,7 @@ import { useApp } from '../state/store'
 import { Drawer, Switch } from '../ui/Modal'
 import { CiIcon } from '../chrome/CiBadge'
 import { ciItems, fixCi, fixerFor, refreshCi, setCiAutoFix, useCi, type CiItem } from '../workbench/ciStore'
-import { agentMade, autoRouteOn, markSent, ownerOf, refreshFeedback, routeFeedback, setAutoRoute, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
+import { agentMade, markSent, ownerOf, refreshFeedback, routeFeedback, setAutoRoute, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
 
 const ago = (iso: string) => {
   const s = (Date.now() - Date.parse(iso)) / 1000

@@ -30,7 +30,7 @@ after(async () => {
 
 const api = (url: string, p: string, init: RequestInit = {}, token?: string) => {
   const u = new URL(url)
-  return fetch(`${u.origin}${p}`, { ...init, headers: { ...(token !== '' ? { Authorization: `Bearer ${token ?? u.hash.slice(1)}` } : {}), ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers ?? {}) } })
+  return fetch(`${u.origin}${p}`, { ...init, headers: { ...(token !== '' ? { Authorization: `Bearer ${token ?? u.hash.slice(1)}` } : {}), ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers } })
 }
 
 test('off by default: nothing listens until it is turned on', async () => {

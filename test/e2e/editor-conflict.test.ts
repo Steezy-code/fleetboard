@@ -58,3 +58,25 @@ test('Markdown studio: autosave after an agent changed the note asks; "load the 
   assert.equal(fs.readFileSync(file, 'utf8'), '# Notes\n\nfirst\n\nadded by an agent\n')
   assert.deepEqual(app.rendererErrors, [])
 })
+
+test('Markdown studio: a note it could not read is never saved over', async () => {
+  // The bulk prefetch used to fill the notes map but not the "what is on disk" map, and a read that
+  // failed cached the empty string. fs:write with no base overwrites unconditionally, so a note that
+  // failed to read showed as empty, claimed to be saved, and the first keystroke replaced the real
+  // file with that empty buffer. Here the note is simply not there (removed between the tree read and
+  // the open, a stale wiki link): the same missing base, and nothing may be written.
+  const file = path.join(repo, 'ghost.md')
+  assert.equal(fs.existsSync(file), false, 'not there to begin with')
+  await app.eval(() => localStorage.setItem('fb.md.mode', 'source'))
+  // the studio from the test before is still mounted: a new path prop alone would not reload it
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().closePanel())
+  await app.waitFor(() => app.eval(() => !document.querySelector('textarea')), { label: 'the studio closed' })
+  await app.eval((p) => (window as any).__fleetboard.useApp.getState().openPanel('markdown', { path: p }), file)
+  await app.waitFor(async () => (await app.texts('body')).join('').includes('Could not open ghost.md'), { label: 'the failed read is reported' })
+  await typeInto('# typed into a note that was never read\n')
+  await new Promise((r) => setTimeout(r, 1500)) // well past the 600 ms autosave
+  assert.equal(fs.existsSync(file), false, 'nothing was written')
+  assert.ok((await app.texts('body')).join('').includes('could not be read, so it is not saved over'), 'and the user is told why')
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().closePanel())
+  assert.deepEqual(app.rendererErrors, [])
+})

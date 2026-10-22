@@ -2,10 +2,10 @@
 // The renderer polls ci:status (faster while something is running) and asks for ci:failedLog when an
 // agent is sent to fix a failure. ci:prFeedback reads reviewers' comments on open PRs (one GraphQL
 // call), so new ones can go back to the agent that made the PR.
-import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import type { MainContext } from './context'
-import { loginEnv, which } from './env'
+import { which } from './env'
+import { ghEnv, git, run } from './run'
 import { stripAnsi } from '@shared/ansi'
 
 export type CiState = 'passing' | 'failing' | 'running' | 'none'
@@ -47,26 +47,8 @@ export type CiStatus =
   | { ok: true; at: number; branch: string; slug: string; runs: CiRun[]; prs: CiPr[] }
   | { ok: false; at: number; error: string; reason: 'no-gh' | 'no-auth' | 'no-remote' | 'not-repo' | 'error' }
 
-interface Out {
-  code: number
-  stdout: string
-  stderr: string
-}
-
-function exec(bin: string, args: string[], cwd: string, env: Record<string, string>, timeout = 20000): Promise<Out> {
-  return new Promise((resolve) => {
-    execFile(bin, args, { cwd, env, timeout, maxBuffer: 32 * 1024 * 1024 }, (err: any, stdout, stderr) => {
-      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-      resolve({ code, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') || (err ? String(err.message ?? err) : '') })
-    })
-  })
-}
-
-let envCache: Record<string, string> | null = null
-async function ghEnv() {
-  envCache ??= { ...(await loginEnv()), GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_SPINNER_DISABLED: '1', NO_COLOR: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
-  return envCache
-}
+const exec = (bin: string, args: string[], cwd: string, env: Record<string, string>, timeout = 20000) =>
+  run(bin, args, { cwd, env, timeout, maxBuffer: 32 * 1024 * 1024 })
 
 const firstLine = (s: string) => s.trim().split('\n')[0] ?? ''
 
@@ -122,7 +104,7 @@ async function status(cwd: string): Promise<CiStatus> {
   const gh = await which('gh')
   if (!gh) return { ok: false, at, error: 'Install the GitHub CLI (gh) to watch CI.', reason: 'no-gh' }
   const env = await ghEnv()
-  const b = await exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], cwd, env, 5000)
+  const b = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 })
   if (b.code !== 0) return { ok: false, at, error: 'Not a git repository', reason: 'not-repo' }
   const branch = b.stdout.trim()
   const repo = await exec(gh, ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], cwd, env)

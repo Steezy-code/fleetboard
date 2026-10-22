@@ -1,7 +1,11 @@
 name: CI
 
+# A branch with a pull request open used to run all of this twice over, once for the push and once
+# for the pull request, because the two have different refs and so different concurrency groups.
+# The pull request run covers the branch; push covers what lands.
 on:
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -43,6 +47,12 @@ jobs:
       - name: Typecheck (noUncheckedIndexedAccess, migrated directories)
         run: npm run typecheck:strict
 
+      # errors only. The React Compiler rules and exhaustive-deps are warnings on purpose: this project
+      # does not use the compiler, and every one of those findings needs a judgement a linter cannot
+      # make. A gate that cries wolf is one people learn to ignore.
+      - name: Lint
+        run: npm run lint
+
       - name: Unit tests
         run: npm test
 
@@ -60,10 +70,13 @@ jobs:
       - name: Display server for the end-to-end tests
         run: sudo apt-get update -q && sudo apt-get install -yq xvfb
 
+      # Several files at a time, which is what ARCHITECTURE.md recommends and what finds races. It
+      # was not possible until the leak test stopped reading collector lag as a leak.
       - name: End-to-end tests
         run: npm run test:e2e
         env:
           E2E_SHOTS: ${{ runner.temp }}/e2e-shots
+          FB_E2E_JOBS: 3
 
       - name: Screenshots of the end-to-end runs
         if: failure()
@@ -110,10 +123,14 @@ jobs:
           path: ${{ runner.temp }}/e2e-shots
           if-no-files-found: ignore
 
+      # Nothing consumes this artifact — release.yml builds the installer again from scratch on a tag —
+      # and it is nearly four minutes of Windows runner time, billed at double, on every push.
       - name: Installer
+        if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
         run: npx electron-builder --win --x64 --publish never
 
       - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
         with:
           name: fleetboard-windows-installer
           path: release/*.exe

@@ -10,7 +10,28 @@ import { pathToFileURL } from 'node:url'
 
 const require = createRequire(import.meta.url)
 const ROOT = path.resolve(import.meta.dirname, '../..')
-const ELECTRON: string = require('electron')
+/**
+ * Where Electron is, without asking it to install itself.
+ *
+ * `require('electron')` downloads and extracts the binary when it is missing. One process doing that
+ * is slow; several doing it at once — which is what running the suite a few files at a time means,
+ * since each file is its own process — extract into the same folder together, and the result is a
+ * corrupt install ("failed to create resources.pak: File exists") and ETXTBSY for whichever process
+ * tries to run the half-written binary. Installing is `npm ci`'s job, so this only looks.
+ */
+const ELECTRON: string = (() => {
+  const pkg = path.dirname(require.resolve('electron/package.json'))
+  // path.txt is written by the install, so its absence means the same thing as a missing binary
+  const bin = (() => {
+    try {
+      return path.join(pkg, 'dist', fs.readFileSync(path.join(pkg, 'path.txt'), 'utf8').trim())
+    } catch {
+      return ''
+    }
+  })()
+  if (!bin || !fs.existsSync(bin)) throw new Error(`Electron is not installed in ${pkg}. Run \`npm ci\` (its postinstall fetches it) before the end-to-end tests.`)
+  return bin
+})()
 export const FAKE_CLAUDE = path.join(ROOT, 'test/fake-agent/claude.mjs')
 
 export interface LaunchOptions {
@@ -184,6 +205,25 @@ export class App {
     }
   }
 
+  /**
+   * Start the app, retrying ETXTBSY.
+   *
+   * "Text file busy" from execve means something holds that binary open for writing — which in CI was
+   * Electron installing itself from several test processes at once, now prevented where ELECTRON is
+   * resolved above. This stays as cover for the general case: a transient condition on starting a
+   * process is worth trying again, briefly, rather than failing a whole run over.
+   */
+  private static async launchRetrying(start: () => ReturnType<typeof spawn>): Promise<ReturnType<typeof spawn>> {
+    for (let i = 0; ; i++) {
+      try {
+        return start()
+      } catch (e: any) {
+        if (e?.code !== 'ETXTBSY' || i >= 5) throw e
+        await new Promise((r) => setTimeout(r, 150 * (i + 1)))
+      }
+    }
+  }
+
   static async launch(opts: LaunchOptions = {}): Promise<App> {
     if (!fs.existsSync(path.join(ROOT, 'out/main/index.js'))) throw new Error('build the app first: npx electron-vite build')
     const sb = opts.sandbox ?? makeSandbox()
@@ -209,7 +249,8 @@ export class App {
     const inspect = opts.mainInspector ? ['--inspect=0'] : []
     // FB_E2E_HEADLESS=1: no window on screen (Chromium's headless platform), for running without a virtual display
     const headless = process.env.FB_E2E_HEADLESS ? ['--ozone-platform=headless'] : []
-    const proc = spawn(ELECTRON, ['--no-sandbox', '--remote-debugging-port=0', ...headless, ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const args = ['--no-sandbox', '--remote-debugging-port=0', ...headless, ...inspect, ...(opts.extraArgs ?? []), path.join(ROOT, 'out/main/index.js')]
+    const proc = await App.launchRetrying(() => spawn(ELECTRON, args, { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] }))
     let output = ''
     const wsUrl = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`app did not start:\n${output.slice(-3000)}`)), 30_000)
