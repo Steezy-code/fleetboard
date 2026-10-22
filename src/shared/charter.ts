@@ -29,6 +29,8 @@ export interface Charter {
   question?: { text: string; options: string[] }
   /** set when this is a follow-up to a Lead already running */
   followUpTo?: string
+  /** the running Lead whose team confirming this would replace, by name; set at the gate, never stored */
+  replaces?: string
   at: number
 }
 

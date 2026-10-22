@@ -265,13 +265,16 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trim
 const noStop = (s: string) => s.trim().replace(/[.,;]+$/, '')
 
 /**
- * Which of the charter's two renderings this one gets. Low confidence opens the full card — but only
- * where there is something to open it on. A one-line message ("tell Kaz it's Windows-only") coerces
- * to a charter with no assumptions, no exclusions and no question, and a card of empty headings says
- * less than the line itself does. `understood` and `doneWhen` both show in the one-line form, so
- * neither is ever the reason to unfold it.
+ * Which of the charter's two renderings this one gets. An exclusion always opens the full card,
+ * whatever the charter scores: it is the one thing on it that refuses a merge later, and the
+ * one-line form has nowhere to show it, so a confident charter would otherwise be agreed to with a
+ * rule on it the user never saw. Otherwise low confidence opens the card — but only where there is
+ * something to open it on. A one-line message ("tell Kaz it's Windows-only") coerces to a charter
+ * with no assumptions, no exclusions and no question, and a card of empty headings says less than
+ * the line itself does. `understood` and `doneWhen` both show in the one-line form, so neither is
+ * ever the reason to unfold it.
  */
-export const fullCard = (c: Charter) => c.confidence < FULL_CARD_BELOW && (c.assumptions.length > 0 || c.wontTouch.length > 0 || !!c.question)
+export const fullCard = (c: Charter) => c.wontTouch.length > 0 || (c.confidence < FULL_CARD_BELOW && (c.assumptions.length > 0 || !!c.question))
 
 /**
  * Answering the charter's one question. The answer joins what the job is understood to be — that is
@@ -283,6 +286,13 @@ export const fullCard = (c: Charter) => c.confidence < FULL_CARD_BELOW && (c.ass
  * range"), and few of them read as a sentence after a full stop.
  */
 const answerQuestion = (c: Charter, option: string) => useCharter.getState().edit({ understood: `${noStop(c.understood)} — ${noStop(option)}.`, question: undefined, ambiguity: undefined })
+
+/**
+ * What confirming this charter will do, after the name on the card. A door that always starts a new
+ * team (a playbook) while one is running takes the running team's place — the card is the one screen
+ * where that can be said before it happens, so it says it.
+ */
+export const charterHead = (c: Charter) => (c.followUpTo ? 'gets this next' : c.replaces ? `starts with this, replacing ${c.replaces}’s team` : 'starts with this')
 
 /**
  * The card on the command bar: what the user asked for, as it was understood, before anything runs.

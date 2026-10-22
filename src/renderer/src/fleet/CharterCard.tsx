@@ -58,8 +58,9 @@ export function CharterCard({ charter: c }: { charter: Charter }) {
           ))}
         </div>
       )}
-      {/* one line per exclusion: these are what a merge is refused for, so every one of them is read
-          before it is agreed to, however many the model wrote */}
+      {/* one line per exclusion, however many the model wrote: these are what a merge is refused
+          for, which is why any charter carrying one is this rendering and not the one-line form
+          (fullCard) — there is nowhere up there to read them */}
       {c.wontTouch.length > 0 && (
         <div className="ch-row">
           <Ban size={12} />

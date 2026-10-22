@@ -81,10 +81,28 @@ export function ownedBy(file: string, owns: string[] | undefined): boolean {
   return (owns ?? []).some((raw) => covers(f, raw))
 }
 
+/**
+ * An exclusion in the form `covers` can match, or null for one that must not be used at all.
+ * Exclusions alone go through this: `owns` is a grant, where a leading slash or a glob that matches
+ * nothing only over-flags, while here it would silently protect nothing — or, for a bare `*`,
+ * everything, refusing a merge over a rule the user was never shown.
+ */
+const asExclusion = (raw: string): string | null => {
+  const o = norm(raw)
+    .replace(/^\/+/, '')
+    .replace(/\/\*\*(\/\*)?$/, '/*')
+  return o && !/^\*+$/.test(o) ? o : null
+}
+
 /** The `wontTouch` entry that covers `file`, as it was written, or null. */
 export function excludedBy(file: string, wontTouch: string[] | undefined): string | null {
   const f = norm(file)
-  return (wontTouch ?? []).find((raw) => covers(f, raw)) ?? null
+  return (
+    (wontTouch ?? []).find((raw) => {
+      const o = asExclusion(raw)
+      return o !== null && covers(f, o)
+    }) ?? null
+  )
 }
 
 const gapOf = (m: FleetMember): Claim['gap'] | undefined => {
