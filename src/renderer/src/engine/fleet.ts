@@ -4,7 +4,7 @@ import type { FleetMember, FleetState } from '@shared/fleet'
 import { type Charter, charterMessage } from '@shared/charter'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
-import { draftCharter, gateCharter } from '../fleet/charter'
+import { clearGate, draftCharter, gateCharter } from '../fleet/charter'
 import { CONSOLE_H, CONSOLE_W } from './consoles'
 
 // Board side of lead/worker teams: mirrors the fleet state from the main process, places team
@@ -162,7 +162,11 @@ export function wireFleet() {
     useFleet.setState({ state: p ? await invoke<FleetState>('fleet:state', p.id, p.path) : null })
   }
   useApp.subscribe((s, prev) => {
-    if (s.project?.id !== prev.project?.id) refresh()
+    if (s.project?.id === prev.project?.id) return
+    // the card about the project just left names a Lead and a repo that are gone, and nothing it
+    // starts could land anywhere: whoever is waiting at the gate is let go with it
+    clearGate()
+    refresh()
   })
   refresh()
 
