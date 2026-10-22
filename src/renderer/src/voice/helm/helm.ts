@@ -2,6 +2,7 @@
 // for a short answer plus 1-3 one-click routes (playbook, team goal, message to a console, board
 // actions, a panel), and runs the one the user picks. The card itself is HelmCard.tsx.
 import { create } from 'zustand'
+import { coerceCharter } from '@shared/charter'
 import { useApp } from '../../state/store'
 import { extractJson, runCli, uid } from '../../lib/api'
 import { activeLead, sendGoal } from '../../engine/fleet'
@@ -352,8 +353,10 @@ async function execOption(o: HelmOption, request: string) {
         return
       }
       case 'team': {
-        const lead = await sendGoal(o.goal!)
-        const line = lead && activeLead()?.id === lead.id ? `Sent to ${lead.name}.` : 'Started a Lead for this. It will plan, delegate and report back in your Inbox.'
+        // the charter rode Oracle's own reply; a missing or unusable one is a low-confidence charter, not a second model call
+        const lead = await sendGoal(o.goal!, coerceCharter(o.charter, request))
+        if (!lead) return // dismissed at the gate (or the folder was declined): nothing started, so nothing to report
+        const line = activeLead()?.id === lead.id ? `Sent to ${lead.name}.` : 'Started a Lead for this. It will plan, delegate and report back in your Inbox.'
         thread().add('system', line)
         setVoice({ reply: line, captionUntil: Date.now() + 6000 })
         return

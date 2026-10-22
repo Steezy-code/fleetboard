@@ -3,6 +3,7 @@ import { invoke } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { CONSOLE_H, CONSOLE_W, nextName } from '../engine/consoles'
 import { confirmTeamFolder } from '../engine/fleet'
+import { draftCharter, gateCharter } from '../fleet/charter'
 import { playbookById } from './catalog'
 
 /** Remember what was typed last time, per playbook. */
@@ -37,12 +38,14 @@ export async function runPlaybook(id: string, inputs: Record<string, string> = {
   rememberInputs(id, values)
 
   const goal = pb.brief!(values)
-  if (!(await confirmTeamFolder(p.path))) return null
-  app.toast(`${pb.name}: starting a Lead…`)
   // short title for the Ready card, branch name and merge commit: "Hotfix: wordCount gives 1 for…"
   const first = pb.inputs.map((i) => values[i.key]).find((v) => v && v !== 'yes')
   const title = first ? `${pb.name}: ${first.length > 70 ? first.slice(0, 68) + '…' : first}` : pb.name
-  const lead = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal, title })
+  const charter = await gateCharter(await draftCharter(goal))
+  if (!charter) return null
+  if (!(await confirmTeamFolder(p.path))) return null
+  app.toast(`${pb.name}: starting a Lead…`)
+  const lead = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal, title, charter })
 
   // extra tiles (live preview, dev server) go to the right of the new Lead once it is on the board
   const tiles = pb.tiles?.(values) ?? []

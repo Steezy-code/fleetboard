@@ -57,7 +57,7 @@ const RISKS: { why: string; hit: (p: string) => boolean }[] = [
 ]
 
 /** git reports forward slashes; `owns` comes from an agent and may not. */
-const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
+export const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
 
 /**
  * Does one entry cover `f` (already `norm`ed)? An entry is either the file itself, a folder
