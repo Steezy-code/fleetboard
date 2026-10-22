@@ -26,21 +26,24 @@ Charter rules:
 - ambiguity and question: only when something material is unclear. ambiguity names the kind of gap: scope (how much), acceptance (how to tell it is finished), subject (which thing the request means) or constraint (a limit it did not state). Ask at most one question, the one with the most leverage, and guess the rest, marked as guesses. Leave both out when nothing is unclear.
 - Never report a confidence number: it is computed from the evidence above, not from what you claim.`
 
-const draftPrompt = (request: string) => `You are drafting a charter for Fleetboard, where a Lead agent will plan work and run workers in git worktrees on this repo. Before anyone starts, the user will check what you understood their request to be.
+const draftPrompt = (request: string, procedure?: string) => `You are drafting a charter for Fleetboard, where a Lead agent will plan work and run workers in git worktrees on this repo. Before anyone starts, the user will check what you understood their request to be.
 Reply with ONLY a JSON object, no prose, no code fences:
 ${CHARTER_FIELDS}
 
-User request: ${JSON.stringify(request)}`
+User request: ${JSON.stringify(request)}${procedure ? `
+The work will follow this procedure, already chosen by the user; the charter must not describe a job it contradicts: ${JSON.stringify(procedure)}` : ''}`
 
 /**
  * A charter from its own model call, for a door that never consults Oracle (a playbook, a
- * brainstorm idea). A bad or missing reply costs confidence, never the goal.
+ * brainstorm idea). A bad or missing reply costs confidence, never the goal. `procedure` is how the work
+ * will be done where the user has already chosen that (a playbook's step list): it informs the draft but
+ * is not the request, which stays the user's words and is what a failed draft falls back to.
  */
-export async function draftCharter(request: string): Promise<Charter> {
+export async function draftCharter(request: string, procedure?: string): Promise<Charter> {
   const app = useApp.getState()
   if (!app.project) return coerceCharter(null, request)
   try {
-    const res = await runCli({ prompt: draftPrompt(request), cwd: app.project.path, agentId: app.settings.plannerAgent || undefined }).promise
+    const res = await runCli({ prompt: draftPrompt(request, procedure), cwd: app.project.path, agentId: app.settings.plannerAgent || undefined }).promise
     return coerceCharter(extractJson(res.text), request)
   } catch {
     return coerceCharter(null, request)

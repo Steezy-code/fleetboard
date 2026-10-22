@@ -3,7 +3,7 @@
 import type { BoardNode, ConsoleData, Group, Role } from '@shared/types'
 import { ROLES } from '@shared/types'
 import { AGENTS, AGENT_ALIASES } from '@shared/agents'
-import { charterBrief, coerceCharter } from '@shared/charter'
+import { charterMessage, coerceCharter } from '@shared/charter'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { agentLabel, isLive, killConsoles, pauseAll, resumeAll, sendToConsole, spawnConsoles } from '../engine/consoles'
 import { handoff } from '../engine/handoff'
@@ -449,7 +449,7 @@ export async function runAction(a: Action): Promise<ActionResult> {
       if (to) {
         const confirmed = await gateCharter(coerceCharter(null, a.text), to)
         if (!confirmed) return { ok: false, line: `Not sent to ${namesOf(members)}: the charter was dismissed${direct.length ? ` (${namesOf(direct)} got it)` : ''}.` }
-        members.forEach((id) => sendToConsole(id, charterBrief(confirmed), true))
+        members.forEach((id) => sendToConsole(id, charterMessage(confirmed, a.text), true))
       }
       touch(ids)
       const onlyTarget = a.targets.length === 1 ? a.targets[0] : undefined

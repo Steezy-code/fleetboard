@@ -348,6 +348,7 @@ async function execOption(o: HelmOption, request: string) {
           return
         }
         const lead = await runPlaybook(pb.id, o.playbook!.inputs)
+        if (!lead && !pb.panel) return // dismissed at the gate, or the folder was declined: nothing opened or started
         const line = lead ? `${pb.name}: ${lead.name} is on it. Results land in your Inbox.` : `Opened ${pb.name}.`
         reply(line)
         return

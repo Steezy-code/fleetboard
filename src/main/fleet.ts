@@ -8,7 +8,7 @@ import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
 import { emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
-import { charterBrief } from '@shared/charter'
+import { charterMessage } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
@@ -483,17 +483,8 @@ function pickName(s: FleetState, wanted?: string) {
   return `Worker ${used.size + 1}`
 }
 
-/**
- * What the Lead is first told: the agreed charter when there is one, otherwise the goal as given. The charter
- * says what the job is and how it will be known to be done; a goal that is more than the request the user
- * typed (a playbook's step list, Oracle's rewrite) says how to go about it, so it follows the charter.
- */
-export function goalMessageFor(charter: Charter | undefined, goal: string): string {
-  if (!charter) return goal
-  const brief = charterBrief(charter)
-  const how = goal.trim()
-  return how && how !== charter.request.trim() ? `${brief} ${how}` : brief
-}
+/** What the Lead is first told: the agreed charter, with the goal after it where that is more than the request (see charterMessage), otherwise the goal as given. */
+export const goalMessageFor = (charter: Charter | undefined, goal: string) => (charter ? charterMessage(charter, goal) : goal)
 
 /** What a Lead is told when its console comes back. A restored conversation still has its goal, so it is not repeated. */
 export function leadRestartNote(o: { how: string; team: string; task: string; charter: Charter | undefined; resume: boolean }) {

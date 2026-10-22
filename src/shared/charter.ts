@@ -98,13 +98,13 @@ export function scoreConfidence(c: Pick<Charter, 'assumptions' | 'wontTouch' | '
 }
 
 const sentence = (s: string) => (/[.!?]$/.test(s) ? s : `${s}.`)
+const one = (s: string) => s.replace(/\s+/g, ' ').trim()
 
 /**
  * What the Lead is told the job is, in place of the user's raw words. One line of plain text: it is
  * typed into a terminal, where a newline submits it and markdown is just noise.
  */
 export function charterBrief(c: Charter): string {
-  const one = (s: string) => s.replace(/\s+/g, ' ').trim()
   const parts = [sentence(one(c.understood))]
   if (c.assumptions.length) {
     parts.push(sentence(`Assumptions: ${c.assumptions.map((a) => (a.known && a.from ? `${one(a.text)} (from ${one(a.from)})` : `${one(a.text)} (a guess)`)).join('; ')}`))
@@ -112,4 +112,17 @@ export function charterBrief(c: Charter): string {
   if (c.wontTouch.length) parts.push(sentence(`Do not touch: ${c.wontTouch.map(one).join(', ')}`))
   if (c.doneWhen.trim()) parts.push(sentence(`Done when: ${one(c.doneWhen)}`))
   return parts.join(' ')
+}
+
+/**
+ * What the Lead is told about a piece of work: the charter, and the goal after it when the goal is more
+ * than the request the user typed (a playbook's step list, Oracle's rewrite). The charter says what the job
+ * is and how it is known to be done; such a goal says how to go about it, which the charter does not. One
+ * rule, for the Lead's first message and for a follow-up to it, so the two cannot disagree. One line, like
+ * the brief.
+ */
+export function charterMessage(c: Charter, goal: string): string {
+  const brief = charterBrief(c)
+  const how = one(goal)
+  return how && how !== one(c.request) ? `${brief} ${how}` : brief
 }

@@ -1,7 +1,7 @@
 // The charter: what a goal was understood to be, and the score that says how far to trust that.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FULL_CARD_BELOW, charterBrief, coerceCharter, scoreConfidence } from '../../src/shared/charter'
+import { FULL_CARD_BELOW, charterBrief, charterMessage, coerceCharter, scoreConfidence } from '../../src/shared/charter'
 
 test('confidence is the share of assumptions that cite evidence', () => {
   const c = { assumptions: [{ text: 'a', known: true }, { text: 'b', known: true }, { text: 'c', known: false }], wontTouch: ['x'], doneWhen: 'npm test' }
@@ -79,4 +79,34 @@ test('a charter that shows its evidence reads as confident', () => {
 test('the brief is one line, since a newline typed into a terminal submits it', () => {
   const b = charterBrief(coerceCharter({ understood: 'Add a split\n\nsubcommand', assumptions: [{ text: 'a\nb', known: false }], wontTouch: ['x'], doneWhen: 'npm test' }, 'r'))
   assert.doesNotMatch(b, /[\r\n]/)
+})
+
+// The charter says what the job is and how it is known to be done. A goal that is more than the request
+// the user typed (a playbook's step list, Oracle's rewrite) says how to go about it, so it follows the brief.
+const MSG = coerceCharter({ understood: 'Add a split subcommand', doneWhen: 'npm test' }, 'add split to the cli', 1)
+
+test('a goal that is the request adds nothing to the brief', () => {
+  assert.equal(charterMessage(MSG, 'add split to the cli'), charterBrief(MSG))
+  assert.equal(charterMessage(MSG, '  add split\n to the   cli \n'), charterBrief(MSG), 'spacing is not a different goal')
+})
+
+test('a goal that is more than the request follows the brief, whole', () => {
+  const how = 'Find the split subcommand in src/cli and write one file per page range.'
+  assert.equal(charterMessage(MSG, how), charterBrief(MSG) + ' ' + how)
+})
+
+test('what follows the brief is one line too, since a newline typed into a terminal submits it', () => {
+  const m = charterMessage(MSG, 'Playbook "Hotfix".\n1) reproduce it\n\n2) fix it  ')
+  assert.doesNotMatch(m, /[\r\n]/)
+  assert.ok(m.endsWith('Playbook "Hotfix". 1) reproduce it 2) fix it'))
+})
+
+test('an empty goal adds nothing', () => {
+  assert.equal(charterMessage(MSG, '  \n'), charterBrief(MSG))
+})
+
+test('a multi-line request is still the request: the goal that is the same text is not added again', () => {
+  const pasted = 'add split to the cli\n\nwith tests'
+  const c = coerceCharter({ understood: 'Add split with tests' }, pasted, 1)
+  assert.equal(charterMessage(c, pasted), charterBrief(c))
 })

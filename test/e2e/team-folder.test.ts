@@ -19,6 +19,12 @@ after(async () => {
 const leads = async (projectId: string) => Object.values((await app.invoke('fleet:state', projectId))?.members ?? {}).filter((m: any) => m.role === 'lead').length
 const dialogText = () => app.waitFor(async () => (await app.texts('body')).join('').match(/Let the team work in your files directly\?[^]*?Start anyway/)?.[0], { label: 'the question' })
 const goal = () => app.eval(() => void (window as any).__fleetboard.sendGoal('tidy up the readme'))
+// every goal waits at the gate for a glance before anything starts, the folder question included
+const charterUp = () => app.waitFor(() => app.eval(() => !!(window as any).__fleetboard.useCharter.getState().pending), { label: 'the charter' })
+const confirmCharter = async () => {
+  await charterUp()
+  await app.eval(() => (window as any).__fleetboard.useCharter.getState().confirm())
+}
 
 test('a folder that is not a repository: asked first; Cancel starts nothing, Start anyway starts the Lead', async () => {
   const dir = path.join(sb.home, 'plain folder')
@@ -26,11 +32,17 @@ test('a folder that is not a repository: asked first; Cancel starts nothing, Sta
   fs.writeFileSync(path.join(dir, 'README.md'), '# plain\n')
   const projectId = await app.openProject(dir)
   await goal()
+  await charterUp()
+  await new Promise((r) => setTimeout(r, 500))
+  assert.equal(await leads(projectId), 0, 'nothing starts while the charter waits')
+  assert.doesNotMatch((await app.texts('body')).join(''), /Let the team work in your files directly/, 'and the folder question comes after it')
+  await confirmCharter()
   assert.match(await dialogText(), /not a git repository/)
   await app.click('button', 'Cancel')
   await new Promise((r) => setTimeout(r, 500))
   assert.equal(await leads(projectId), 0, 'nothing started')
   await goal()
+  await confirmCharter()
   await dialogText()
   await app.click('button', 'Start anyway')
   await app.waitFor(async () => (await leads(projectId)) === 1, { label: 'Lead started' })
@@ -43,6 +55,7 @@ test('a repository without a commit: asked too', async () => {
   git(sb, dir, 'init', '-q')
   const projectId = await app.openProject(dir)
   await goal()
+  await confirmCharter()
   assert.match(await dialogText(), /no commits yet/)
   await app.click('button', 'Cancel')
   await new Promise((r) => setTimeout(r, 500))
@@ -54,6 +67,7 @@ test('a repository with a commit: the team starts in worktrees without a questio
   const repo = makeRepo(sb, 'real repo')
   const projectId = await app.openProject(repo)
   await goal()
+  await confirmCharter()
   await app.waitFor(async () => (await leads(projectId)) === 1, { label: 'Lead started' })
   assert.doesNotMatch((await app.texts('body')).join(''), /Let the team work in your files directly/)
 })
