@@ -30,15 +30,19 @@ export interface FileFlag {
   path: string
   /** no member was granted this file */
   outside: boolean
+  /** the charter's won't-touch entry this file falls under: the user ruled it out whoever was granted it */
+  excluded?: string
   /** why it is worth a look whoever owns it */
   why?: string
 }
 
 export interface MergeReview {
-  /** outside-the-scope files first, then the merely sensitive ones */
+  /** excluded files first, then outside-the-scope ones, then the merely sensitive */
   flags: FileFlag[]
   claims: Claim[]
-  /** every file in the diff was inside someone's owns, and every claim is proven */
+  /** a file in the diff is one the charter ruled out */
+  blocked: boolean
+  /** nothing is blocked, every file in the diff was inside someone's owns, and every claim is proven */
   clean: boolean
 }
 
@@ -56,20 +60,31 @@ const RISKS: { why: string; hit: (p: string) => boolean }[] = [
 const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
 
 /**
- * Is `file` inside one of `owns`? An entry is either the file itself, a folder containing it, or a
- * trailing-`*` prefix.
+ * Does one entry cover `f` (already `norm`ed)? An entry is either the file itself, a folder
+ * containing it, or a trailing-`*` prefix.
  *
  * ponytail: exact / folder-prefix / trailing-star only, no real globbing. If agents start writing
- * `src/**\/*.ts` in owns, swap the body for a glob matcher — the callers don't change.
+ * `src/**\/*.ts` in owns or wontTouch, swap the body for a glob matcher — the callers don't change.
+ * The two fail differently: an owns entry that matches nothing over-flags, but a wontTouch entry that
+ * matches nothing excludes nothing, so a glob or a description there is held only by the worker's brief.
  */
+const covers = (f: string, raw: string): boolean => {
+  const o = norm(raw)
+  if (!o) return false
+  if (o.endsWith('*')) return f.startsWith(o.slice(0, -1))
+  return f === o || f.startsWith(`${o}/`)
+}
+
+/** Is `file` inside one of `owns`? */
 export function ownedBy(file: string, owns: string[] | undefined): boolean {
   const f = norm(file)
-  return (owns ?? []).some((raw) => {
-    const o = norm(raw)
-    if (!o) return false
-    if (o.endsWith('*')) return f.startsWith(o.slice(0, -1))
-    return f === o || f.startsWith(`${o}/`)
-  })
+  return (owns ?? []).some((raw) => covers(f, raw))
+}
+
+/** The `wontTouch` entry that covers `file`, as it was written, or null. */
+export function excludedBy(file: string, wontTouch: string[] | undefined): string | null {
+  const f = norm(file)
+  return (wontTouch ?? []).find((raw) => covers(f, raw)) ?? null
 }
 
 const gapOf = (m: FleetMember): Claim['gap'] | undefined => {
@@ -116,13 +131,15 @@ export function reviewReady(s: FleetState): MergeReview | null {
   const flags: FileFlag[] = []
   for (const f of r.files) {
     const outside = granted.length > 0 && !ownedBy(f, granted)
+    const excluded = excludedBy(f, s.charter?.wontTouch)
     const rule = RISKS.find((x) => x.hit(norm(f)))
-    if (outside || rule) flags.push({ path: f, outside, ...(rule ? { why: rule.why } : {}) })
+    if (excluded || outside || rule) flags.push({ path: f, outside, ...(excluded ? { excluded } : {}), ...(rule ? { why: rule.why } : {}) })
   }
-  // reaching outside the brief is the thing to read first; a sensitive file somebody owns is a note
-  flags.sort((a, b) => Number(b.outside) - Number(a.outside))
+  // what the user ruled out comes first, then reaching outside the brief; a sensitive file somebody owns is a note
+  flags.sort((a, b) => Number(!!b.excluded) - Number(!!a.excluded) || Number(b.outside) - Number(a.outside))
 
-  return { flags, claims, clean: !flags.some((f) => f.outside) && claims.every((c) => c.proven) }
+  const blocked = flags.some((f) => f.excluded)
+  return { flags, claims, blocked, clean: !blocked && !flags.some((f) => f.outside) && claims.every((c) => c.proven) }
 }
 
 export interface Stall {

@@ -9,6 +9,7 @@ import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetS
 import { emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
 import { charterBrief } from '@shared/charter'
+import { excludedBy } from '@shared/mergeReview'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -543,6 +544,17 @@ export function numstat(out: string): { path: string; add: number; del: number }
     .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
 }
 
+/** Why a worker's branch cannot be merged: it changed files the charter's won't-touch list rules out. Null when it can. */
+export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined): string | null {
+  const hits = touched.flatMap((f) => {
+    const rule = excludedBy(f, wontTouch)
+    return rule ? [`${f} (excluded by "${rule}")`] : []
+  })
+  if (!hits.length) return null
+  const more = hits.length > 5 ? `, and ${hits.length - 5} more` : ''
+  return `Not merged: ${worker} changed ${hits.slice(0, 5).join(', ')}${more}, which the user ruled out. Ask ${worker} to revert ${hits.length === 1 ? 'it' : 'them'} with fleet_send, then merge again.`
+}
+
 const str = (description: string) => ({ type: 'string', description })
 const strArr = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
 
@@ -823,6 +835,15 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
     case 'fleet_merge': {
       const w = findMember(s, a.worker)
       if (!w?.branch) return fail('That worker has no branch to merge.')
+      // before the merge, so a refusal leaves the lead's worktree as it was
+      const wontTouch = s.charter?.wontTouch
+      if (wontTouch?.length) {
+        // -z: git quotes non-ASCII names otherwise, and a quoted name matches no exclusion; --no-renames: a move touches the file it left
+        const d = await git(m.cwd, ['diff', '--name-only', '-z', '--no-renames', `HEAD...${w.branch}`])
+        if (!d.ok) return fail(`Not merged: ${w.name}'s changes could not be checked against what the user ruled out: ${d.err.slice(0, 300)}`)
+        const refusal = excludedRefusal(w.name, d.out.split('\0').filter(Boolean), wontTouch)
+        if (refusal) return fail(refusal)
+      }
       const r = await git(m.cwd, ['merge', '--no-ff', '--no-edit', w.branch])
       if (!r.ok) {
         const conflicts = (await git(m.cwd, ['diff', '--name-only', '--diff-filter=U'])).out
