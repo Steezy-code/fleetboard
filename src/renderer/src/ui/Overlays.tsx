@@ -42,7 +42,13 @@ export function Overlays() {
                 className={`btn ${c.danger ? 'danger' : 'primary'}`}
                 autoFocus
                 onClick={() => c.resolve(true)}
-                onKeyDown={(e) => e.key === 'Escape' && c.resolve(false)}
+                onKeyDown={(e) => {
+                  // the dialog's answer, and nothing else's: the board would otherwise also close the panel behind it
+                  if (e.key !== 'Escape') return
+                  e.preventDefault()
+                  e.stopPropagation()
+                  c.resolve(false)
+                }}
               >
                 {c.confirm ?? 'Confirm'}
               </button>

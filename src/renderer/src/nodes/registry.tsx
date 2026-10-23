@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import type { NodeType } from '@shared/types'
 import type { NodeDef } from './types'
-import ConsoleNode, { ConsoleActions, ConsoleHeader, beforeRemoveConsoles } from './ConsoleNode'
+import ConsoleNode, { ConsoleActions, ConsoleHeader } from './ConsoleNode'
 import WebNode from './WebNode'
 import KanbanNode from './KanbanNode'
 import CalendarNode from './CalendarNode'
@@ -34,7 +34,7 @@ import BrainstormNode from './BrainstormNode'
 const defs: NodeDef[] = [
   {
     type: 'console', label: 'Console', icon: SquareTerminal, component: ConsoleNode, header: ConsoleHeader, actions: ConsoleActions,
-    defaultSize: { w: 780, h: 440 }, minSize: { w: 360, h: 200 }, beforeRemove: beforeRemoveConsoles
+    defaultSize: { w: 780, h: 440 }, minSize: { w: 360, h: 200 }
   },
   { type: 'web', label: 'Web tile', icon: Globe, component: WebNode, defaultSize: { w: 720, h: 480 }, minSize: { w: 280, h: 200 }, create: () => ({ url: '' }) },
   { type: 'kanban', label: 'Board', icon: KanbanSquare, component: KanbanNode, defaultSize: { w: 860, h: 420 }, minSize: { w: 420, h: 240 } },

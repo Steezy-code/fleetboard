@@ -1,6 +1,7 @@
 import { memo, useRef } from 'react'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { BoardNode } from '@shared/types'
+import { mayRemove } from './removeHooks'
 import { NODE_DEFS } from '../nodes/registry'
 import { activeWs, connectClick, focusRect, useApp } from '../state/store'
 import { groupAt, snap } from './geometry'
@@ -90,13 +91,7 @@ function startResize(e: React.PointerEvent, node: BoardNode, edge: 'r' | 'b' | '
 export async function removeWithHooks(ids: string[]) {
   const ws = activeWs()
   if (!ws) return
-  const nodes = ws.nodes.filter((n) => ids.includes(n.id))
-  const byType = new Map<string, BoardNode[]>()
-  for (const n of nodes) byType.set(n.type, [...(byType.get(n.type) ?? []), n])
-  for (const [type, list] of byType) {
-    const hook = NODE_DEFS[type as BoardNode['type']]?.beforeRemove
-    if (hook && !(await hook(list))) return
-  }
+  if (!(await mayRemove(ws.nodes.filter((n) => ids.includes(n.id))))) return
   useApp.getState().removeNodes(ids)
   useApp.getState().setSelection([])
 }
