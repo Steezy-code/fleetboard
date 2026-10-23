@@ -317,7 +317,7 @@ Only while a Lead is working. Three triggers, in this order of weight: the done-
 
 - [ ] **Step 1: Write the failing tests** — two consoles and a kanban selected out of four consoles, a note and a checklist: the snapshot names the two consoles and the kanban's cards, says it is scoped to the user's selection, and contains neither the other consoles' names or output nor the note; the selected consoles get the room the others would have used; a selected group counts as its members (Review Focus 6); a selection of only a wire gives the whole board.
 - [ ] **Step 2: Run them and watch them fail.**
-- [ ] **Step 3: Implement** — the scoped snapshot keeps the project header, the charter and the recent thread, and leaves out the rest of the board, CI and the sweep.
+- [ ] **Step 3: Implement** — the scoped snapshot keeps the project line, the charter (when a selected console is on the team) and the recent thread, and leaves out the rest of the board, the git status, CI and the sweep.
 - [ ] **Step 4: Run them and watch them pass.**
 - [ ] **Step 5: Commit** — `git commit -m "Oracle answers about the tiles you pointed at"`
 

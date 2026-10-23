@@ -142,7 +142,8 @@ export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'
   if (s.check && s.check.command !== command) s.check = { command, runs: [], ...(s.check.off ? { off: true } : {}) }
   const check = s.check ?? { command, runs: [] }
   const head = inWorktree ? (await git(lead.cwd, ['rev-parse', 'HEAD'], { timeout: 20_000 })).stdout.trim() || undefined : undefined
-  const ok = mayRun({ command, off: check.off, running: s.check?.running ?? (inflight.has(s.projectId) ? 1 : undefined), leadWorking, inWorktree, head, lastHead: check.runs[check.runs.length - 1]?.head, reason })
+  // what is in flight is this map's to say: `check.running` is for the board, and survives a stop until the process closes
+  const ok = mayRun({ command, off: check.off, running: inflight.has(s.projectId) ? 1 : undefined, leadWorking, inWorktree, head, lastHead: check.runs[check.runs.length - 1]?.head, reason })
   if (ok !== true) return
   const ac = new AbortController()
   inflight.set(s.projectId, ac)
@@ -154,9 +155,10 @@ export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'
     const run: CheckRun = { at: Date.now(), code: r.code, ...(failing !== undefined ? { failing } : {}), ...(head ? { head } : {}), ...(r.error ? { error: r.error } : {}), ...(r.timedOut ? { timedOut: true } : {}) }
     // a new team's charter meanwhile: this answer is about a job nobody is doing any more
     if (s.check?.command !== command) return
-    // stopped (dismissed, switched off): not a result
-    if (ac.signal.aborted) delete s.check.running
-    else s.check = withRun(s.check, run)
+    // stopped (dismissed, switched off): not a result, and a run started since then is not this one's to clear
+    if (ac.signal.aborted) {
+      if (!inflight.has(s.projectId)) delete s.check.running
+    } else s.check = withRun(s.check, run)
   } finally {
     if (inflight.get(s.projectId) === ac) inflight.delete(s.projectId)
     live.changed(s)
@@ -166,6 +168,9 @@ export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'
 /** End the run in flight for a project (its team was dismissed, or the user switched the check off). */
 export function stopCheck(projectId: string) {
   inflight.get(projectId)?.abort()
+  // forgotten now, not when its process has finished closing: a new team's baseline asked for a
+  // moment later would otherwise be refused as overlapping a run that is already over
+  inflight.delete(projectId)
 }
 
 function checkTick() {
