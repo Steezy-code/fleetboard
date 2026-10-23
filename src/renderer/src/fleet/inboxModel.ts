@@ -202,25 +202,28 @@ export function openConsole(id: string) {
  *
  * ponytail: module state, so it goes when the window reloads — which is the right lifetime for an
  * offer to undo something that happened minutes ago. Persist it only if undo-after-restart is asked
- * for, and then check it is still HEAD before offering (revertMerge already refuses otherwise).
+ * for, and then check it is still HEAD before offering (revertMerge already refuses otherwise). It
+ * belongs to the project it was made in: opening another project swaps the board without a reload,
+ * and that project's Inbox must neither claim the merge nor send its undo to the wrong checkout.
  */
 const UNDO_WINDOW = 15 * 60_000
-let lastMerge: { commit: string; into: string; at: number } | null = null
+type Merge = { projectId: string; commit: string; into: string; at: number }
+let lastMerge: Merge | null = null
 
 async function mergeReady(projectId: string) {
   const app = useApp.getState()
   const r = await invoke<{ ok: boolean; into?: string; error?: string; commit?: string }>('fleet:mergeReady', projectId)
   if (r.ok) {
     app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
-    lastMerge = r.commit ? { commit: r.commit, into: r.into ?? '', at: Date.now() } : null
+    lastMerge = r.commit ? { projectId, commit: r.commit, into: r.into ?? '', at: Date.now() } : null
     refreshInbox()
   } else app.toast(`Merge failed: ${r.error}`, 'error')
 }
 
-async function undoMerge(projectId: string, m: { commit: string; into: string }) {
+async function undoMerge(m: Merge) {
   const app = useApp.getState()
   if (!(await app.confirm({ title: `Undo the merge into ${m.into}?`, body: 'Adds a commit that reverses everything the team merged. Its branches and worktrees are already gone, so this cannot be re-merged with one click.', confirm: 'Undo the merge', danger: true }))) return
-  const r = await invoke<{ ok: boolean; error?: string }>('fleet:revertMerge', projectId, m.commit)
+  const r = await invoke<{ ok: boolean; error?: string }>('fleet:revertMerge', m.projectId, m.commit)
   if (r.ok) {
     app.toast(`Reverted. ${m.into} is back where it was.`, 'ok')
     lastMerge = null
@@ -502,10 +505,10 @@ function build() {
   }
 
   // the merge that just happened, while undoing it is still one click
-  if (lastMerge && Date.now() - lastMerge.at < UNDO_WINDOW) {
+  if (lastMerge && lastMerge.projectId === project.id && Date.now() - lastMerge.at < UNDO_WINDOW) {
     const m = lastMerge
     const key = `merged:${m.commit}`
-    if (!dismissed.has(key)) items.push(mergedNotice(key, m, project.id))
+    if (!dismissed.has(key)) items.push(mergedNotice(key, m))
   }
 
   const fb = useFeedback.getState().result
@@ -574,7 +577,7 @@ function stalledNotice(key: string, x: Stall): InboxItem {
   }
 }
 
-function mergedNotice(key: string, m: { commit: string; into: string }, projectId: string): InboxItem {
+function mergedNotice(key: string, m: Merge): InboxItem {
   return {
     kind: 'notice',
     tone: 'info',
@@ -586,7 +589,7 @@ function mergedNotice(key: string, m: { commit: string; into: string }, projectI
     since: seen(key),
     actions: [
       { label: 'Looks right', primary: true, run: () => undefined },
-      { label: 'Undo the merge', tone: 'deny', run: () => undoMerge(projectId, m) }
+      { label: 'Undo the merge', tone: 'deny', run: () => undoMerge(m) }
     ]
   }
 }

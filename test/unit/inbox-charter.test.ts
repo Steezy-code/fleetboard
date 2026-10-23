@@ -256,6 +256,26 @@ describe('the Ready card', () => {
     assert.deepEqual(primaries(item), ['Done'])
   })
 
+  // Opening another project swaps the board without a reload, and main keeps a team state per
+  // project: an undo offered there would revert in the wrong checkout, or be refused for a reason
+  // that is not true of it.
+  test('the undo offered after a merge belongs to the project the merge was made in', async () => {
+    ipc.handle('fleet:mergeReady', () => ({ ok: true, commit: 'abc1234', into: 'main' }))
+    fleet({ members: { [lead.id]: lead }, ready })
+    const item = await readyItem()
+    await runAction(item, labels(item).indexOf('Merge'))
+    fleet({ members: {}, ready: null })
+    const merged = async () => (await list()).find((i) => i.key === 'merged:abc1234')
+    assert.ok(await merged(), 'the project it was made in offers the undo')
+    useApp.setState({ project: { ...project, id: 'q' } as any })
+    assert.equal(await merged(), undefined, 'another project’s Inbox does not')
+    useApp.setState({ project: project as any })
+    const back = await merged()
+    assert.ok(back, 'and coming back within the window offers it again')
+    await runAction(back, labels(back).indexOf('Looks right'))
+    assert.equal(await merged(), undefined)
+  })
+
   test('work inside what the charter allowed still merges with one click', async () => {
     fleet({ members: { [lead.id]: { ...lead, owns: ['src'] } }, ready, charter: coerceCharter({ understood: 'u', wontTouch: ['docs'] }, 'r') })
     const item = await readyItem()
