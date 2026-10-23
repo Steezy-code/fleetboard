@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { MainContext } from './context'
-import { type KnowledgeFact, slug } from '@shared/knowledge'
+import { type KnowledgeFact, type RepoReading, slug } from '@shared/knowledge'
 import { allowed } from './roots'
 
 // The free half of repo knowledge: what a repo's own files say about how it is checked, who owns what
@@ -9,12 +9,6 @@ import { allowed } from './roots'
 // run whenever its result is a few minutes old without costing the user anything. Everything here is
 // `repo` provenance, which is why it reads only what a file states outright and leaves anything that
 // needs judgement to the model pass (renderer/src/fleet/knowledge.ts).
-
-export interface RepoReading {
-  facts: KnowledgeFact[]
-  /** the readme and guides that exist: what the model pass reads, and what `readme` provenance is checked against */
-  docs: string[]
-}
 
 /** A config or manifest is kilobytes; anything far past that is not one, and is not worth the read. */
 const MAX_FILE = 256 * 1024
