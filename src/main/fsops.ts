@@ -97,15 +97,19 @@ export function writeText(file: string, content: string, base?: string | null): 
   } catch {
     /* gone, or not a file this could have written */
   }
+  // A textarea gives back "\n" for every line break, so a file that uses CRLF keeps its own line
+  // endings when saved; and the editor's idea of what is on disk after that save is the LF text it
+  // sent, which is the same file.
+  const crlf = !!existing && usesCrlf(existing)
+  const asOnDisk = (t: string) => (crlf ? t.replace(/\r?\n/g, '\r\n') : t)
   if (base !== undefined) {
     const current = existing ? existing.toString('utf8') : null
-    if (current !== base) return { ok: false, reason: 'changed', current }
+    if (current !== (base === null ? null : asOnDisk(base)) && current !== base) return { ok: false, reason: 'changed', current }
   }
   // An editor holds text, so a file that is not UTF-8 came to it with its odd bytes already replaced;
-  // saving that would replace them on disk too. And a textarea gives back "\n" for every line break,
-  // so a file that uses CRLF would be rewritten line by line: it keeps its own line endings.
+  // saving that would replace them on disk too.
   if (existing && !isUtf8(existing)) throw new Error(`${path.basename(file)} is not UTF-8 text, so it was not saved: writing it from an editor would change bytes the editor cannot show.`)
-  writeResolved(file, existing && usesCrlf(existing) ? content.replace(/\r?\n/g, '\r\n') : content)
+  writeResolved(file, asOnDisk(content))
   return { ok: true }
 }
 
