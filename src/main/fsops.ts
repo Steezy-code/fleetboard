@@ -217,6 +217,9 @@ export function register(ctx: MainContext) {
  * Files the desktop would run rather than show (scripts, binaries, launchers): a link in a README
  * must not start a program. Those are revealed in the file manager instead.
  */
+/** Folders macOS opens by running them, or by installing what is inside. */
+const BUNDLE = /\.(app|prefpane|workflow|action|saver|qlgenerator|mdimporter|plugin|bundle|kext|pkg|mpkg)\/?$/i
+
 const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|msp|ps1|psm1|vbs|vbe|js|jse|mjs|cjs|wsf|wsh|wsc|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|pif|x86_64|hta|scr|cpl|chm|msc|reg|xll|appx|msix|application|appref-ms|settingcontent-ms)$/i
 
 /**
@@ -230,7 +233,8 @@ const VIEWABLE_ON_WINDOWS = /\.(md|markdown|txt|text|log|csv|tsv|json|jsonl|ya?m
 export function opensSafely(p: string, platform: NodeJS.Platform = process.platform): boolean {
   try {
     const st = fs.statSync(p)
-    if (st.isDirectory()) return true
+    // a folder opens in the file manager, unless it is one macOS runs: an app bundle and its kin
+    if (st.isDirectory()) return !RUNNABLE.test(p) && !BUNDLE.test(p)
     if (!st.isFile()) return false
     if (platform === 'win32') return VIEWABLE_ON_WINDOWS.test(p)
     if (st.mode & 0o111) return false
