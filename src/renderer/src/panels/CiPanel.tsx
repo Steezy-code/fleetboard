@@ -150,7 +150,7 @@ function Feedback({ pr }: { pr: PrFeedback }) {
   useApp((s) => s.live)
   const [busy, setBusy] = useState(false)
   const fresh = unsent(pr)
-  const owner = ownerOf(pr.branch)
+  const owner = ownerOf(pr)
   const shown = (fresh.length ? fresh : pr.comments).slice(-3)
   const target = owner ? owner.name : 'a new console'
   return (
@@ -159,7 +159,7 @@ function Feedback({ pr }: { pr: PrFeedback }) {
         <MessageSquareText size={12} />
         <span className="grow">
           {fresh.length ? `${fresh.length} new review comment${fresh.length === 1 ? '' : 's'}` : `${pr.comments.length} review comment${pr.comments.length === 1 ? '' : 's'}, all sent`}
-          {agentMade(pr.branch) ? ' · made by an agent' : ''}
+          {agentMade(pr) ? ' · made by an agent' : ''}
         </span>
       </div>
       {shown.map((c) => (

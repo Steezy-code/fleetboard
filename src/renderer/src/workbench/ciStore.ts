@@ -4,7 +4,7 @@ import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { sendToConsole, spawnConsoles } from '../engine/consoles'
 import { maySpendOn } from '../engine/guards'
-import { ownerOf, refreshFeedback, setBranchAgent, useFeedback } from './prFeedback'
+import { autoApproves, ownerOf, refreshFeedback, setBranchAgent, useFeedback } from './prFeedback'
 import type { CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
 export type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
@@ -173,7 +173,11 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   if (!app.project || !status?.ok || !path) return null
   // Automatic only: when the user presses Fix it themselves, that is their call to make. Spawning an
   // agent is the most expensive thing this app does on its own.
-  if (opts.auto && !maySpendOn(app.settings.plannerAgent, 'sending an agent at a CI failure')) return null
+  // never on its own for a fork's PR: anyone can open one, and its title, check names and log are
+  // theirs, written into the fixer's prompt. The user can still send one by pressing Fix it.
+  if (opts.auto && item.pr?.fork) return null
+  // the spend guard asks about the agent a fixer runs: a new console's default agent
+  if (opts.auto && !maySpendOn(app.settings.defaultAgent, 'sending an agent at a CI failure')) return null
   const busy = fixerFor(item.key)
   if (busy) {
     if (!opts.auto) app.focusItem(busy)
@@ -197,7 +201,12 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
     "Never weaken, skip or delete a test to make it pass; if a test itself looks wrong, or the failure isn't in our code (an outage, a secret, a flaky runner), stop and tell me instead."
   ].join('\n\n')
   // a PR that an agent is already working on goes back to that agent
-  const owner = item.pr ? ownerOf(item.branch) : null
+  const owner = item.pr ? ownerOf(item.pr) : null
+  if (owner && opts.auto && autoApproves(owner.id)) {
+    // it would act on a CI log without asking: tell the user instead, who can still send it by hand
+    app.toast(`CI failed on PR #${item.pr!.number}: ${owner.name} approves everything, so the failure was not sent to it automatically`, 'warn')
+    return null
+  }
   if (owner) {
     const note = `${prompt.replace(/\n\nDon't touch my current checkout[^\n]*|\n\nThen commit and push to [^\n]*/, '')}\n\nFix it on ${item.branch} and push.`
     if (owner.lead) await invoke('fleet:userMessage', owner.id, note)
@@ -209,7 +218,9 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   const taken = allConsoles().map((c) => c.data.name as string)
   let name = 'CI fixer'
   for (let n = 2; taken.includes(name); n++) name = `CI fixer ${n}`
-  const [id] = spawnConsoles({ names: [name], initialPrompt: prompt })
+  // explicitly not auto-approving, like a PR fixer: the prompt holds a CI log, which is other people's
+  // words, and without this the console would inherit the global auto-approve setting
+  const [id] = spawnConsoles({ names: [name], initialPrompt: prompt, autoApprove: false })
   if (!id) return null
   fixers.set(item.key, id)
   if (item.pr) setBranchAgent(item.branch, id)

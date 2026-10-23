@@ -512,7 +512,7 @@ function build() {
   const fb = useFeedback.getState().result
   for (const pr of fb?.ok ? fb.prs : []) {
     const fresh = unsent(pr)
-    if (!fresh.length || agentMade(pr.branch)) continue
+    if (!fresh.length || agentMade(pr)) continue
     const key = `review:${pr.number}:${fresh.map((c) => c.id).join(',')}`
     if (dismissed.has(key)) continue
     items.push(reviewNotice(key, pr, fresh.length))

@@ -69,3 +69,10 @@ test('a console that approves everything counts as auto-approving', () => {
   assert.equal(prf.autoApproves('asks'), false, 'an explicit false still wins')
   assert.equal(prf.autoApproves('no-such-console'), false)
 })
+
+test('a fork’s PR is never "made by an agent of ours" and has no owner, whatever its branch is called', () => {
+  // a team branch name is what a stranger would copy to have their comments reach our agent
+  assert.equal(prf.agentMade({ branch: 'fleet/csv-export-1a2b', fork: false }), true)
+  assert.equal(prf.agentMade({ branch: 'fleet/csv-export-1a2b', fork: true }), false)
+  assert.equal(prf.ownerOf({ branch: 'fleet/csv-export-1a2b', fork: true }), null)
+})

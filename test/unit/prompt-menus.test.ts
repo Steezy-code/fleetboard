@@ -160,9 +160,9 @@ test('Inbox cards: Claude Code permissions', async () => {
   assert.deepEqual(buttons(edit), ['Allow once [allow]', 'Allow all edits this session [always]', 'Deny [deny]'])
   const trust = approvalFor(await promptAt('claude-session.cast', 'needs-you: trust folder'))
   assert.deepEqual(buttons(trust), ['Trust folder [allow]', 'No, close agent [deny]'])
-  assert.equal((trust?.options[0].answer as { option: string }).option, 'Yes, I trust this folder')
+  assert.equal((trust!.options[0]!.answer as { option: string }).option, 'Yes, I trust this folder')
   // and marked with the card it is on, so it answers that card and nothing that replaces it
-  assert.equal(trust?.options[0].answer.seen, seenOf(trust!))
+  assert.equal(trust!.options[0]!.answer.seen, seenOf(trust!))
 })
 
 test('Inbox cards: questions keep their own words and order', async () => {
