@@ -59,21 +59,11 @@ test('a prompt far over the command-line limit reaches claude whole (through std
   assert.equal(r.text, 'Here is the summary.')
   assert.equal(lastPrint().promptLength, big.length)
   assert.ok(!lastPrint().args.some((a: string) => a.length > 1000), 'the prompt is not on the command line')
-  // the whole argv: allowed tools add to the user's own settings, so the mode is pinned too, or a
-  // defaultMode of bypassPermissions would let a run that reads console output do anything
+  // the whole argv. The tool set is restricted, not allowed: allow rules add to the user's own
+  // settings, which may already allow Bash(curl:*), Edit or an MCP server's write tools
   assert.deepEqual(lastPrint().args, [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--permission-mode', 'default',
-    '--allowedTools', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log --oneline -n 40)', 'Bash(git ls-files:*)', 'Bash(git status:*)'
-  ])
-})
-
-test('a run allowed to change files says so in full, and only when asked', async () => {
-  await ipcMain.invoke('cli:run', { runId: 'rw', prompt: 'summarize', cwd: dir, allowTools: true })
-  assert.deepEqual(lastPrint().args, [
-    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--permission-mode', 'acceptEdits',
-    '--allowedTools', 'Bash', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log --oneline -n 40)', 'Bash(git ls-files:*)', 'Bash(git status:*)', 'Edit', 'Write'
+    '--permission-mode', 'default', '--tools', 'Read,Grep,Glob', '--strict-mcp-config'
   ])
 })
 

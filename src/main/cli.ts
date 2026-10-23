@@ -23,10 +23,12 @@ const MAX_TEXT = 4 * 1024 * 1024
 /** stderr is only ever shown as a tail. */
 const MAX_ERR = 64 * 1024
 /**
- * What a read-only run may use. git log only in the one exact form the prompts ask for: as a prefix
- * rule it would allow `git log --output=<any file>`, which writes.
+ * A headless run reads console output, PR comments and repositories, any of which can carry
+ * instructions, so it gets these tools and no others. The set is restricted rather than allowed:
+ * allow rules add to the user's own settings, where Bash(curl:*), Edit or an MCP server may already
+ * be allowed. No Bash at all, since even git log writes files (--output=).
  */
-const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'LS', 'Bash(git log --oneline -n 40)', 'Bash(git ls-files:*)', 'Bash(git status:*)']
+const READ_ONLY_TOOLS = 'Read,Grep,Glob'
 
 export function register(ctx: MainContext) {
   ctx.ipc.handle('cli:run', async (_e, req: CliRunRequest) => {
@@ -44,9 +46,8 @@ export function register(ctx: MainContext) {
     if (isClaude) {
       args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
       if (req.model) args.push('--model', req.model)
-      if (req.allowTools) args.push('--permission-mode', 'acceptEdits', '--allowedTools', 'Bash', ...READ_ONLY_TOOLS, 'Edit', 'Write')
-      // the mode too: allowed tools add to the user's own settings, and a defaultMode of bypass would let anything run
-      else args.push('--permission-mode', 'default', '--allowedTools', ...READ_ONLY_TOOLS)
+      // the mode too, or a defaultMode of bypass in the user's settings would apply; and no MCP servers
+      args.push('--permission-mode', 'default', '--tools', READ_ONLY_TOOLS, '--strict-mcp-config')
     } else {
       if (req.prompt.length > MAX_ARG_PROMPT) {
         const msg = `[This prompt is ${Math.round(req.prompt.length / 1000)} KB, too long to pass to ${agent.name} on its command line. Use Claude Code for it, or include less.]`
