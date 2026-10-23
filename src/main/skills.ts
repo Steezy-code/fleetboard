@@ -3,6 +3,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { shell } from 'electron'
 import type { MainContext } from './context'
+import { readRegularText } from './paths'
+import { writeText } from './fsops'
 
 // Claude Code skills: folders with a SKILL.md (YAML frontmatter name + description) under
 // ~/.claude/skills/ (personal) and <project>/.claude/skills/ (shared with the repo).
@@ -21,6 +23,8 @@ export interface SkillInfo {
 
 const userRoot = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills')
 const projectRoot = (projectPath: string) => path.join(projectPath, '.claude', 'skills')
+/** a skill is prose: far more than this is not one */
+const MAX_SKILL = 2 * 1024 * 1024
 
 export function parseFrontmatter(text: string): Record<string, string> {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text)
@@ -56,7 +60,8 @@ function listIn(root: string, scope: SkillInfo['scope']): SkillInfo[] {
     const file = path.join(dir, 'SKILL.md')
     try {
       const st = fs.statSync(file)
-      const fm = parseFrontmatter(fs.readFileSync(file, 'utf8').slice(0, 8000))
+      // a SKILL.md that is a FIFO or a link to /dev/zero would hang the main process here
+      const fm = parseFrontmatter(readRegularText(file, MAX_SKILL).slice(0, 8000))
       out.push({
         name: fm.name || e.name,
         description: fm.description || '',
@@ -104,12 +109,13 @@ export function register(ctx: MainContext) {
 
   ipc.handle('skills:read', (_e, file: string, projectPath?: string) => {
     if (!insideRoots(file, projectPath)) throw new Error('Not a skill file')
-    return fs.readFileSync(file, 'utf8')
+    return readRegularText(file, MAX_SKILL)
   })
 
   ipc.handle('skills:save', (_e, file: string, content: string, projectPath?: string) => {
     if (!insideRoots(file, projectPath)) throw new Error('Not a skill file')
-    fs.writeFileSync(file, content)
+    // through the symlink, keeping CRLF endings and any bytes the editor could not show, atomically
+    writeText(file, String(content))
     return true
   })
 
