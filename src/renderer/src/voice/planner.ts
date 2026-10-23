@@ -752,8 +752,14 @@ export async function runCommand(raw: string, source: Source) {
 
   // 5b. CLI planner for board commands the local rules didn't catch
   try {
+    const asked = useApp.getState().project?.id
     const res = await askPlanner(text)
     if (!res) return
+    // a plan is about the board it was asked on: another project opened meanwhile is not where it goes
+    if (useApp.getState().project?.id !== asked) {
+      thread().add('system', 'Another project was opened while that was being planned, so nothing was done.')
+      return
+    }
     await plan(res.actions, res.say, text, true)
   } catch (e: any) {
     const msg = `Planner failed: ${e?.message ?? e}`
