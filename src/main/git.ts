@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { which } from './env'
+import { readRegularFile } from './paths'
 import { ghEnv, run, git as runGit, type GitOpts, type RunOut } from './run'
 
 // Git card / GitHub panel IPC. Every handler resolves to { ok: true, ... } or { ok: false, error }.
@@ -229,7 +230,7 @@ async function diff(cwd: string, file: string, opts: { untracked?: boolean; stag
         return { ok: true, diff: `New folder · ${files.length} file${files.length === 1 ? '' : 's'}\n` + files.map((f) => '+ ' + f).join('\n') }
       }
       if (st.size > MAX_DIFF) return { ok: true, diff: `New file · ${(st.size / 1024).toFixed(0)} KB (too large to preview)`, truncated: true }
-      const buf = fs.readFileSync(abs)
+      const buf = readRegularFile(abs, MAX_DIFF)
       if (buf.subarray(0, 8000).includes(0)) return { ok: true, diff: 'New binary file', binary: true }
       const lines = buf.toString('utf8').split('\n')
       if (lines[lines.length - 1] === '') lines.pop()

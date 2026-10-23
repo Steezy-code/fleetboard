@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { type KnowledgeFact, type RepoReading, slug } from '@shared/knowledge'
+import { readRegularText } from './paths'
 import { allowed } from './roots'
 
 // The free half of repo knowledge: what a repo's own files say about how it is checked, who owns what
@@ -39,9 +40,7 @@ const GUIDES: [string, string][] = [
 /** A small text file's contents, or null: missing, a folder, too big, or unreadable all mean the same here. */
 function readText(file: string): string | null {
   try {
-    const st = fs.statSync(file)
-    if (!st.isFile() || st.size > MAX_FILE) return null
-    return fs.readFileSync(file, 'utf8')
+    return readRegularText(file, MAX_FILE)
   } catch {
     return null
   }
