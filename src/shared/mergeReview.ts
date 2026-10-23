@@ -167,21 +167,28 @@ export function reviewReady(s: FleetState): MergeReview | null {
 export interface Stall {
   who: string
   consoleId: string
+  /** minutes its console has printed nothing */
   minutes: number
 }
 
 /**
- * Members that have been going a long time without reporting.
- *
- * ponytail: measured from createdAt, because FleetMember records no last-activity time — so a
- * genuinely long task trips this as readily as a wedged one. That is why it only ever annotates,
- * never blocks. To make it mean "idle" rather than "old", stamp a lastActivityAt on the member when
- * its console produces output and measure from that instead.
+ * Silence that makes a member stalled: Claude Code, Codex and Gemini all redraw while they work, a
+ * tool call in flight included, so a console this quiet is waiting on something or stuck. One
+ * threshold for the Inbox card and the ambient line (drift.ts), so they cannot disagree.
  */
-export function stalled(s: FleetState, now: number, afterMinutes = 45): Stall[] {
+export const QUIET_MINUTES = 5
+
+/**
+ * Members still going that have gone quiet, quietest first. Measured from the last output the main
+ * process saw (`lastOutputAt`), never from the estimate: this is what works on the first goal in a
+ * fresh repo, where nothing estimated anything. `since` is when this run of the app started watching
+ * — an output time from before a restart says nothing about the silence since, so silence is never
+ * counted from before it.
+ */
+export function stalled(s: FleetState, now: number, quietMinutes = QUIET_MINUTES, since = 0): Stall[] {
   return Object.values(s.members)
     .filter((m) => (m.status === 'working' || m.status === 'starting') && !m.report)
-    .map((m) => ({ who: m.name, consoleId: m.id, minutes: Math.round((now - m.createdAt) / 60000) }))
-    .filter((x) => x.minutes >= afterMinutes)
+    .map((m) => ({ who: m.name, consoleId: m.id, minutes: Math.floor((now - Math.max(m.lastOutputAt ?? m.createdAt, since)) / 60000) }))
+    .filter((x) => x.minutes >= quietMinutes)
     .sort((a, b) => b.minutes - a.minutes)
 }
