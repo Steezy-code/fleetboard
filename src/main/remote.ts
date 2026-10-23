@@ -137,7 +137,7 @@ export const lockedOut = (peer: string) => recent(peer).length >= MAX_WRONG
 export function wrongSecret(peer: string) {
   // a flood of peers must not grow this without end: past the cap, peers whose minute is over go
   // first, so the table never fills with stale ones and stops counting anyone new
-  if (!failures.has(peer) && failures.size >= PEERS) for (const p of [...failures.keys()]) recent(p)
+  if (!failures.has(peer) && failures.size >= PEERS) for (const p of failures.keys()) recent(p)
   if (!failures.has(peer) && failures.size >= PEERS) return
   failures.set(peer, [...recent(peer), Date.now()])
 }
