@@ -313,7 +313,8 @@ function workerPrompt(m: FleetMember, lead?: FleetMember) {
     `You are ${m.name}, a worker on a Fleetboard team led by ${lead?.name ?? 'the lead'}.`,
     'Do only the task you are given and edit only the files you own. If you need something outside them, ask the lead with fleet_send.',
     'Work in your current directory (your own git worktree). Do not commit or push; Fleetboard commits your work when you report.',
-    'When your done_when check passes, call fleet_report with status "done" and a 3-6 line summary (what changed, files, how you verified). If you are stuck, call fleet_report with status "blocked" and what you need.'
+    'When your done_when check passes, call fleet_report with status "done" and a 3-6 line summary (what changed, files, how you verified). If you are stuck, call fleet_report with status "blocked" and what you need.',
+    'End the summary with a "Decisions:" line and under it one line per real choice you made that the task did not settle for you ("- kept X over Y: why"). Leave it out when you made none; do not list routine steps.'
   ].join('\n')
 }
 

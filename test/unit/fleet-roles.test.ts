@@ -392,3 +392,14 @@ test('fleet_merge checks the exclusions before it attempts the merge', () => {
 test('the Lead is asked how long each task should take, in the plan it already makes', () => {
   assert.match(leadPrompt(LEAD_MEMBER), /fleet_plan \(.*estimates.*minutes/)
 })
+
+test('a worker is asked for one line per real choice, and to leave the list out when there were none', async () => {
+  const { decisionsOf } = await import('../../src/shared/live')
+  // a Codex worker gets the role rules inline in its brief; a Claude worker in its system prompt
+  const inline = briefFor({ ...WORKER, agentId: 'codex' }, LEAD_MEMBER)
+  assert.match(inline, /"Decisions:" line/)
+  assert.match(inline, /one line per real choice/)
+  assert.match(inline, /Leave it out when you made none/)
+  // the format asked for is the format read back
+  assert.deepEqual(decisionsOf('Wrote the parser.\nDecisions:\n- kept X over Y: why'), ['kept X over Y: why'])
+})
