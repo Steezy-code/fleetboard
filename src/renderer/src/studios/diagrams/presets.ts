@@ -60,7 +60,7 @@ export function buildDiagramPrompt(opts: { brief?: string; describe?: string; pr
     : `a diagram of ${opts.brief}`
   return `You are drawing ${what}
 
-The repository is in the current working directory (folder "${opts.projectName}"). First explore it with your read-only tools (Read, Grep, Glob, LS, and git log --oneline -n 40) so every box corresponds to something real. Do not modify any files.
+The repository is in the current working directory (folder "${opts.projectName}"). First explore it with your read-only tools (Read, Grep, Glob) so every box corresponds to something real. Do not modify any files.
 
 Reply with ONLY one JSON object, no prose and no code fence, in exactly this shape:
 {

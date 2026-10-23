@@ -158,7 +158,7 @@ const DEPTH_GUIDE: Record<Depth, string> = {
   balanced:
     'Depth: BALANCED — read the entry points and the main module of each area before writing. Roughly 900–1600 words, covering every section of the brief.',
   thorough:
-    'Depth: THOROUGH — read broadly and deeply: every major module, configuration, scripts, tests, and recent history (git log --oneline -n 40). Be comprehensive: roughly 1800–3500 words, every section in detail, with tables and concrete examples.'
+    'Depth: THOROUGH — read broadly and deeply: every major module, configuration, scripts, tests, and recent changes where the files show them (a CHANGELOG, release notes). Be comprehensive: roughly 1800–3500 words, every section in detail, with tables and concrete examples.'
 }
 
 export function buildDocPrompt(opts: { preset?: DocPreset; request?: string; depth: Depth; projectName: string }): string {
@@ -175,7 +175,7 @@ export function buildDocPrompt(opts: { preset?: DocPreset; request?: string; dep
   return `You are writing ${what} about the software repository in the current working directory (folder "${projectName}").
 
 How to work:
-- First explore the repository with your read-only tools (Read, Grep, Glob, LS, and git log --oneline -n 40). Ground every statement in files you actually opened. Never invent modules, endpoints, tables, commands or settings; if something is unclear or missing, say so briefly.
+- First explore the repository with your read-only tools (Read, Grep, Glob). Ground every statement in files you actually opened. Never invent modules, endpoints, tables, commands or settings; if something is unclear or missing, say so briefly.
 - ${DEPTH_GUIDE[depth]}
 - Do not modify any files.
 

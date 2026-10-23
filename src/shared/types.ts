@@ -284,8 +284,6 @@ export interface CliRunRequest {
   cwd: string
   model?: string
   profileId?: string
-  /** allow file edits / tools (default: read-only plan mode where supported) */
-  allowTools?: boolean
 }
 
 export interface MemoryCard {
