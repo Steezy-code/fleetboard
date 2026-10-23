@@ -27,11 +27,9 @@ export interface KnowledgeFact {
 }
 
 /**
- * One field of a charter the user changed before confirming it. Kept, shown, and read by nothing yet:
- * promoting a repeated correction into a fact needs either a model pass per correction or enough
- * structure to compare corrections across differently-worded goals, and this is the structure. Lists
- * are kept as what was added and removed, not before and after, so two corrections can be compared
- * entry by entry.
+ * One field of a charter the user changed before confirming it. Lists are kept as what was added and
+ * removed, not before and after, so two corrections can be compared entry by entry — which is what
+ * `repeatedCorrections` reads to offer the same change, made on several goals, as a fact to keep.
  */
 export type CharterDelta = { at: number; request: string } & (
   | { field: 'understood' | 'doneWhen' | 'question'; before: string; after: string }
@@ -244,4 +242,70 @@ export function charterDeltas(drafted: Charter, confirmed: Charter, at: number =
 
 export function withDeltas(k: RepoKnowledge, deltas: CharterDelta[]): RepoKnowledge {
   return deltas.length ? { ...k, deltas: [...k.deltas, ...deltas].slice(-MAX_DELTAS) } : k
+}
+
+/** How many different goals a correction has to be made on before it is offered as a fact. */
+export const REPEATED_GOALS = 2
+
+/**
+ * A correction the user has made on more than one goal, as a fact they could keep. Only the two
+ * fields whose values compare exactly are read — a path put out of bounds, and the command set as
+ * done-when. What "understood" should have said is phrased for its own goal, so recognising the same
+ * correction there needs a model pass, which this deliberately does not have; and the user keeps or
+ * dismisses what is offered, so nothing is promoted behind them on a threshold nobody picked.
+ */
+export interface Suggestion {
+  /** the key the kept fact gets: stable, so keeping or dismissing it is remembered by the facts themselves */
+  key: string
+  topic: Topic
+  text: string
+  /** the value that repeated, as the user typed it */
+  value: string
+  command?: string
+  /** how many different goals it was corrected on */
+  times: number
+  /** the last time it was corrected */
+  at: number
+}
+
+const sameGoal = (request: string) => request.toLowerCase().replace(/\s+/g, ' ').trim()
+
+/**
+ * The corrections worth offering, most often made first. A key already held as a fact, or one the
+ * user dismissed (`forgotten`), is not offered again — which is also what makes keeping and
+ * dismissing stick without any state of their own.
+ */
+export function repeatedCorrections(k: RepoKnowledge): Suggestion[] {
+  const held = new Set([...k.facts.map((f) => f.key), ...k.forgotten])
+  const seen = new Map<string, { s: Omit<Suggestion, 'times'>; goals: Set<string> }>()
+  for (const d of k.deltas) {
+    const values = d.field === 'wontTouch' ? d.added : d.field === 'doneWhen' ? [d.after] : []
+    for (const raw of values) {
+      const value = raw.trim()
+      if (!value) continue
+      const tail = slug(value)
+      if (!tail) continue
+      const s: Omit<Suggestion, 'times'> =
+        d.field === 'wontTouch'
+          ? { key: `ownership.wont-touch-${tail}`, topic: 'ownership', text: `Work here does not touch ${value}.`, value, at: d.at }
+          : { key: `checks.done-when-${tail}`, topic: 'checks', text: `Work here is done when \`${value}\` passes.`, value, command: value, at: d.at }
+      if (held.has(s.key)) continue
+      const there = seen.get(s.key)
+      if (there) {
+        there.goals.add(sameGoal(d.request))
+        there.s.at = Math.max(there.s.at, d.at)
+      } else seen.set(s.key, { s, goals: new Set([sameGoal(d.request)]) })
+    }
+  }
+  return [...seen.values()]
+    .map(({ s, goals }) => ({ ...s, times: goals.size }))
+    .filter((s) => s.times >= REPEATED_GOALS)
+    .sort((a, b) => b.times - a.times || b.at - a.at)
+}
+
+/** Keep a repeated correction as a fact of the user's own, which a charter may then cite. */
+export function rememberCorrection(k: RepoKnowledge, s: Suggestion, at: number = Date.now()): RepoKnowledge {
+  if (k.facts.some((f) => f.key === s.key)) return k
+  const kept: KnowledgeFact = { key: s.key, topic: s.topic, text: s.text, provenance: 'you', ...(s.command ? { command: s.command } : {}), at }
+  return { ...k, facts: [...k.facts, kept].slice(0, MAX_FACTS) }
 }
