@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { dayKey } from '@shared/time'
 
 /** Close a popover/menu when the pointer goes down outside of it (or Escape is pressed). */
 export function useDismiss(ref: RefObject<HTMLElement | null>, open: boolean, onClose: () => void) {
@@ -49,7 +50,7 @@ export function FloatBar({ zoom, children, className = '' }: { zoom: number; chi
 
 // ---------- dates ----------
 export const pad2 = (n: number) => String(n).padStart(2, '0')
-export const ymd = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+export const ymd = (d: Date) => dayKey(d.getTime())
 export const todayYmd = () => ymd(new Date())
 export const parseYmd = (s: string) => {
   const [y = 1970, m, d] = s.split('-').map(Number)

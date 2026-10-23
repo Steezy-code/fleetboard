@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pairs } from '@shared/seq'
+import { dayKey } from '@shared/time'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { listProfiles } from './profiles'
@@ -512,11 +513,6 @@ const add = (t: Tot, e: Ev) => {
   t.cacheCreate += e[4]
   t.cacheRead += e[5]
   t.total += e[2] + e[3] + e[4] + e[5]
-}
-const pad = (n: number) => String(n).padStart(2, '0')
-export const dayKey = (t: number) => {
-  const d = new Date(t)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 const startOfDay = (t: number) => {
   const d = new Date(t)

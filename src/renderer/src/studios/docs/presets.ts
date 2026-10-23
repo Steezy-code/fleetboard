@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { BookOpen, Compass, Database, FileText, Layers, ShieldCheck, Telescope, CodeXml } from 'lucide-react'
+import { dayKey } from '@shared/time'
 
 export type Depth = 'quick' | 'balanced' | 'thorough'
 
@@ -162,7 +163,7 @@ const DEPTH_GUIDE: Record<Depth, string> = {
 
 export function buildDocPrompt(opts: { preset?: DocPreset; request?: string; depth: Depth; projectName: string }): string {
   const { preset, request, depth, projectName } = opts
-  const today = new Date().toISOString().slice(0, 10)
+  const today = dayKey(Date.now())
   const what = preset ? `a "${preset.title}" document` : 'a document'
   const titleRule = preset
     ? `The very first line must be the title as a level-1 heading: "# ${projectName} — ${preset.title}" (or the project's real name if it differs from the folder name).`
