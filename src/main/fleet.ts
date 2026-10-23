@@ -299,6 +299,8 @@ export function leadPrompt(m: FleetMember) {
     '8. Your goal as given, and any assumptions, "Do not touch" or "Done when" that come with it, are what the user confirmed: not yours to reinterpret or widen. If the job looks wrong, ask with fleet_ask_user rather than deciding.',
     '9. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
     'Keep your own messages short: one-line progress updates.',
+    // agents post as the user: without the mark, Fleetboard would route the comment back as the user's own
+    'If you or a worker comment on a pull request, start the comment with 🤖.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
   ].join('\n')
 }
@@ -394,7 +396,9 @@ function post(s: FleetState, msg: Omit<FleetMessage, 'id' | 'at' | 'delivered'>)
   return full
 }
 
-const labelOf = (s: FleetState, id: string) => (id === 'user' ? 'the user' : s.members[id]?.name ?? id)
+/** Who a PR's review comments or CI failure are from: never the user, whose goal a Lead does not question. */
+const GITHUB = 'github'
+const labelOf = (s: FleetState, id: string) => (id === 'user' ? 'the user' : id === GITHUB ? 'GitHub (passed on by Fleetboard, not the user)' : (s.members[id]?.name ?? id))
 
 function render(s: FleetState, msg: FleetMessage) {
   switch (msg.kind) {
@@ -1277,6 +1281,12 @@ export async function register(c: MainContext) {
     const f = memberOf(toId)
     if (!f) return false
     post(f.s, { from: 'user', to: toId, kind: 'goal', text })
+    return true
+  })
+  ipc.handle('fleet:fromGitHub', (_e, toId: string, text: string) => {
+    const f = memberOf(toId)
+    if (!f) return false
+    post(f.s, { from: GITHUB, to: toId, kind: 'message', text: String(text) })
     return true
   })
   ipc.handle('fleet:answer', (_e, askId: string, answer: string) => answerAsk(askId, answer))

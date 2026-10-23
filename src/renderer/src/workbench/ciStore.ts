@@ -198,7 +198,9 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
     otherBranch
       ? `Don't touch my current checkout (it is on ${status.branch}): add a git worktree for ${item.branch} in a temporary folder, work and push from there, then remove the worktree.`
       : `Then commit and push to ${item.branch}.`,
-    "Never weaken, skip or delete a test to make it pass; if a test itself looks wrong, or the failure isn't in our code (an outage, a secret, a flaky runner), stop and tell me instead."
+    "Never weaken, skip or delete a test to make it pass; if a test itself looks wrong, or the failure isn't in our code (an outage, a secret, a flaky runner), stop and tell me instead.",
+    // agents post as the user: without the mark, Fleetboard would route the comment back as the user's own
+    'If you comment on the pull request, start the comment with 🤖.'
   ].join('\n\n')
   // a PR that an agent is already working on goes back to that agent
   const owner = item.pr ? ownerOf(item.pr) : null
@@ -209,7 +211,8 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   }
   if (owner) {
     const note = `${prompt.replace(/\n\nDon't touch my current checkout[^\n]*|\n\nThen commit and push to [^\n]*/, '')}\n\nFix it on ${item.branch} and push.`
-    if (owner.lead) await invoke('fleet:userMessage', owner.id, note)
+    // a CI log is other people's text: to a Lead as GitHub's, not as the user's goal
+    if (owner.lead) await invoke('fleet:fromGitHub', owner.id, note)
     else sendToConsole(owner.id, note)
     fixers.set(item.key, owner.id)
     app.toast(`Sent the CI failure on PR #${item.pr!.number} to ${owner.name}`, 'info')
