@@ -251,8 +251,15 @@ test("a worker's permission prompt reaches the Inbox and is answered there", asy
 
 test('"Allow for the team" answers every worker asking for that same command, and the Night log says so', async () => {
   const { projectId } = await team({ ...TWO_WORKERS, lead: { ...TWO_WORKERS.lead, review: false }, workers: { Ada: { bash: 'npm test' }, Bo: { bash: 'npm test', delayMs: 1500 } } })
-  await app!.waitFor(async () => (await app!.texts('.it-card[data-kind="approval"]')).find((t) => t.includes('npm test')), { label: 'approval card', timeout: 30_000 })
-  const buttons = await app!.texts('.it-card[data-kind="approval"] .it-actions button')
+  // the card can show (with the agent's last output) a moment before its dialog has been read, when
+  // its only button is "Open console": wait for the dialog's own buttons, then check their order
+  const buttons = await app!.waitFor(
+    async () => {
+      const b = await app!.texts('.it-card[data-kind="approval"] .it-actions button')
+      return b.includes('Allow once') ? b : null
+    },
+    { label: 'the approval card, read', timeout: 30_000 }
+  )
   assert.deepEqual(buttons.slice(0, 2), ['Allow once', 'Allow for the team'])
   await app!.click('.it-card[data-kind="approval"] .it-actions button', 'Allow for the team')
   const ready = await waitReady(projectId)
