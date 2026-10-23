@@ -6,6 +6,7 @@ import { dayKey } from '@shared/time'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { listProfiles } from './profiles'
+import { userEnv } from './env'
 
 // Usage pill + token analytics, read from the CLIs' own local session logs. Nothing leaves the machine.
 //   Claude Code: <config>/projects/**/*.jsonl  — assistant lines carry message.usage
@@ -129,10 +130,11 @@ function roots(): { agent: UsageAgent; dir: string; exists: boolean }[] {
   const home = os.homedir()
   const list: { agent: UsageAgent; dir: string }[] = [
     { agent: 'claude', dir: path.join(home, '.claude', 'projects') },
-    { agent: 'codex', dir: path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions') },
+    { agent: 'codex', dir: path.join(userEnv().CODEX_HOME || path.join(home, '.codex'), 'sessions') },
     { agent: 'gemini', dir: path.join(home, '.gemini', 'tmp') }
   ]
-  if (process.env.CLAUDE_CONFIG_DIR) list.push({ agent: 'claude', dir: path.join(process.env.CLAUDE_CONFIG_DIR, 'projects') })
+  const claudeDir = userEnv().CLAUDE_CONFIG_DIR
+  if (claudeDir) list.push({ agent: 'claude', dir: path.join(claudeDir, 'projects') })
   try {
     for (const p of listProfiles()) {
       if (p.agentId === 'claude') list.push({ agent: 'claude', dir: path.join(p.dir, 'projects') })
