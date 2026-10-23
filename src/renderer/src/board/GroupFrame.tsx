@@ -1,10 +1,37 @@
 import { memo, useState } from 'react'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, ChevronsDownUp, ChevronsUpDown } from 'lucide-react'
 import type { Group } from '@shared/types'
 import { ROLES, ROLE_TINT } from '@shared/types'
 import { activeWs, connectClick, useApp } from '../state/store'
 import { killConsoles, pauseAll, resumeAll } from '../engine/consoles'
 import { snap } from './geometry'
+import { GAP, GROUP_HEAD_H, findFreeSpot, occupied } from './place'
+
+/**
+ * Fold a group down to its header, or open it again. Folded, its consoles keep running at their size
+ * (NodeFrame hides them without unmounting, so no terminal is resized to nothing) and the header still
+ * counts who is working and who needs you. Opened, if whatever took its space meanwhile would now be
+ * covered, the whole group moves to the nearest free spot instead of landing on top of it.
+ */
+export function toggleCollapsed(id: string) {
+  const app = useApp.getState()
+  const ws = activeWs()
+  const g = ws?.groups.find((x) => x.id === id)
+  if (!ws || !g) return
+  const members = ws.nodes.filter((n) => n.groupId === id).map((n) => n.id)
+  if (!g.collapsed) {
+    if (app.focusedNode && members.includes(app.focusedNode)) app.exitFocus()
+    app.setSelection(app.selection.filter((sid) => !members.includes(sid)))
+    return app.updateGroup(id, { collapsed: true })
+  }
+  const own = new Set([id, ...members])
+  const others = occupied({ ...ws, nodes: ws.nodes.filter((n) => !own.has(n.id)), groups: ws.groups.filter((x) => x.id !== id) })
+  const full = { w: g.w, h: g.h }
+  const clear = findFreeSpot(others, full, { x: g.x, y: g.y }, 0)
+  const spot = clear.x === Math.round(g.x) && clear.y === Math.round(g.y) ? null : findFreeSpot(others, full, { x: g.x, y: g.y }, GAP)
+  app.updateGroup(id, { collapsed: false })
+  if (spot) app.moveNodes([id, ...members], spot.x - g.x, spot.y - g.y)
+}
 
 function startGroupDrag(e: React.PointerEvent, g: Group) {
   if (e.button !== 0) return
@@ -55,8 +82,8 @@ export const GroupFrame = memo(function GroupFrame({ group, selected }: { group:
 
   return (
     <div
-      className={`group ${selected ? 'selected' : ''}`}
-      style={{ left: group.x, top: group.y, width: group.w, height: group.h, ['--tint' as any]: tint }}
+      className={`group ${selected ? 'selected' : ''} ${group.collapsed ? 'collapsed' : ''}`}
+      style={{ left: group.x, top: group.y, width: group.w, height: group.collapsed ? Math.min(group.h, GROUP_HEAD_H) : group.h, ['--tint' as any]: tint }}
       data-group-id={group.id}
     >
       <div className="group-head" onPointerDown={(e) => startGroupDrag(e, group)} onDoubleClick={() => setEditing(true)}>
@@ -78,6 +105,15 @@ export const GroupFrame = memo(function GroupFrame({ group, selected }: { group:
         )}
         <span className="group-count">{ids.length}</span>
         <span className="group-sum">· {summary}</span>
+        <button
+          className="icon-btn sm"
+          title={group.collapsed ? 'Open the group' : 'Fold the group to its header (its consoles keep running)'}
+          aria-expanded={!group.collapsed}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => toggleCollapsed(group.id)}
+        >
+          {group.collapsed ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
+        </button>
         <button className="icon-btn sm" onPointerDown={(e) => e.stopPropagation()} onClick={() => setMenu(!menu)}>
           <ChevronDown size={13} />
         </button>
@@ -101,9 +137,14 @@ export const GroupFrame = memo(function GroupFrame({ group, selected }: { group:
             <button className="menu-item" onClick={() => (setEditing(true), setMenu(false))}>
               Rename
             </button>
-            <button className="menu-item" onClick={() => (app.fitGroup(group.id), setMenu(false))}>
-              Fit to members
+            <button className="menu-item" onClick={() => (toggleCollapsed(group.id), setMenu(false))}>
+              {group.collapsed ? 'Open' : 'Fold to header'}
             </button>
+            {!group.collapsed && (
+              <button className="menu-item" onClick={() => (app.fitGroup(group.id), setMenu(false))}>
+                Fit to members
+              </button>
+            )}
             <button className="menu-item" onClick={() => (pauseAll(ids), setMenu(false))}>
               Pause team
             </button>

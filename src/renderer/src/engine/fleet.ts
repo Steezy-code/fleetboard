@@ -4,6 +4,7 @@ import type { FleetMember, FleetState } from '@shared/fleet'
 import { type Charter, charterMessage } from '@shared/charter'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
+import { findFreeSpot, occupied, viewCentre } from '../board/place'
 import { clearGate, draftCharter, gateCharter } from '../fleet/charter'
 import { CONSOLE_H, CONSOLE_W } from './consoles'
 
@@ -109,30 +110,31 @@ function removeEverywhere(ids: string[]) {
   }))
 }
 
-/** Where a new team console goes: leads in free space, workers in a row under their lead. */
+/**
+ * Where a new team console goes: a Lead as near the middle of the view as it fits, its workers in
+ * rows of four under it — each in the free spot nearest its slot, so a busy board bends the rows
+ * rather than stacking a worker on top of something.
+ */
 function placeFor(m: FleetMember): { wsId: string; x: number; y: number } {
   const app = useApp.getState()
   const p = app.project!
+  const size = { w: CONSOLE_W, h: CONSOLE_H }
   if (m.leadId) {
     const ws = workspaceOf(m.leadId) ?? activeWs()!
     const lead = ws.nodes.find((n) => n.id === m.leadId)
     if (lead) {
       const mates = ws.nodes.filter((n) => n.type === 'console' && memberOf(n.id)?.leadId === m.leadId)
       const i = mates.length
-      // up to four slots centred under the lead, then a second row
       const col = i % 4
       const row = Math.floor(i / 4)
-      return { wsId: ws.id, x: lead.x + lead.w / 2 - 2 * (CONSOLE_W + 24) + 12 + col * (CONSOLE_W + 24), y: lead.y + lead.h + 140 + row * (CONSOLE_H + 40) }
+      const slot = { x: lead.x + lead.w / 2 - 2 * (CONSOLE_W + 24) + 12 + col * (CONSOLE_W + 24), y: lead.y + lead.h + 140 + row * (CONSOLE_H + 40) }
+      return { wsId: ws.id, ...findFreeSpot(occupied(ws), size, slot, 24) }
     }
   }
   const ws = activeWs() ?? p.workspaces[0]
-  const boxes = [...ws.nodes, ...ws.groups]
-  if (!boxes.length) {
-    const vp = app.viewport
-    const cam = ws.camera
-    return { wsId: ws.id, x: (vp.w / 2 - cam.x) / cam.zoom - CONSOLE_W / 2, y: (vp.h / 3 - cam.y) / cam.zoom - CONSOLE_H / 2 }
-  }
-  return { wsId: ws.id, x: Math.max(...boxes.map((b) => b.x + b.w)) + 160, y: Math.min(...boxes.map((b) => b.y)) }
+  // a third of the way down rather than the middle: its workers go underneath
+  const near = viewCentre(app.viewport, ws.camera, size)
+  return { wsId: ws.id, ...findFreeSpot(occupied(ws), size, { x: near.x, y: near.y - app.viewport.h / 6 / ws.camera.zoom }) }
 }
 
 function nameFree(wanted: string) {

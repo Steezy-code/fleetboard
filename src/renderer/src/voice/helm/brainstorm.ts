@@ -5,6 +5,7 @@
 import { extractJson, invoke, runCli } from '../../lib/api'
 import { allConsoles, useApp } from '../../state/store'
 import { sendGoal } from '../../engine/fleet'
+import { findFreeSpot, occupied } from '../../board/place'
 
 export type PersonaId = 'pragmatist' | 'wildcard' | 'critic'
 export type Effort = 'S' | 'M' | 'L'
@@ -166,7 +167,8 @@ export function startBrainstorm(topic: string, opts: { near?: string; parentId?:
     title: `Brainstorm · ${clip(topic, 48)}`,
     w: BRAINSTORM_W,
     h: BRAINSTORM_H,
-    ...(near ? { x: near.x + near.w + 60, y: near.y } : {}),
+    // beside the brainstorm it goes deeper on, or wherever is free nearest that; else the view's middle
+    ...(near && ws ? findFreeSpot(occupied(ws), { w: BRAINSTORM_W, h: BRAINSTORM_H }, { x: near.x + near.w + 60, y: near.y }, 60) : {}),
     data
   })
   window.setTimeout(() => useApp.getState().focusItem(id), 60)

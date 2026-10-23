@@ -381,6 +381,15 @@
   border-style: solid;
   border-color: var(--tint);
 }
+/* folded to its header (GroupFrame toggleCollapsed); its members are kept, unseen, at their size */
+.group.collapsed {
+  border-style: solid;
+  background: color-mix(in srgb, var(--tint) 9%, var(--panel));
+}
+.node.in-collapsed {
+  visibility: hidden;
+  pointer-events: none;
+}
 .group-head {
   position: absolute;
   left: 10px;

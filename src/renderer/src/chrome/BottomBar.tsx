@@ -1,4 +1,4 @@
-import { Lightbulb, Map as MapIcon, Minus, Plus, Scan } from 'lucide-react'
+import { LayoutGrid, Lightbulb, Map as MapIcon, Minus, Plus, Scan } from 'lucide-react'
 import { useHelm } from '../voice/helm/helm'
 import { CAN_PAUSE } from '../lib/api'
 import { zoomToSelection } from '../board/Board'
@@ -8,6 +8,7 @@ import { CommandBar } from '../voice/CommandBar'
 import { BranchBadge } from './BranchBadge'
 import { CiBadge } from './CiBadge'
 import { InboxTray } from '../fleet/InboxTray'
+import { clearFinished, finishedConsoles, tidyBoard } from '../board/tidy'
 import { AmbientLine } from '../fleet/AmbientLine'
 import { offerGoal, useGoalIdeas } from './goalIdeas'
 import { useInbox } from '../fleet/inboxModel'
@@ -32,6 +33,9 @@ export function BottomBar() {
   const app = useApp.getState()
   const hint = useApp((s) => s.project?.extras.hintDismissed)
   const tray = useInbox((s) => s.items.length > 0)
+  // a selector that ignores its argument still runs on every change to the app store, which is where
+  // statuses and the board live; the bar re-renders only when the count changes
+  const finished = useApp(() => finishedConsoles().length)
   const idea = useGoalIdeas()[0]
   return (
     <div className={`bottombar ${tray ? 'with-tray' : ''}`}>
@@ -86,6 +90,14 @@ export function BottomBar() {
         <button className="chip" onClick={() => app.openPanel('memory')}>
           Memory
         </button>
+        <button className="chip" title="Pack the board into rows, keeping teams and groups together (one Undo)" onClick={tidyBoard}>
+          <LayoutGrid size={12} /> Tidy
+        </button>
+        {finished > 0 && (
+          <button className="chip" title="Remove the consoles whose programs have ended" onClick={clearFinished}>
+            Clear {finished} finished
+          </button>
+        )}
       </div>
       <div className="bar-stack">
         <AmbientLine />
