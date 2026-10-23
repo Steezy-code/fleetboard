@@ -259,6 +259,13 @@ function registerCore() {
   })
 }
 
+// The dev server's address and the test hooks are for `electron-vite dev` and the end-to-end tests: a
+// packaged app honouring them would load its window from wherever the environment pointed.
+if (app.isPackaged) {
+  delete process.env.ELECTRON_RENDERER_URL
+  delete process.env.FLEETBOARD_DEVTOOLS
+}
+
 // A separate state folder (FLEETBOARD_HOME) is a separate Fleetboard: give it its own Electron profile
 // so it neither shares the single-instance lock nor the browser storage of the main app.
 if (process.env.FLEETBOARD_HOME) app.setPath('userData', path.join(process.env.FLEETBOARD_HOME, 'electron'))
