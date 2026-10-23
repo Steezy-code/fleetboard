@@ -376,6 +376,8 @@ async function workerFlow(brief) {
   const owns = /You own: (.+?)\.(?:\s|$)/.exec(brief)?.[1]?.split(", ") ?? []
   const files = sc.files ?? Object.fromEntries(owns.map((f) => [f, `${me.name} was here\n`]))
   for (const [file, content] of Object.entries(files)) await writeFile(file, fill(content))
+  // the work is on disk but not reported yet: what the live diff is for
+  if (sc.holdMs) await sleep(sc.holdMs)
   if (sc.report === false) return
   await tool('fleet_report', { status: sc.status ?? 'done', summary: fill(sc.summary ?? `Wrote ${Object.keys(files).join(', ')}`) })
 }
@@ -390,7 +392,12 @@ async function soloFlow(prompt) {
   await sleep(rule?.workMs ?? 600)
   if (rule?.bash) {
     const ok = await permission('Bash', rule.bash)
-    transcript(`● Bash(${rule.bash})\n  ⎿  ${ok ? 'Done' : 'User rejected'}`)
+    transcript(`● Bash(${rule.bash})${rule.holdMs ? '' : `\n  ⎿  ${ok ? 'Done' : 'User rejected'}`}`)
+    // still running, the way a long command looks: its line drawn, the spinner going, no result yet
+    if (rule.holdMs) {
+      await sleep(rule.holdMs)
+      transcript(`  ⎿  ${ok ? 'Done' : 'User rejected'}`)
+    }
   }
   if (rule?.write) for (const [f, c] of Object.entries(rule.write)) await writeFile(f, c)
   transcript(`● ${rule?.reply ?? `Done: ${prompt.slice(0, 60)}`}`)
