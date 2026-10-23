@@ -180,7 +180,21 @@ export function teamRuleAllowed(cmd: string): boolean {
   return !/\b(sudo|doas|runas|curl|wget|ssh|scp|rsync|nc)\b/i.test(cmd)
 }
 
+/** What a card showed, as one string: an answer given on it carries this (PromptAnswer.seen). */
+export const seenOf = (a: Pick<Approval, 'title' | 'detail' | 'command'>) => JSON.stringify([a.title, a.detail ?? null, a.command ?? null])
+
+/** Each option's answer marked with the card it is on: an answer is for what was shown, nothing else. */
+function marked(a: Approval): Approval {
+  const seen = seenOf(a)
+  return { ...a, options: a.options.map((o) => ({ ...o, answer: { ...o.answer, seen } })) }
+}
+
 export function approvalFor(p: Prompt | null): Approval | null {
+  const a = unmarkedApprovalFor(p)
+  return a && marked(a)
+}
+
+function unmarkedApprovalFor(p: Prompt | null): Approval | null {
   if (!p) return null
   if (p.kind === 'menu' && p.options?.length) {
     const permission = PERMISSION.test(p.question ?? '') || p.options.some((o) => /trust/i.test(o.label))

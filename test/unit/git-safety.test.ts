@@ -92,11 +92,12 @@ test('a textconv driver named by the repo is never run — the one that reaches 
   assert.match((await git(repo, ['show', '--patch', 'HEAD'])).stdout, /\+two/, 'and the patch is still there')
 })
 
-test('git is told to ignore a filesystem monitor the repo names', async () => {
+test('git is told to ignore a filesystem monitor the repo names, and never to verify signatures', async () => {
   // Defence in depth, stated honestly: core.fsmonitor names a program and `git status` is the app's
   // most-run command, but a hostile core.fsmonitor did not reproduce on the git here (2.43), so this
   // asserts the argument rather than an outcome it cannot demonstrate.
-  assert.deepEqual(GIT_OPTS, ['-c', 'core.fsmonitor=false'])
+  // (log.showSignature would run the repo's gpg.program on every log/show; the app never shows signatures)
+  assert.deepEqual(GIT_OPTS, ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false'])
   const { repo } = hostileRepo('external')
   execFileSync('git', ['config', 'core.fsmonitor', path.join(repo, 'payload.sh')], { cwd: repo, env: ENV })
   const r = await git(repo, ['status', '--porcelain=v2', '--branch'])

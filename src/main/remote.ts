@@ -230,7 +230,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
     if (!body || typeof body !== 'object') return send(res, 400, { error: 'bad request' })
     if (url.pathname === '/api/answer') {
       const a = body.answer as PromptAnswer
-      const valid = a && typeof a === 'object' && (typeof (a as any).option === 'string' || typeof (a as any).yes === 'boolean' || (a as any).enter === true)
+      // always from a card on the phone page, so always marked with it (pty.ts answer checks the mark)
+      const valid = a && typeof a === 'object' && typeof (a as any).seen === 'string' && (typeof (a as any).option === 'string' || typeof (a as any).yes === 'boolean' || (a as any).enter === true)
       if (typeof body.consoleId !== 'string' || !valid) return send(res, 400, { error: 'bad answer' })
       const r: AnswerResult = await ctx.ptys.answer(body.consoleId, a)
       if (r.ok) answered('your phone', body.consoleId, describeAnswer(a))

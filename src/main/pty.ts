@@ -11,7 +11,7 @@ import { TermScreen, type ScreenView } from './screen'
 import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
 import { activityOf } from './activity'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
-import { commandOf } from '@shared/approvals'
+import { approvalFor, commandOf, seenOf } from '@shared/approvals'
 import { RunRecord } from './orphans'
 import { CAN_PAUSE, IS_WIN, killTree, killTreeSync, launch, shellArgs, shellCommandArgs } from './platform'
 
@@ -425,6 +425,14 @@ export class PtyManager {
     await s.screen.flush()
     const prompt = detectPrompt(s.screen.view())
     if (command !== undefined && commandOf(prompt) !== command) return { ok: false, reason: prompt ? 'changed' : 'gone' }
+    if (answer.seen !== undefined) {
+      // given on a card: the screen must still make that card, and the option must be one it offered
+      // (a card leaves out options such as "switch to auto mode"; the CLI's menu still has them)
+      const card = approvalFor(prompt)
+      if (!card) return { ok: false, reason: prompt ? 'changed' : 'gone' }
+      if (seenOf(card) !== answer.seen) return { ok: false, reason: 'changed' }
+      if ('option' in answer && !card.options.some((o) => 'option' in o.answer && o.answer.option === answer.option)) return { ok: false, reason: 'changed' }
+    }
     const keys = answerKeys(prompt, answer, s.screen.appCursorKeys)
     if (!Array.isArray(keys)) return keys
     for (const [i, k] of keys.entries()) {
