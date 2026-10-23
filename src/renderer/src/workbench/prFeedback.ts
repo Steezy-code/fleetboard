@@ -5,6 +5,7 @@ import { isLive, sendToConsole, spawnConsoles } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
 import { useCi } from './ciStore'
 import { maySpendOn } from '../engine/guards'
+import { journal } from '../lib/journal'
 import type { PrComment, PrFeedback, PrFeedbackResult } from '../../../main/ci'
 
 export type { PrComment, PrFeedback, PrFeedbackResult } from '../../../main/ci'
@@ -157,17 +158,24 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   if (!list.length) return null
   const msg = feedbackMessage(pr, list)
   const owner = ownerOf(pr)
-  if (owner && opts.auto && autoApproves(owner.id)) {
-    // it would act on these words without asking: tell the user instead, who can still send it by hand
-    app.toast(`${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}: ${owner.name} approves everything, so they were not sent automatically`, 'warn')
-    return null
+  if (owner && autoApproves(owner.id)) {
+    // it would act on these words without asking: never on its own, and only once the user has said so
+    if (opts.auto) {
+      app.toast(`${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}: ${owner.name} approves everything, so they were not sent automatically`, 'warn')
+      return null
+    }
+    const ok = await app.confirm({ title: `${owner.name} approves everything`, body: 'It would act on these review comments without asking you first.', confirm: 'Send them anyway' })
+    if (!ok) return null
   }
+  // what it spends on its own is checked against the agent that would do the work
+  if (owner && opts.auto && !maySpendOn(String(allConsoles().find((c) => c.id === owner.id)?.data.agentId ?? ''), 'sending review comments to an agent')) return null
   if (owner) {
     // to a Lead as reviewers' words, not as the user's goal, which its brief says is not to be questioned
     if (owner.lead) await invoke('fleet:fromGitHub', owner.id, msg)
     else sendToConsole(owner.id, msg)
     markSent(pr, list)
     app.toast(`Sent ${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number} to ${owner.name}`, 'info')
+    if (opts.auto) journal('pr.route', `${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number} sent to ${owner.name}`, { pr: pr.number, consoleId: owner.id, comments: list.map((c) => c.id) })
     return owner.id
   }
   const current = useCi.getState().status
@@ -189,6 +197,7 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   if (!id) return null
   setBranchAgent(pr.branch, id)
   markSent(pr, list)
+  if (opts.auto) journal('pr.route', `${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}, so ${name} was started on them`, { pr: pr.number, consoleId: id, comments: list.map((c) => c.id) })
   app.toast(opts.auto ? `New review comments on PR #${pr.number}, so ${name} is on them` : `${name} is on it`, 'info')
   if (!opts.auto) window.setTimeout(() => useApp.getState().focusItem(id), 120)
   return id
