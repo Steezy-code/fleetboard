@@ -100,7 +100,8 @@ if (opts.print !== undefined) {
       out({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: piece } } })
       await sleep(5)
     }
-    out({ type: 'result', subtype: 'success', result: reply })
+    // the real CLI exits 0 after a run that ended in an error, and says so in its result
+    out(rule?.isError ? { type: 'result', subtype: 'error_max_turns', is_error: true, result: reply } : { type: 'result', subtype: 'success', result: reply })
   } else process.stdout.write(reply + '\n')
   process.exit(rule?.exit ?? 0)
 }

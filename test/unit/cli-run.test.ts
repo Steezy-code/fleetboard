@@ -22,7 +22,7 @@ before(async () => {
   const rest = (process.env.PATH ?? '').split(':').filter((d) => d && !fs.existsSync(path.join(d, 'codex')))
   process.env.PATH = [bin, ...rest].join(':')
   process.env.FAKE_CLAUDE_LOG = log
-  process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify({ print: [{ match: 'summarize', reply: 'Here is the summary.' }] })
+  process.env.FAKE_CLAUDE_SCENARIO = JSON.stringify({ print: [{ match: 'summarize', reply: 'Here is the summary.' }, { match: 'run out', reply: 'Reached max turns', isError: true }] })
   process.env.FLEETBOARD_HOME = path.join(dir, 'fb')
   const cli = await import('../../src/main/cli')
   const { DEFAULT_SETTINGS } = await import('../../src/shared/types')
@@ -44,6 +44,12 @@ test('streams the reply and returns the final text', async () => {
   assert.deepEqual(r, { code: 0, text: 'Here is the summary.' })
   const chunks = events.filter((e) => e[0] === 'cli:chunk').map((e) => e[2])
   assert.equal(chunks.join(''), 'Here is the summary.')
+})
+
+test('a run Claude reports as an error is a failure, though it exits 0', async () => {
+  // callers save what a run returns (a document, a charter): one that ended in an error is not that
+  const r = await run('run out of turns')
+  assert.deepEqual(r, { code: 1, text: 'Reached max turns' })
 })
 
 test('a prompt far over the command-line limit reaches claude whole (through stdin)', async () => {
