@@ -28,7 +28,7 @@ test("a console's hook token reports for that console only", async () => {
   ])
 })
 
-test("Windows' hook script (node) reports an event with its payload, and never fails the hook", async () => {
+test('the hook script (node) reports an event with its payload, and never fails the hook', async () => {
   const { NODE_HOOK } = await import('../../src/main/hooks')
   const { execFile } = await import('node:child_process')
   // async: the hook server runs in this process and must be free to answer
@@ -49,4 +49,15 @@ test("Windows' hook script (node) reports an event with its payload, and never f
   await run([script, 'Bad/Event'], env, '{}')
   assert.equal(got.length, 1)
   void port
+})
+
+test('the hook command never puts the token on a command line where node is found', async () => {
+  // every account on the machine can read another process's argv; curl's URL carried the token
+  const settings = JSON.parse(fs.readFileSync(path.join(process.env.FLEETBOARD_HOME!, 'hooks', 'claude-hooks.json'), 'utf8'))
+  const commands: string[] = Object.values(settings.hooks).flatMap((h: any) => h[0].hooks.map((x: any) => x.command))
+  assert.ok(commands.length > 0)
+  for (const c of commands) {
+    assert.doesNotMatch(c, /FB_HOOK_TOKEN/, c)
+    assert.match(c, /fb-hook\.cjs" [A-Za-z]+$/)
+  }
 })
