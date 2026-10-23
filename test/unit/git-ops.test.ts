@@ -119,3 +119,19 @@ test('a real branch, and a commit id, still check out', async () => {
   assert.equal((await ipcMain.invoke('git:checkout', repo, 'side')).ok, true, 'back to the branch')
   assert.equal(sh('rev-parse', 'HEAD').trim(), head)
 })
+
+test('committing everything is held to the list that was on screen', async () => {
+  write('held.txt', 'v1\n')
+  const st = await ipcMain.invoke('git:status', repo)
+  const shown = st.status.files.map((f: any) => f.path)
+  const head = sh('rev-parse', 'HEAD').trim()
+  // an agent writes another file between the look and the click
+  write('.env.local', 'SECRET=1\n')
+  const r = await ipcMain.invoke('git:commit', repo, 'all of it', null, shown)
+  assert.equal(r.ok, false)
+  assert.match(r.error, /\.env\.local changed since you looked/)
+  assert.equal(sh('rev-parse', 'HEAD').trim(), head, 'nothing was committed')
+  fs.rmSync(path.join(repo, '.env.local'))
+  const ok = await ipcMain.invoke('git:commit', repo, 'all of it', null, shown)
+  assert.equal(ok.ok, true, JSON.stringify(ok))
+})
