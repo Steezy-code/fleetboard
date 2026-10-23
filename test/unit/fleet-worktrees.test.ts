@@ -9,7 +9,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 
 process.env.FLEETBOARD_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-wt-'))
-const { ownWorktree, containedIn } = await import('../../src/main/fleet')
+const { ownWorktree, containedIn, branchToDelete } = await import('../../src/main/fleet')
 
 const TREES = path.join('/tmp', 'fb-trees')
 const at = (...p: string[]) => path.join(TREES, ...p)
@@ -73,6 +73,43 @@ test("a branch is only deleted once the lead's branch really holds its commits",
   assert.equal(await containedIn(repo, 'fleet/lead--rafa', undefined), false)
   // a branch that does not exist is not "contained"
   assert.equal(await containedIn(repo, 'fleet/lead--gone', 'fleet/lead'), false)
+})
+
+test('a rescue commit makes the lead-contains-it answer stale, and keeps the branch', async () => {
+  // The decision to delete a worker's branch is taken from containedIn *before* the dismissal runs,
+  // and removing the worktree commits whatever the worker never reported onto that same branch. So by
+  // the time `branch -D` runs, the answer it was given can be wrong — this shows that it is.
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-rescue-'))
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
+  const sh = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', env })
+  const commit = (f: string, c: string) => {
+    fs.writeFileSync(path.join(repo, f), c)
+    sh('add', '-A')
+    sh('commit', '-qm', `add ${f}`)
+  }
+  sh('init', '-q', '-b', 'main')
+  commit('a.txt', 'a')
+  sh('branch', 'fleet/lead')
+  sh('checkout', '-q', '-b', 'fleet/lead--maya', 'fleet/lead')
+  commit('maya.txt', 'maya')
+  sh('checkout', '-q', 'fleet/lead')
+  sh('merge', '-q', '--no-ff', '-m', 'merge maya', 'fleet/lead--maya')
+
+  // what dismissTeam asks, and is told, before it starts
+  assert.equal(await containedIn(repo, 'fleet/lead--maya', 'fleet/lead'), true, 'merged: safe to delete')
+
+  // then the worker's unreported edits are committed onto its branch, as keepUncommitted does
+  sh('checkout', '-q', 'fleet/lead--maya')
+  commit('maya-late.txt', 'work it never reported')
+  assert.equal(await containedIn(repo, 'fleet/lead--maya', 'fleet/lead'), false, 'that commit is on the branch and nowhere else')
+
+  // so the branch must survive, whatever the caller was told a moment ago
+  assert.equal(branchToDelete('force', 'rescued'), 'keep', 'a rescue commit always keeps the branch')
+  assert.equal(branchToDelete('merged', 'rescued'), 'keep')
+  // with nothing to rescue the caller's decision stands, and a failed rescue never gets this far
+  assert.equal(branchToDelete('force', 'clean'), 'force')
+  assert.equal(branchToDelete('merged', 'clean'), 'merged')
+  assert.equal(branchToDelete('keep', 'clean'), 'keep')
 })
 
 test('a project id is checked before it becomes a file or folder name', async () => {

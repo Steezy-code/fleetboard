@@ -111,12 +111,36 @@ interface FrameProps {
 // Tiles that zoom in on a click to their body. Sticky notes and text labels edit in place instead.
 const NO_CLICK_ZOOM = new Set(['note', 'text'])
 
+function UnknownNode({ node, selected }: { node: BoardNode; selected: boolean }) {
+  return (
+    <div
+      className={`node node-unknown ${selected ? 'selected' : ''}`}
+      style={{ left: node.x, top: node.y, width: node.w, height: node.h, zIndex: node.z }}
+      onPointerDown={(e) => startNodeDrag(e, node)}
+    >
+      <div className="node-unknown-body">
+        <div className="label">Unknown tile</div>
+        <div className="muted small">
+          This board has a <code className="mono">{node.type}</code> tile, which this version of Fleetboard does not know how to draw. Updating may bring
+          it back.
+        </div>
+        <button className="btn sm" onClick={() => useApp.getState().removeNodes([node.id])}>
+          Remove it
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximized = false }: FrameProps) {
   const def = NODE_DEFS[node.type]
   const ref = useRef<HTMLDivElement>(null)
   const viewport = useApp((s) => s.viewport)
   const tool = useApp((s) => s.tool)
-  if (!def) return null
+  // A type this build does not know — a board written by a newer Fleetboard, or edited by hand. It
+  // used to render nothing at all: the tile was invisible, unselectable and undeletable, while still
+  // taking up its place in the file. Better to show that something is there and let it be removed.
+  if (!def) return <UnknownNode node={node} selected={selected} />
   const Body = def.component
   const Header = def.header
   const Actions = def.actions

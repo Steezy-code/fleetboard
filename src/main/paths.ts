@@ -35,18 +35,19 @@ function syncDir(dir: string) {
 }
 
 /**
- * Write JSON atomically so a crash mid-write never corrupts state. `mode` 0o600 for files only the
- * user may read. `pretty: false` for files nobody reads by hand.
+ * Write a file so that a crash or a power loss can only ever leave the old contents or the new ones.
+ * `mode` 0o600 for files only the user may read. `tmp` for callers that need the temporary file to
+ * sit somewhere particular — it must share a directory with `file`, or the rename is not atomic.
  *
  * Rename is atomic for the *name*, which is what stops a half-written file ever being seen under the
  * real one — but on its own it says nothing about when the new contents reach the disk. Without the
- * fsync, a power loss seconds after a save could leave the board file present and empty, or holding
- * a torn tail; the recovery path in store.ts would then set it aside and fall back to a snapshot, so
- * the user loses up to five minutes of work for a write that had already "succeeded".
+ * fsync, a power loss seconds after a save could leave the file present and empty, or holding a torn
+ * tail (on ext4 with data=ordered, the classic zero-length file after a crash). For the board file
+ * the recovery path in store.ts would then set it aside and fall back to a snapshot, so the user
+ * loses up to five minutes of work for a write that had already "succeeded" — and a file in the
+ * user's own project has no snapshot to fall back to at all.
  */
-export function writeJsonAtomic(file: string, value: unknown, mode?: number, opts: { pretty?: boolean } = {}) {
-  const tmp = `${file}.${process.pid}.tmp`
-  const text = opts.pretty === false ? JSON.stringify(value) : JSON.stringify(value, null, 2)
+export function writeDurable(file: string, text: string | Uint8Array, mode?: number, tmp = `${file}.${process.pid}.tmp`) {
   try {
     const fd = fs.openSync(tmp, 'w', mode ?? 0o666)
     try {
@@ -68,6 +69,11 @@ export function writeJsonAtomic(file: string, value: unknown, mode?: number, opt
     }
     throw e
   }
+}
+
+/** writeDurable for state we keep as JSON. `pretty: false` for files nobody reads by hand. */
+export function writeJsonAtomic(file: string, value: unknown, mode?: number, opts: { pretty?: boolean } = {}) {
+  writeDurable(file, opts.pretty === false ? JSON.stringify(value) : JSON.stringify(value, null, 2), mode)
 }
 
 /**

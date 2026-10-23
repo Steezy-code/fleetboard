@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { mapWorkspaces, type InkItem } from '@shared/types'
+import { mapWorkspaces, type InkItem, type Workspace } from '@shared/types'
 import { uid } from '../../lib/api'
 import { activeWs, useApp } from '../../state/store'
 
@@ -16,12 +16,10 @@ export function patchInk(patches: Record<string, Partial<InkItem>>, persist = tr
   if (!p) return
   const [firstId] = Object.keys(patches)
   if (!firstId) return
-  const workspaces = mapWorkspaces(p, (w) =>
-    w.id !== p.activeWorkspaceId ? w : { ...w, ink: w.ink.map((i) => (patches[i.id] ? { ...i, ...patches[i.id] } : i)) }
-  )
-  useApp.setState({ project: { ...p, workspaces } })
-  // any store mutation schedules a save of the whole project
-  if (persist) s.updateInk(firstId, {})
+  const patched = (w: Workspace) => ({ ...w, ink: w.ink.map((i) => (patches[i.id] ? { ...i, ...patches[i.id] } : i)) })
+  if (persist) return s.mutateWsById(p.activeWorkspaceId, patched)
+  // live but not saved, on purpose: this is every pointer move of a drag
+  useApp.setState({ project: { ...p, workspaces: mapWorkspaces(p, (w) => (w.id === p.activeWorkspaceId ? patched(w) : w)) } })
 }
 
 export function selectedInk(): InkItem[] {

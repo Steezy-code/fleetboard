@@ -97,3 +97,24 @@ test('a request body that is too big is refused, and the server keeps answering'
   await handlers.get('remote:disable')!({})
   assert.equal(remoteStatus().running, false)
 })
+
+test('one peer guessing the secret cannot lock the user out of their own Inbox', async () => {
+  const { lockedOut, wrongSecret, authorized } = await import('../../src/main/remote')
+  const attacker = '192.168.1.50'
+  const phone = '192.168.1.9'
+
+  for (let i = 0; i < 40; i++) wrongSecret(attacker)
+  assert.equal(lockedOut(attacker), true, 'it still slows a guesser down')
+  assert.equal(lockedOut(phone), false, "and says nothing about anyone else's requests")
+
+  // a few wrong tries of its own (a stale link, a mistyped token) must not stick once it gets in
+  for (let i = 0; i < 29; i++) wrongSecret(phone)
+  assert.equal(lockedOut(phone), false)
+  authorized(phone)
+  for (let i = 0; i < 29; i++) wrongSecret(phone)
+  assert.equal(lockedOut(phone), false, 'the earlier ones were forgotten, so 29 more are still 29')
+
+  // and a flood of peers cannot grow the table without end
+  for (let i = 0; i < 1500; i++) wrongSecret(`10.0.${Math.floor(i / 250)}.${i % 250}`)
+  assert.equal(lockedOut(attacker), true, 'the peers already being counted still are')
+})

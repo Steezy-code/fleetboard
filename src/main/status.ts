@@ -226,7 +226,7 @@ function questionAbove(lines: string[], top: number): string | undefined {
   for (let j = top - 1; j >= 0 && j >= top - 10; j--) {
     const t = lineAt(lines, j).trim()
     if (!t || RULE.test(lineAt(lines, j))) continue
-    if (/\?$/.test(t)) return t
+    if (t.endsWith('?')) return t
     nearest ??= t
   }
   return nearest

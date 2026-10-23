@@ -82,7 +82,10 @@ export default function WebNode({ node, selected, maximized }: NodeProps) {
 
   const wvRef = useRef<WebviewTag | null>(null)
   const mountSrc = useRef('')
-  if (url && !mountSrc.current) mountSrc.current = url
+  // Through the same allowlist the address bar uses. normalizeUrl's own comment says the stored URL is
+  // "re-mounted as src on every load, so it is not only what someone types" — but only go() was
+  // calling it, and this is the path a board file takes. A board file is written by agents.
+  if (url && !mountSrc.current) mountSrc.current = normalizeUrl(url)
   if (!url) mountSrc.current = ''
   const hasView = !!url
 

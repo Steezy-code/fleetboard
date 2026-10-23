@@ -1175,3 +1175,26 @@
   width: 140px;
   flex: none;
 }
+
+/* A tile whose type this build does not know (a board from a newer Fleetboard, or a hand edit).
+   It used to render nothing, so the tile was invisible and could not be selected or removed. */
+.node-unknown {
+  position: absolute;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-md, 10px);
+  background: var(--bg-1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+.node-unknown.selected {
+  border-color: var(--accent);
+}
+.node-unknown-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+  max-width: 320px;
+}

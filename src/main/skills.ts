@@ -94,7 +94,7 @@ function isRoot(p: string, projectPath?: string) {
   return rootsFor(projectPath).some((root) => r === path.resolve(root))
 }
 
-export function registerSkills(ctx: MainContext) {
+export function register(ctx: MainContext) {
   const { ipc } = ctx
   ipc.handle('skills:list', (_e, projectPath?: string) => ({
     user: listIn(userRoot(), 'user'),

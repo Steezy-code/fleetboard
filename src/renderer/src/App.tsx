@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useApp } from './state/store'
 import { SCHEMA_VERSION, type Recovery } from '@shared/types'
-import { on, invoke } from './lib/api'
+import { fb, on, invoke } from './lib/api'
 import { wireConsoleEvents } from './engine/consoles'
 import { wireFleet } from './engine/fleet'
 import { startEngines } from './engine/engines'
@@ -35,14 +35,8 @@ export function App() {
     wireConsoleEvents()
     wireFleet()
     startEngines()
-    return on('app:confirmQuit', async (n: number) => {
-      const ok = await useApp.getState().confirm({
-        title: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
-        body: 'Their processes stop. When you reopen, each console comes back in place and offers to resume its conversation.',
-        confirm: 'Quit',
-        danger: true
-      })
-      if (!ok) return
+    /** Save the board now (the normal save is debounced), then quit. */
+    const saveThenQuit = async () => {
       const p = useApp.getState().project
       if (p) {
         // a save that fails must not keep the app from quitting, nor lose the board without a word
@@ -61,7 +55,27 @@ export function App() {
         }
       }
       invoke('app:quit')
+    }
+    const offConfirm = on('app:confirmQuit', async (n: number) => {
+      const ok = await useApp.getState().confirm({
+        title: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
+        body: 'Their processes stop. When you reopen, each console comes back in place and offers to resume its conversation.',
+        confirm: 'Quit',
+        danger: true
+      })
+      if (ok) await saveThenQuit()
     })
+    // Closing with nothing running asks nothing, but the board still has to be written: the debounced
+    // save may be mid-wait. The ack goes first, so the main process knows this page is alive and does
+    // not close the window out from under the save.
+    const offSaveAndQuit = on('app:saveAndQuit', () => {
+      fb.send('app:quitAck')
+      void saveThenQuit()
+    })
+    return () => {
+      offConfirm()
+      offSaveAndQuit()
+    }
   }, [])
 
   // a state file that could not be read was set aside and restored from a snapshot: say so
@@ -71,7 +85,7 @@ export function App() {
         useApp
           .getState()
           .toast(
-            `This board was saved by a newer version of Fleetboard (board format ${r.tooNew}; this one reads ${SCHEMA_VERSION}). It was left untouched and an empty board opened instead. Update Fleetboard to open it.`,
+            `This board was saved by a newer version of Fleetboard (board format ${r.tooNew}; this one reads ${SCHEMA_VERSION}). It was left untouched and not opened. Update Fleetboard to open it.`,
             'warn'
           )
         return

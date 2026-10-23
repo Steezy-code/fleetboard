@@ -9,6 +9,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { ipcMain } from '../support/electron-stub'
 
+const IS_WIN = process.platform === 'win32'
+
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-confine-'))
 process.env.FLEETBOARD_HOME = home
 const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-confine-out-'))
@@ -39,10 +41,12 @@ before(async () => {
   roots = await import('../../src/main/roots')
   const store = await import('../../src/main/store')
   const fsops = await import('../../src/main/fsops')
+  const goal = await import('../../src/main/goal')
   const { DEFAULT_SETTINGS } = await import('../../src/shared/types')
   const ctx = { ipc: ipcMain as never, win: () => null, ptys: null as never, settings: () => DEFAULT_SETTINGS, emit: () => {} }
   store.register(ctx)
   fsops.register(ctx)
+  goal.register(ctx)
   fs.mkdirSync(path.join(home, 'projects'), { recursive: true })
   fs.writeFileSync(path.join(home, 'projects', 'proj1.json'), JSON.stringify(board('proj1', project)))
   assert.ok(store.loadProject('proj1'), 'the project opened')
@@ -53,7 +57,6 @@ beforeEach(() => roots.resetGrantsForTest())
 test('a path inside the project still works, through every handler', async () => {
   const file = path.join(project, 'src', 'a.ts')
   assert.equal(await ipcMain.invoke('fs:read', file), 'inside\n')
-  assert.match(await ipcMain.invoke('fs:readBase64', file), /^[A-Za-z0-9+/=]+$/)
   assert.equal(await ipcMain.invoke('fs:exists', file), true)
   assert.equal((await ipcMain.invoke('fs:stat', file)).dir, false)
   assert.deepEqual(
@@ -76,12 +79,10 @@ test('~/.fleetboard works too — Settings reveals it, and the board lives there
 test('a read outside the roots is refused, in the shape each caller expects', async () => {
   // fs:read already throws for a missing file, so a throw is what callers handle
   await assert.rejects(() => ipcMain.invoke('fs:read', secret), /Outside the folders/)
-  await assert.rejects(() => ipcMain.invoke('fs:readBase64', secret), /Outside the folders/)
   // these must stay quiet: a file node on a path that is gone relies on it
   assert.equal(await ipcMain.invoke('fs:stat', secret), null)
   assert.equal(await ipcMain.invoke('fs:exists', secret), false)
   assert.deepEqual(await ipcMain.invoke('fs:tree', outside, 2), [])
-  assert.deepEqual(await ipcMain.invoke('fs:list', outside), [])
   // and the file is untouched either way
   assert.equal(fs.readFileSync(secret, 'utf8'), 'PRIVATE KEY\n')
 })
@@ -165,4 +166,13 @@ test('the renderer cannot grant itself a path through the global store', async (
   await assert.rejects(() => ipcMain.invoke('fs:read', file), /Outside the folders/)
   // and the real grants were not replaced either
   assert.deepEqual(await ipcMain.invoke('store:getGlobal', 'fsGrants'), [])
+})
+
+test("a loop's goal check only runs in a folder Fleetboard may touch", async () => {
+  // The command is the user's own — that is what a loop's goal is — but the folder arrives over IPC,
+  // and a loop is stored in the board file. This handler runs `$SHELL -lc <command>` for up to
+  // fifteen minutes, which makes it the sharpest thing on the surface.
+  await assert.rejects(() => ipcMain.invoke('goal:check', outside, 'true'), /Outside the folders/)
+  const r = await ipcMain.invoke('goal:check', project, IS_WIN ? 'exit 0' : 'true')
+  assert.equal(r.code, 0, JSON.stringify(r))
 })

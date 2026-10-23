@@ -80,7 +80,7 @@ export function agentMade(branch: string): boolean {
 }
 
 export function setBranchAgent(branch: string, consoleId: string) {
-  useApp.getState().setProjectExtra('prAgents', { ...(extras().prAgents ?? {}), [branch]: consoleId })
+  useApp.getState().setProjectExtra('prAgents', { ...extras().prAgents, [branch]: consoleId })
 }
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)

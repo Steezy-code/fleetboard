@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useApp } from '../state/store'
-import { startUsageWatch, toneColor, usedPct, USAGE_AGENT_IDS, USAGE_AGENT_META, useUsage } from '../continuity/usageStore'
+import { pctTone, startUsageWatch, toneColor, usedPct, USAGE_AGENT_IDS, USAGE_AGENT_META, useUsage } from '../continuity/usageStore'
 import { fmtReset, fmtTokens } from '../continuity/format'
 import type { UsageAgent } from '../continuity/types'
 
@@ -20,6 +20,8 @@ export function UsagePill() {
   const l = limits[agent]
   const pct = usedPct(l, budgets[agent])
   const color = toneColor(pct)
+  // the same thresholds as the colour, from the one place that defines them
+  const tone = pctTone(pct)
   const r = 6
   const c = 2 * Math.PI * r
   const label = l?.session.active ? `resets ${fmtReset(l.session.resetsAt)}` : 'usage'
@@ -32,7 +34,7 @@ export function UsagePill() {
 
   return (
     <button
-      className={`usage-pill ${pct >= 0.9 ? 'danger' : pct >= 0.7 ? 'warn' : ''}`}
+      className={`usage-pill ${tone === 'ok' ? '' : tone}`}
       title={(title || 'No local session logs yet') + '\nEstimated from local session logs'}
       onClick={() => useApp.getState().openDrawer('usage')}
     >

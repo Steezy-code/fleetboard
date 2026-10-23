@@ -19,6 +19,13 @@ const { useThread } = await import('@/voice/thread')
 const withProject = () =>
   useApp.setState({ project: { schema: 1, id: 'p', name: 'p', path: '/tmp/p', activeWorkspaceId: 'w', lastOpened: 0, extras: {}, workspaces: [] } as any })
 
+/** The options the nth `cli:run` was given. Asserted present, so a missing call says so by name. */
+const runArgs = (n = 0): any => {
+  const call = ipc.callsTo('cli:run')[n]
+  assert.ok(call, `cli:run #${n} was never called`)
+  return call[0]
+}
+
 beforeEach(() => {
   ipc.reset()
   useApp.setState({ project: null })
@@ -162,8 +169,8 @@ test('draftCharter costs one model call and returns the model\'s charter, coerce
   assert.equal(c.understood, 'Add a --json flag')
   assert.deepEqual(c.wontTouch, ['src/renderer/*'])
   assert.notEqual(c.confidence, 99, 'a confidence the model reports is not believed')
-  assert.equal((ipc.callsTo('cli:run')[0]?.[0] as any).cwd, '/tmp/p', 'it runs in the project, so the model can look at the repo')
-  assert.ok((ipc.callsTo('cli:run')[0]?.[0] as any).prompt.includes('"add a json flag"'), 'the request is in the prompt')
+  assert.equal(runArgs().cwd, '/tmp/p', 'it runs in the project, so the model can look at the repo')
+  assert.ok(runArgs().prompt.includes('"add a json flag"'), 'the request is in the prompt')
 })
 
 test('a draft can be told the procedure the work will follow, in the same single call', async () => {
@@ -171,7 +178,7 @@ test('a draft can be told the procedure the work will follow, in the same single
   ipc.handle('cli:run', () => ({ code: 0, text: JSON.stringify({ understood: 'Review the diff against origin/main' }) }))
   const c = await draftCharter('Database safety pass: origin/main', 'Playbook "DB safety". Review only; change no files.')
   assert.equal(ipc.callsTo('cli:run').length, 1)
-  const prompt = (ipc.callsTo('cli:run')[0]?.[0] as any).prompt
+  const prompt = runArgs().prompt
   assert.ok(prompt.includes('"Database safety pass: origin/main"'), 'the request is still the user\'s words')
   assert.match(prompt, /procedure, already chosen by the user/)
   assert.ok(prompt.includes(JSON.stringify('Playbook "DB safety". Review only; change no files.')), 'and the procedure is in the prompt')
@@ -182,7 +189,7 @@ test('a draft with no procedure says nothing about one, and a failed one falls b
   withProject()
   ipc.handle('cli:run', () => ({ code: 0, text: JSON.stringify({ understood: 'x' }) }))
   await draftCharter('fix the login bug')
-  assert.doesNotMatch((ipc.callsTo('cli:run')[0]?.[0] as any).prompt, /procedure/i)
+  assert.doesNotMatch(runArgs().prompt, /procedure/i)
   ipc.handle('cli:run', () => {
     throw new Error('spawn claude ENOENT')
   })
@@ -672,7 +679,7 @@ describe('the gate', () => {
     const card = await cardUp()
     await quiet()
     assert.equal(ipc.callsTo('cli:run').length, 1)
-    const prompt = (ipc.callsTo('cli:run')[0]?.[0] as any).prompt
+    const prompt = runArgs().prompt
     assert.match(prompt, /"Hotfix: ledger sync creates a duplicate row"/, 'the charter is drafted from what the user asked for')
     assert.match(prompt, /Playbook \\"Hotfix\\"/, "with the playbook's step list as the procedure the work will follow")
     assert.equal(card.understood, 'Fix the duplicate ledger row')

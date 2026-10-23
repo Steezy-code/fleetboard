@@ -15,6 +15,7 @@ import GitPanel from './GitPanel'
 import ChatPanel from './ChatPanel'
 import SweepPanel from './SweepPanel'
 import CiPanel from './CiPanel'
+import JournalPanel from './JournalPanel'
 import CodeStudio from '../studios/CodeStudio'
 import MarkdownStudio from '../studios/MarkdownStudio'
 import DocumentsStudio from '../studios/DocumentsStudio'
@@ -49,5 +50,6 @@ export const DRAWERS: Record<string, ComponentType<any>> = {
   accounts: AccountsPanel,
   git: GitPanel,
   ci: CiPanel,
-  chat: ChatPanel
+  chat: ChatPanel,
+  journal: JournalPanel
 }

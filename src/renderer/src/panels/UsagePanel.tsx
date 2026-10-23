@@ -168,6 +168,7 @@ function UsageBar({ label, pct, right, sub, thin }: { label: string; pct: number
 }
 
 const BUDGET_PRESETS = [2e6, 6e6, 15e6, 40e6]
+const CEILINGS = [0.8, 0.9, 0.95, 1, 0]
 
 function BudgetEditor({ agent }: { agent: UsageAgent }) {
   const budget = useUsage((s) => s.budgets[agent])
@@ -198,6 +199,24 @@ function BudgetEditor({ agent }: { agent: UsageAgent }) {
         <input key={budget.week} className="input sm-input mono" defaultValue={budget.week / 1e6} onBlur={(e) => set('week', e.target.value)} />
         <span className="dim small">M tokens</span>
       </label>
+      <label className="budget-row">
+        <span className="grow">Stop spending by itself at</span>
+        <select
+          className="input sm-input"
+          value={budget.ceiling}
+          onChange={(e) => useUsage.getState().setBudget(agent, { ceiling: Number(e.target.value) })}
+        >
+          {CEILINGS.map((c) => (
+            <option key={c} value={c}>
+              {c ? `${Math.round(c * 100)}% of either budget` : 'never'}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="muted small" style={{ lineHeight: 1.45 }}>
+        At that point loops stop typing, goal judges stop running and CI failures stop being handed to an agent — the things that spend
+        while you are not watching. Your own prompts always go through.
+      </div>
     </div>
   )
 }

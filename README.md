@@ -24,11 +24,15 @@ scripts/install-desktop.sh   # add it to your app launcher
 
 ```bash
 npm test           # unit tests, including replays of real recorded CLI sessions
+npm run lint       # oxlint, errors only
 npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted claude
+#   FB_E2E_JOBS=3     several files at a time (what CI does; races show up under load)
+#   FB_E2E_HEADLESS=1 no Xvfb needed
+#   npm run test:e2e:one -- test/e2e/<file>.test.ts
 # by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
-#   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions}.test.ts
+#   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions,handoff}.test.ts
 #   FLEETBOARD_REAL_CODEX=$(which codex)      test/e2e/real/codex-*.test.ts   (local mock model, no account)
-#   FLEETBOARD_REAL_GEMINI=$(which gemini)    test/e2e/real/gemini-sessions.test.ts
+#   FLEETBOARD_REAL_GEMINI=$(which gemini)    test/e2e/real/{gemini-sessions,gemini-team}.test.ts
 ```
 
 ## Windows

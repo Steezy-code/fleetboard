@@ -1,9 +1,9 @@
-import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { MainContext } from './context'
-import { loginEnv, which } from './env'
+import { which } from './env'
+import { ghEnv, git, run, type RunOut } from './run'
 import { toRendererPath } from './platform'
 import { dirs, readJson } from './paths'
 
@@ -104,35 +104,8 @@ const MAX_REPOS = 40
 const DEFAULT_ROOTS = ['~/code', '~/Github', '~/projects', '~/src']
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', '__pycache__', 'venv'])
 
-interface RunOut {
-  code: number
-  stdout: string
-  stderr: string
-}
-
-function exec(bin: string, args: string[], cwd: string, env: Record<string, string>, timeout = CMD_TIMEOUT): Promise<RunOut> {
-  return new Promise((resolve) => {
-    execFile(bin, args, { cwd, env, timeout, maxBuffer: 16 * 1024 * 1024 }, (err: any, stdout, stderr) => {
-      const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0
-      let se = String(stderr ?? '')
-      if (err && !se.trim()) se = err.killed ? `${path.basename(bin)} timed out` : err.code === 'ENOENT' ? `${path.basename(bin)} not found` : String(err.message ?? err)
-      resolve({ code, stdout: String(stdout ?? ''), stderr: se })
-    })
-  })
-}
-
-let envCache: { git: Record<string, string>; gh: Record<string, string> } | null = null
-async function envs() {
-  if (envCache) return envCache
-  const base = await loginEnv()
-  envCache = {
-    git: { ...base, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C', GIT_PAGER: 'cat', GCM_INTERACTIVE: 'never', GIT_ASKPASS: '', SSH_ASKPASS: '' },
-    gh: { ...base, GH_PROMPT_DISABLED: '1', GH_NO_UPDATE_NOTIFIER: '1', GH_SPINNER_DISABLED: '1', NO_COLOR: '1', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
-  }
-  // keep ssh from prompting for host keys / passphrases during an opt-in fetch
-  if (!envCache.git.GIT_SSH_COMMAND) envCache.git.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=6'
-  return envCache
-}
+const exec = (bin: string, args: string[], cwd: string, env: Record<string, string>, timeout = CMD_TIMEOUT) =>
+  run(bin, args, { cwd, env, timeout, maxBuffer: 16 * 1024 * 1024 })
 
 const firstLine = (s: string) =>
   s
@@ -406,9 +379,11 @@ export function score(r: SweepRepo): void {
 
 async function inspect(c: SweepCandidate, opts: { fetch: boolean; gh: string | null }): Promise<SweepRepo> {
   const t0 = Date.now()
-  const { git: genv, gh: ghenv } = await envs()
+  const ghenv = await ghEnv()
   const cwd = c.path
-  const g = (args: string[], timeout?: number) => exec('git', args, cwd, genv, timeout)
+  // through run.ts, so core.fsmonitor cannot make `git status` run a command the repo chose: these
+  // are repos found by walking the user's folders, not ones they opened
+  const g = (args: string[], timeout?: number) => git(cwd, args, { timeout: timeout ?? CMD_TIMEOUT, maxBuffer: 16 * 1024 * 1024 })
   const r: SweepRepo = {
     name: c.name,
     path: toRendererPath(c.path),

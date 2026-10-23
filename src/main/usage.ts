@@ -390,6 +390,7 @@ async function scan(force = false) {
       for (const f of out) files.push({ agent: r.agent, file: f })
     }
     const live = new Set(files.map((f) => f.file))
+    // eslint-disable-next-line unicorn/no-useless-spread -- a copy, because the loop deletes as it goes
     for (const k of [...cache.keys()]) if (!live.has(k)) (cache.delete(k), (cacheDirty = true))
 
     const todo: { agent: UsageAgent; file: string; mtime: number; size: number }[] = []
@@ -757,7 +758,6 @@ export function register(ctx: MainContext) {
     if (agent) return limits(agent)
     return USAGE_AGENTS.map(limits)
   })
-  ctx.ipc.handle('usage:scanning', () => !!scanning)
   // warm the cache in the background shortly after launch
   setTimeout(() => scan(false).catch(() => {}), 2500)
 }

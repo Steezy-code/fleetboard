@@ -135,3 +135,16 @@ test('tiles showing files', async () => {
   await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ type: 'git', x: 0, y: 0 }))
   await check('file, doc, image and git tiles', n)
 })
+
+test('a tile of a type this build does not know says so, and can be removed', async () => {
+  // A board written by a newer Fleetboard, or edited by hand. NodeFrame used to return null for an
+  // unknown type: the tile was invisible, unselectable and undeletable, while still taking up its
+  // place in the board file — so it came back, still invisible, on every load.
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ type: 'hologram', x: 60, y: 1400, w: 360, h: 180 }))
+  const text = await app.waitFor(async () => (await app.texts('.node-unknown'))[0] ?? null, { label: 'the placeholder' })
+  assert.match(text, /unknown tile/i)
+  assert.match(text, /hologram/, 'it names the type, so the board file makes sense')
+  await app.click('.node-unknown button', 'Remove it')
+  await app.waitFor(() => app.eval(() => !document.querySelector('.node-unknown')), { label: 'removed' })
+  assert.deepEqual(app.rendererErrors, [])
+})

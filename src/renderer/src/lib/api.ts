@@ -62,8 +62,6 @@ export function extractJson<T = any>(text: string): T | null {
   return null
 }
 
-export const basename = (p: string) => p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || p
-export const relPath = (root: string, p: string) => (p.startsWith(root) ? p.slice(root.length).replace(/^[\\/]+/, '') : p)
 
 /** URL the renderer can load for a local file (images, PDFs, video). Windows paths become fbfile:///C:/… */
 export const fileUrl = (path: string) => {
