@@ -197,7 +197,7 @@ export function remoteState() {
     consoles,
     approvals,
     asks: (fleet?.asks ?? []).filter((a) => !a.answer).map((a) => ({ id: a.id, from: memberName(a.from), question: a.question, options: a.options })),
-    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length, closeOnly: closeOnly(ready), prUrl: ready.prUrl } : null
+    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length, closeOnly: closeOnly(ready), prUrl: ready.prUrl, head: ready.head } : null
   }
 }
 
@@ -245,7 +245,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
     }
     if (url.pathname === '/api/merge') {
       if (typeof body.projectId !== 'string' || body.confirm !== true) return send(res, 400, { error: 'confirm the merge' })
-      return send(res, 200, await mergeReady(body.projectId))
+      // the project the phone was shown, and the card it confirmed
+      if (body.projectId !== currentProject()?.id) return send(res, 409, { ok: false, error: 'Another project is open on the computer now.' })
+      return send(res, 200, await mergeReady(body.projectId, typeof body.head === 'string' ? body.head : ''))
     }
   }
   return send(res, 404, { error: 'not found' })

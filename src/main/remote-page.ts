@@ -149,7 +149,7 @@ export const PAGE_JS = `'use strict'
         }
       } else acts.appendChild(button('Merge into my checkout', 'primary', function () {
         if (!confirm('Merge ' + (r.branch || 'the work') + ' into your checkout on the computer?')) return
-        return api('/api/merge', { projectId: s.project.id, confirm: true }).then(function (x) { x.ok ? toast('Merged' + (x.into ? ' into ' + x.into : '') + '.') : toast('Merge failed: ' + (x.error || ''), true) })
+        return api('/api/merge', { projectId: s.project.id, confirm: true, head: r.head || '' }).then(function (x) { x.ok ? toast('Merged' + (x.into ? ' into ' + x.into : '') + '.') : toast('Merge failed: ' + (x.error || ''), true) })
       }))
       card.appendChild(acts)
       main.appendChild(card)

@@ -273,12 +273,13 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   const rm = await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
   if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
   const how = branchToDelete(deleteBranch, kept)
-  if (m.branch && how !== 'keep') await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])
+  // -d refuses a branch with commits the checkout lacks (a Lead's after its Ready card): it is kept then
+  const deleted = !!m.branch && how !== 'keep' && (await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])).ok
   journal({
     kind: 'fleet.remove',
-    text: `${m.name}'s worktree removed${m.branch ? (how === 'keep' ? `, branch ${m.branch} kept` : `, branch ${m.branch} deleted`) : ''}${kept === 'rescued' ? ' (its unreported work was committed first)' : ''}`,
+    text: `${m.name}'s worktree removed${m.branch ? (deleted ? `, branch ${m.branch} deleted` : `, branch ${m.branch} kept`) : ''}${kept === 'rescued' ? ' (its unreported work was committed first)' : ''}`,
     project: projectPath,
-    detail: { member: m.name, branch: m.branch, branchDeleted: how !== 'keep', rescued: kept === 'rescued' }
+    detail: { member: m.name, branch: m.branch, branchDeleted: deleted, rescued: kept === 'rescued' }
   })
 }
 
@@ -1053,12 +1054,15 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       if (!m.branch) {
         s.ready = { leadId: m.id, branch: '', summary: String(a.summary), commits: 0, files: [], at: Date.now(), ...(verified ? { verified } : {}) }
       } else {
-        const base = m.base ?? 'HEAD~1'
-        const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..HEAD`])).out) || 0
-        const files = (await git(m.cwd, ['diff', '--name-only', `${base}..HEAD`])).out.split('\n').filter(Boolean)
-        const stat = numstat((await git(m.cwd, ['diff', '--numstat', `${base}..HEAD`])).out)
+        // one commit for everything the card says, and for what Merge later merges
+        const head = await commitOf(m.cwd, m.branch)
+        if (!head) return fail(`Your branch ${m.branch} is not a commit git can find.`)
+        const base = m.base ?? `${head}~1`
+        const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..${head}`])).out) || 0
+        const files = (await git(m.cwd, ['diff', '--name-only', `${base}..${head}`])).out.split('\n').filter(Boolean)
+        const stat = numstat((await git(m.cwd, ['diff', '--numstat', `${base}..${head}`])).out)
         const hasRemote = (await git(m.cwd, ['remote', 'get-url', 'origin'])).ok
-        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, stat, at: Date.now(), hasRemote, ...(verified ? { verified } : {}) } as FleetReady
+        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, head, stat, at: Date.now(), hasRemote, ...(verified ? { verified } : {}) } as FleetReady
       }
       m.status = 'reported'
       changed(s)
@@ -1297,7 +1301,7 @@ export async function register(c: MainContext) {
     const base = lead.base ?? 'HEAD~1'
     return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
   })
-  ipc.handle('fleet:mergeReady', (_e, projectId: string) => mergeReady(projectId))
+  ipc.handle('fleet:mergeReady', (_e, projectId: string, head?: string) => mergeReady(projectId, typeof head === 'string' ? head : undefined))
   ipc.handle('fleet:revertMerge', (_e, projectId: string, commit: string) => revertMerge(projectId, String(commit)))
   /** Push the team's branch and open a draft PR whose description is the lead's summary. */
   ipc.handle('fleet:openPr', async (_e, projectId: string) => {
@@ -1377,9 +1381,14 @@ async function unfinishedOperation(cwd: string): Promise<string | null> {
 const merging = new Set<string>()
 
 /** Merge the Ready work into the user's checkout (whatever branch it is on now), then close the team. */
-export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string; commit?: string }> {
+/**
+ * Merge the team's work into the user's checkout. `head` is the commit of the Ready card the user
+ * confirmed: a card replaced since (the Lead finished again) is refused rather than merged unseen.
+ */
+export async function mergeReady(projectId: string, head?: string): Promise<{ ok: boolean; into?: string; error?: string; commit?: string }> {
   const s = states.get(projectId)
   if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
+  if (head !== undefined && s.ready.head && head !== s.ready.head) return { ok: false, error: 'The Ready card changed since you looked at it. Check it again, then merge.' }
   // The board offers no Merge once a PR is open (closeOnly), but the phone's /api/merge reaches this
   // too: merging here would delete the branch the open PR is built on, where Done keeps it.
   if (s.ready.prUrl) return { ok: false, error: `A pull request is open for this work (${s.ready.prUrl}); merge it there, or press Done to close the team.` }
@@ -1390,9 +1399,9 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
     const lead = s.members[s.ready.leadId]
     if (!lead) return { ok: false, error: 'The team has no lead to merge from.' }
     if (lead.branch) {
-      // the commit that is checked is the commit that is merged: the Lead is still running and may
-      // commit again between the two
-      const at = await commitOf(s.projectPath, lead.branch)
+      // The commit the card describes: the Lead stays on after finishing and may commit again, which
+      // would otherwise be merged without being seen. It is also the one checked below.
+      const at = s.ready.head ?? (await commitOf(s.projectPath, lead.branch))
       if (!at) return { ok: false, error: `The team's branch ${lead.branch} is not a commit git can find, so there is nothing to merge.` }
       // What the user ruled out is enforced here rather than only on the card, because this is the
       // function every client reaches: the Ready card, and the phone's /api/merge. Checked against

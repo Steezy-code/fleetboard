@@ -74,6 +74,8 @@ export interface FleetReady {
   summary: string
   commits: number
   files: string[]
+  /** the commit the card describes, and the one Merge merges: the Lead stays on and may commit again */
+  head?: string
   /** lines added / removed per file */
   stat?: { path: string; add: number; del: number }[]
   /** what the lead checked before finishing ("typecheck and 48 tests pass"), in its words */

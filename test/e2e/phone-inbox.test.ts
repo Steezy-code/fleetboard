@@ -84,7 +84,11 @@ test("the Lead's question and the Ready card, from the phone", async () => {
   const ready = await app.waitFor(async () => (await (await api(url, '/api/state')).json()).ready, { label: 'Ready on the phone', timeout: 30_000 })
   assert.equal(ready.lead, 'Lead')
   assert.equal((await api(url, '/api/merge', { method: 'POST', body: JSON.stringify({ projectId }) })).status, 400, 'merging needs an explicit confirm')
-  const merged = await (await api(url, '/api/merge', { method: 'POST', body: JSON.stringify({ projectId, confirm: true }) })).json()
+  // the card the phone confirmed: one replaced since is refused, not merged unseen
+  assert.ok(ready.head, 'the phone is told which commit the card describes')
+  const stale = await (await api(url, '/api/merge', { method: 'POST', body: JSON.stringify({ projectId, confirm: true }) })).json()
+  assert.equal(stale.ok, false, 'a merge that names no card')
+  const merged = await (await api(url, '/api/merge', { method: 'POST', body: JSON.stringify({ projectId, confirm: true, head: ready.head }) })).json()
   assert.equal(merged.ok, true, JSON.stringify(merged))
   assert.ok(fs.existsSync(path.join(repo, 'a.txt')))
   assert.equal(git(sb, repo, 'status', '--porcelain'), '')
