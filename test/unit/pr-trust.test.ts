@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 
 const { useApp } = await import('@/state/store')
 const prf = await import('@/workbench/prFeedback')
+const { useFleet } = await import('@/engine/fleet')
 
 const comment = (author: string, association?: string) => ({
   id: `c-${author}-${association ?? 'none'}`,
@@ -67,7 +68,29 @@ test('a console that approves everything counts as auto-approving', () => {
   useApp.setState((st) => ({ settings: { ...st.settings, autoApprove: true } }))
   assert.equal(prf.autoApproves('default'), true, 'global on: it would act without asking')
   assert.equal(prf.autoApproves('asks'), false, 'an explicit false still wins')
-  assert.equal(prf.autoApproves('no-such-console'), false)
+  assert.equal(prf.autoApproves('no-such-console'), true, 'unknown is assumed to: it fails closed')
+})
+
+test('a running console is judged by how its process was started, not by the setting now', () => {
+  // started while Auto-approve was on, it keeps the flag after the setting is turned off
+  useApp.setState((st) => ({ settings: { ...st.settings, autoApprove: false } }))
+  useApp.getState().setLive('default', true, true)
+  assert.equal(prf.autoApproves('default'), true)
+  // and one started asking still asks after the setting is turned on
+  useApp.setState((st) => ({ settings: { ...st.settings, autoApprove: true } }))
+  useApp.getState().setLive('default', true, false)
+  assert.equal(prf.autoApproves('default'), false)
+  useApp.getState().setLive('default', false)
+})
+
+test("a Lead counts as auto-approving when any of its team does: it hands what it is given to them", () => {
+  useApp.setState((st) => ({ settings: { ...st.settings, autoApprove: false } }))
+  useApp.getState().setLive('asks', true, false)
+  useApp.getState().setLive('yolo', true, true)
+  useFleet.setState({ state: { members: { asks: { id: 'asks', role: 'lead', status: 'working' }, yolo: { id: 'yolo', role: 'worker', leadId: 'asks', status: 'working' } } } as any })
+  assert.equal(prf.autoApproves('asks'), true)
+  useFleet.setState({ state: null })
+  assert.equal(prf.autoApproves('asks'), false, 'on its own it asks')
 })
 
 test('a fork’s PR is never "made by an agent of ours" and has no owner, whatever its branch is called', () => {

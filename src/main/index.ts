@@ -209,6 +209,7 @@ function registerCore() {
   })
   ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
+  ipcMain.handle('pty:info', (_e, id: string) => ptys.infoOf(String(id)))
 
   ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
