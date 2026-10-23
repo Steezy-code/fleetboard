@@ -5,6 +5,7 @@ import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { logError } from './errors'
+import { loginEnv } from './env'
 import { IS_WIN, findExecutable } from './platform'
 
 // Claude Code reports its own lifecycle through hooks. Each console's CLI gets a settings file
@@ -68,8 +69,17 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
     })
     server.listen(0, '127.0.0.1', () => {
       port = (server.address() as { port: number }).port
-      writeSettingsFile()
+      writeSettingsFile(findExecutable('node', process.env))
       resolve(port)
+      // An app started from the desktop often has no node on its PATH where the user's shell does
+      // (nvm, mise): without it the hook falls back to curl, whose argv carries the token. Look again
+      // with the login shell's PATH, without holding the window up for it.
+      void loginEnv()
+        .then((env) => {
+          const node = findExecutable('node', env)
+          if (node) writeSettingsFile(node)
+        })
+        .catch(() => {})
     })
   })
 }
@@ -125,11 +135,10 @@ function hookCommand(event: string, node: string | null): string {
   return `powershell -NoProfile -ExecutionPolicy Bypass -File "${slash(path.join(dirs.hooks, 'fb-hook.ps1'))}" ${event}`
 }
 
-function writeSettingsFile() {
+function writeSettingsFile(node: string | null) {
   fs.mkdirSync(dirs.hooks, { recursive: true })
   fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.cjs'), NODE_HOOK)
   if (IS_WIN) fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.ps1'), PS_HOOK)
-  const node = findExecutable('node', process.env)
   const cmd = (event: string) => ({ type: 'command', command: hookCommand(event, node) })
   const hooks: Record<string, unknown[]> = {}
   for (const event of HOOK_EVENTS) {
