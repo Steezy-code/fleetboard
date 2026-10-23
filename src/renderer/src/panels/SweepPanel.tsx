@@ -19,6 +19,7 @@ import {
   X
 } from 'lucide-react'
 import type { SweepRepo, SweepResult } from '../../../main/sweep'
+import { isFailing } from '@shared/ci'
 import { invoke, on, runCli } from '../lib/api'
 import { useApp } from '../state/store'
 import { Modal } from '../ui/Modal'
@@ -32,7 +33,6 @@ let cache: SweepResult | null = null
 let homeDir = ''
 let briefCache: { at: number; text: string } | null = null
 const STALE_MS = 3 * 60_000
-const FAILING = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
 
 const tilde = (p: string) => (homeDir && (p === homeDir || p.startsWith(homeDir + '/')) ? '~' + p.slice(homeDir.length) : p.replace(/^\/home\/[^/]+|^\/Users\/[^/]+|^[A-Za-z]:\/Users\/[^/]+/i, '~'))
 const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).replace(/\s?([AP]M)$/i, (_m, x: string) => x.toLowerCase())
@@ -43,7 +43,7 @@ const agoText = (t: number) => {
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86400)}d ago`
 }
-const failing = (r: SweepRepo) => !!r.ci && FAILING.has(r.ci.conclusion)
+const failing = (r: SweepRepo) => !!r.ci && isFailing(r.ci.conclusion)
 const dirtyCount = (r: SweepRepo) => r.uncommitted + r.untracked
 
 function stats(res: SweepResult | null) {
