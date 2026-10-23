@@ -161,6 +161,21 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
+/**
+ * Stop everything that outlives a window unless told to. Headless runs and goal checks are not
+ * consoles, so dispose() never sees them: a planner run or an `npm test` goal check outlived the app,
+ * spending tokens with its output going nowhere. Both quit paths run it (app:quit destroys the last
+ * window, so window-all-closed follows), and the second gets the first's promise instead of a rerun.
+ */
+let stopping: Promise<void> | undefined
+const shutdown = () =>
+  (stopping ??= (async () => {
+    cli.killRuns()
+    goal.killGoalChecks()
+    stopFleetTicks()
+    await ptys.dispose()
+  })())
+
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ipcMain.on('app:background', (_e, color: string) => {
@@ -197,12 +212,7 @@ function registerCore() {
 
   ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
-    // headless runs and goal checks are not consoles, so dispose() never saw them: a planner run or
-    // an `npm test` goal check outlived the app, spending tokens with its output going nowhere
-    cli.killRuns()
-    goal.killGoalChecks()
-    stopFleetTicks()
-    await ptys.dispose()
+    await shutdown()
     // the board is already saved; don't let a slow child process keep the app alive
     win?.destroy()
     win = null
@@ -308,9 +318,6 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', async () => {
-  cli.killRuns()
-  goal.killGoalChecks()
-  stopFleetTicks()
-  await ptys.dispose()
+  await shutdown()
   app.quit()
 })
