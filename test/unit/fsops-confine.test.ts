@@ -145,6 +145,14 @@ test('a file dropped on the board is granted by the preload, not by the renderer
   assert.equal(await ipcMain.invoke('fs:read', dropped), 'png')
 })
 
+test('a dropped folder never grants the disk, the home folder or above it', async () => {
+  // the grant outlives the session: one of these would switch confinement off for good
+  const onDropped = ipcMain.listeners.get('fs:grantDropped')!
+  const before = roots.allowedRoots()
+  for (const wide of [path.parse(process.cwd()).root, os.homedir(), path.dirname(os.homedir())]) onDropped({}, wide)
+  assert.deepEqual(roots.allowedRoots(), before)
+})
+
 test('a refusal is logged, so a wrong root is diagnosable', async () => {
   const log = path.join(home, 'logs', 'main.log')
   await ipcMain.invoke('fs:stat', path.join(fs.mkdtempSync(path.join(outside, 'log-')), 'curious.txt'))

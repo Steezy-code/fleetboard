@@ -100,6 +100,27 @@ export function grant(p: string): void {
 }
 
 /**
+ * A file or folder dropped on the board. Only the preload sends it, for a real file, but a dropped
+ * folder is never the disk's root, the home folder or one above it: that grant would outlive the
+ * session and switch confinement off for good.
+ */
+export function grantDropped(p: string): void {
+  if (typeof p !== 'string' || !p.trim()) return
+  const abs = path.resolve(p)
+  let dir = false
+  try {
+    dir = fs.statSync(abs).isDirectory()
+  } catch {
+    return // a drop is of something that exists
+  }
+  if (dir && !plausibleRoot(abs)) {
+    logError('roots', `a dropped folder too wide to grant: ${abs}`)
+    return
+  }
+  grant(abs)
+}
+
+/**
  * A folder that could plausibly be a project: not the filesystem root, not the home directory
  * itself, not an ancestor of it.
  *
