@@ -92,7 +92,9 @@ export class PtyManager {
 
     const settings = this.settings()
     const agent = agentById(req.agentId, settings.customAgents)
-    const env = { ...(await loginEnv()), ...hookEnv(req.id), ...profileEnv(req.agentId, req.profileId) }
+    // the hook token only where Claude Code's hooks use it: any other process holding it could report for this console
+    const hooked = agent?.id === 'claude' && !req.command
+    const env = { ...(await loginEnv()), ...(hooked ? hookEnv(req.id) : {}), ...profileEnv(req.agentId, req.profileId) }
     env.FB_CONSOLE_ID = req.id
 
     let file: string
