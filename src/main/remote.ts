@@ -251,7 +251,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
     if (url.pathname === '/api/ask') {
       if (typeof body.askId !== 'string' || typeof body.answer !== 'string' || !body.answer.trim()) return send(res, 400, { error: 'bad answer' })
       // one of the Lead's options: the phone offers no free text, and its answer reaches the Lead as the user's
-      const ok = answerAsk(body.askId, body.answer.trim().slice(0, 500), { fromOptions: true })
+      const ok = answerAsk(body.askId, body.answer.trim().slice(0, 500), { fromOptions: true, projectId: currentProject()?.id ?? '' })
       return send(res, ok ? 200 : 409, { ok })
     }
     if (url.pathname === '/api/merge') {
