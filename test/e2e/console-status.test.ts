@@ -27,7 +27,8 @@ const send = (id: string, text: string) => app.eval(({ id, text }) => (window as
 test('a console goes starting → idle (SessionStart hook) → working → idle', async () => {
   const id = await spawnClaude()
   await app.waitStatus(id, 'idle')
-  assert.ok(app.fakeLog((e) => e.event === 'hook' && e.hook === 'SessionStart').length > 0, 'the hook ran through the hook server')
+  // the fake logs a hook once its command has exited, a moment after the server has it
+  await app.waitFor(() => app.fakeLog((e) => e.event === 'hook' && e.hook === 'SessionStart').length > 0, { label: 'the hook ran through the hook server' })
   await send(id, 'a slow task')
   await app.waitStatus(id, 'working')
   await app.waitStatus(id, 'idle', 15_000)
