@@ -17,6 +17,7 @@ import type {
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
 import { errorText, invoke, uid } from '../lib/api'
 import { baseName } from '../workbench/paths'
+import { mayDropUnsaved } from '../lib/unsaved'
 
 /**
  * Per-window memory that outlives the page (a crash, a reload) but not the app: sessionStorage belongs
@@ -97,7 +98,7 @@ interface AppState {
   setSettings: (patch: Partial<Settings>) => Promise<void>
   refreshAgents: (force?: boolean) => Promise<void>
   openProject: (path: string) => Promise<void>
-  closeProject: () => void
+  closeProject: () => Promise<void>
 
   // workspaces
   addWorkspace: (name?: string) => string
@@ -363,6 +364,8 @@ export const useApp = create<AppState>((set, get) => {
     refreshAgents: async (force) => set({ agents: await invoke('agents:detect', force) }),
 
     openProject: async (path) => {
+      // from a playbook or by voice as well as the home screen: an editor's unsaved work goes only if the user says so
+      if (get().project && get().project!.path !== path && !(await mayDropUnsaved('Open another project'))) return
       const id = await invoke<string>('store:projectId', path)
       // null means there is no board for this folder yet. A *refusal* means there is one and this
       // build must not touch it — opening a blank board over that id would be a board that can never
@@ -393,7 +396,8 @@ export const useApp = create<AppState>((set, get) => {
       scheduleSave(project)
       windowSession.set(OPEN_PROJECT, path)
     },
-    closeProject: () => {
+    closeProject: async () => {
+      if (!(await mayDropUnsaved('Close the project'))) return
       windowSession.set(OPEN_PROJECT, null)
       restoreFocusInstantly()
       const p = get().project
