@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import type { BoardNode, ConsoleData } from '@shared/types'
 import type { FleetMember, FleetState } from '@shared/fleet'
+import { type Charter, charterMessage } from '@shared/charter'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
+import { clearGate, draftCharter, gateCharter } from '../fleet/charter'
 import { CONSOLE_H, CONSOLE_W } from './consoles'
 
 // Board side of lead/worker teams: mirrors the fleet state from the main process, places team
@@ -43,20 +45,36 @@ export async function confirmTeamFolder(projectPath: string): Promise<boolean> {
   })
 }
 
-/** Give work to the team: message the current lead, or start one. */
-export async function sendGoal(goal: string) {
+/** The card can stay up a while: is the project it was drawn for still the open one? If not, say nothing was sent. */
+export function stillInProject(projectId: string): boolean {
+  if (useApp.getState().project?.id === projectId) return true
+  useApp.getState().toast('The project changed while that charter was open, so nothing was sent', 'warn')
+  return false
+}
+
+/**
+ * Give work to the team: message the current lead, or start one. Nothing is sent and nothing starts
+ * until the user has seen the charter. Oracle writes one along with the goal it routes here; a goal
+ * from a door that never asked Oracle has one drafted.
+ */
+export async function sendGoal(goal: string, charter?: Charter) {
   const app = useApp.getState()
   const p = app.project
   if (!p) return
+  const confirmed = await gateCharter(charter ?? (await draftCharter(goal)), activeLead())
+  if (!confirmed) return
+  if (!stillInProject(p.id)) return
+  // read again, so a Lead that came or went meanwhile decides the route, not the one the card was drawn for
   const lead = activeLead()
   if (lead) {
-    await invoke('fleet:userMessage', lead.id, goal)
+    await invoke('fleet:userMessage', lead.id, charterMessage(confirmed, goal))
     app.toast(`Sent to ${lead.name}`, 'ok')
     return lead
   }
   if (!(await confirmTeamFolder(p.path))) return
   app.toast('Starting a Lead for this goal…')
-  const m = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal })
+  const { followUpTo: _gone, ...asNewTeam } = confirmed
+  const m = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal, charter: asNewTeam })
   return m
 }
 
@@ -134,7 +152,11 @@ export function wireFleet() {
     useFleet.setState({ state: p ? await invoke<FleetState>('fleet:state', p.id, p.path) : null })
   }
   useApp.subscribe((s, prev) => {
-    if (s.project?.id !== prev.project?.id) refresh()
+    if (s.project?.id === prev.project?.id) return
+    // the card about the project just left names a Lead and a repo that are gone, and nothing it
+    // starts could land anywhere: whoever is waiting at the gate is let go with it
+    clearGate()
+    refresh()
   })
   refresh()
 
