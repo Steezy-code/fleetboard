@@ -5,7 +5,9 @@ import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { agentLabel, consoleTail } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
-import { approvalFor, type Approval } from '@shared/approvals'
+import { approvalFor, commandNote, type Approval } from '@shared/approvals'
+import { addRule, canRule, pruneRules, ruleFor, rulesOf, teamOf, useTeamRules } from './teamRules'
+import { awayItem, useAway, useAwayWatcher } from './away'
 import { ciItems, fixCi, useCi, type CiItem } from '../workbench/ciStore'
 import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
 import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
@@ -13,9 +15,11 @@ import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
 import { reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
 import type { Spent } from '@shared/spend'
 
-// The Inbox, as one ordered list: what blocks an agent first (its permission prompts, then the
-// Lead's questions), then finished work, then notices (red CI, review comments). The tray on the
-// command bar (InboxTray.tsx) shows it; the command bar's keys and voice answer the front item.
+// The Inbox, as one ordered list: what happened while you were away (away.ts), then what blocks an
+// agent (its permission prompts, then the Lead's questions), then finished work, then notices (red
+// CI, review comments). The tray on the command bar (InboxTray.tsx) shows it; the command bar's keys
+// and voice answer the front item. A team member's prompt that one of your team rules covers
+// (teamRules.ts) is answered here and never shows.
 
 export interface InboxAction {
   label: string
@@ -42,7 +46,7 @@ interface Base {
 }
 
 export type InboxItem =
-  | (Base & { kind: 'approval'; approval: Approval | null; context: string[]; note: string | null })
+  | (Base & { kind: 'approval'; approval: Approval | null; context: string[]; note: string | null; team: string | null; rules: string[] })
   | (Base & { kind: 'ask'; ask: FleetAsk; progress: string })
   | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number; review: MergeReview | null; spend: Record<string, Spent | null> })
   | (Base & { kind: 'stopped' })
@@ -119,19 +123,6 @@ export async function runAction(item: InboxItem, i: number) {
 
 // ---------------------------------------------------------------- what an approval is about
 
-/** A plain word on what a command does, when it is clear from the command. Null when unsure. */
-export function commandNote(cmd: string | undefined): string | null {
-  if (!cmd) return null
-  const c = cmd.trim().replace(/^(sudo\s+)?/, '')
-  if (/\brm\s+-[a-z]*r|\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|push\s+(-f|--force))|\bdrop\s+(table|database)\b/i.test(c)) return 'Deletes or overwrites things'
-  if (/\bgit\s+push\b|\bnpm\s+publish\b|\bcurl\b.*-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(c)) return 'Sends something off this machine'
-  if (/^(npm|pnpm|yarn|bun)\s+(i|install|add)\b|^pip3?\s+install\b|^cargo\s+add\b/i.test(c)) return 'Installs packages'
-  if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(vitest|jest|pytest|playwright\s+test)\b|^(cargo|go)\s+test\b/i.test(c)) return 'Runs your tests'
-  if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?(typecheck|lint|build|check)\b|^(npx\s+)?tsc\b/i.test(c)) return 'Runs a check or build'
-  if (/^(ls|cat|head|tail|wc|grep|rg|find|tree|pwd|which)\b|^git\s+(status|diff|log|show|branch)\b/i.test(c)) return 'Only reads'
-  return null
-}
-
 const CHROME = /[─-▟⠀-⣿]+|[⏺⎿✻✶✳✢·•●○◯◉◐◓◑◒❯›»]+/g
 
 /** The agent's last couple of output lines before its question: what it just did and why it asks. */
@@ -157,6 +148,39 @@ async function answerPrompt(consoleId: string, a: PromptAnswer) {
   const res = await invoke<AnswerResult>('pty:answer', consoleId, a).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
   if (res.ok) return useApp.getState().setStatus(consoleId, 'working')
   useApp.getState().toast(res.reason === 'not-live' ? 'That console has stopped' : 'That question changed; nothing was sent. Check the console.', 'warn')
+}
+
+/** Consoles a team rule is answering right now: their card stays out of the tray meanwhile. */
+const byRule = new Set<string>()
+
+/** Answer a team member's prompt with the team's rule, if it has one for exactly this command. */
+async function answerByRule(id: string, ap: Approval | null) {
+  const fleet = useFleet.getState().state
+  const lead = teamOf(fleet, id)
+  const allow = ap?.options.find((o) => o.tone === 'allow')
+  if (!lead || !ap?.command || !allow || !ruleFor(lead, ap.command) || byRule.has(id)) return
+  byRule.add(id)
+  const name = fleet?.members[id]?.name ?? 'an agent'
+  try {
+    const res = await invoke<AnswerResult>('pty:answerByRule', id, allow.answer, ap.command, name).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+    if (!res.ok) return // the card shows as usual: the question changed, or the console is gone
+    useApp.getState().setStatus(id, 'working')
+    const cmd = ap.command.split('\n')[0]!
+    useApp.getState().toast(`Allowed \`${cmd.length > 40 ? cmd.slice(0, 39) + '…' : cmd}\` for ${name}, by your rule for the team`, 'ok')
+  } finally {
+    byRule.delete(id)
+    refreshInbox()
+  }
+}
+
+/** "Allow for the team": answer this one, then everyone on the team already waiting on the same command. */
+function allowForTeam(id: string, lead: string, ap: Approval) {
+  const allow = ap.options.find((o) => o.tone === 'allow')
+  if (!ap.command || !allow) return
+  addRule(lead, ap.command)
+  const fleet = useFleet.getState().state
+  for (const [other, a] of Object.entries(approvals)) if (other !== id && teamOf(fleet, other) === lead) void answerByRule(other, a.approval)
+  return answerPrompt(id, allow.answer)
 }
 
 export function openConsole(id: string) {
@@ -264,11 +288,28 @@ function build() {
   const items: InboxItem[] = []
   const memberName = (id: string) => fleet?.members[id]?.name ?? (consoles[id]?.data.name as string) ?? 'Lead'
 
+  // 0. what happened while you were away, on top until you have read it
+  const away = awayItem()
+  if (away && !dismissed.has(away.key)) items.push(away)
+
   // 1. permission prompts and other questions a console is stuck on
   for (const id of Object.keys(app.statuses).filter((id) => app.statuses[id] === 'needs-you' && app.live[id])) {
     const c = consoles[id]
     const ap = approvals[id]
     const key = `approval:${id}`
+    const team = teamOf(fleet, id)
+    const rules = rulesOf(team).map((r) => r.command)
+    // a rule is answering it, or may be about to once its question has been read: no card to flash up
+    if (byRule.has(id) || (rules.length && !ap)) continue
+    const actions: InboxAction[] = ap?.approval
+      ? ap.approval.options.map((o, i) => ({ label: o.label, tone: o.tone === 'always' ? 'other' : o.tone, primary: i === 0 && o.tone === 'allow', run: () => answerPrompt(id, o.answer) }))
+      : [{ label: 'Open console', primary: true, keeps: true, run: () => openConsole(id) }]
+    const approval = ap?.approval
+    if (team && approval && canRule(fleet, id, approval.command) && approval.options.some((o) => o.tone === 'allow')) {
+      // next to the one-off yes, of which it is the bigger version
+      const at = actions.findIndex((a) => a.tone === 'allow') + 1
+      actions.splice(at, 0, { label: 'Allow for the team', tone: 'other', run: () => allowForTeam(id, team, approval) })
+    }
     items.push({
       kind: 'approval',
       key,
@@ -276,12 +317,12 @@ function build() {
       sub: agentLabel(c?.data.agentId ?? ''),
       since: seen(key),
       consoleId: id,
-      approval: ap?.approval ?? null,
+      approval: approval ?? null,
       context: ap?.context ?? [],
-      note: commandNote(ap?.approval?.detail?.split('\n')[0]),
-      actions: ap?.approval
-        ? ap.approval.options.map((o, i) => ({ label: o.label, tone: o.tone === 'always' ? 'other' : o.tone, primary: i === 0 && o.tone === 'allow', run: () => answerPrompt(id, o.answer) }))
-        : [{ label: 'Open console', primary: true, keeps: true, run: () => openConsole(id) }]
+      note: commandNote(approval?.command ?? approval?.detail?.split('\n')[0]),
+      team,
+      rules,
+      actions
     })
   }
 
@@ -388,9 +429,12 @@ function build() {
   }
 
   const list = items
-  const { front } = useInbox.getState()
-  const keepFront = list.some((i) => i.key === front)
-  useInbox.setState({ items: list, front: keepFront ? front : (list[0]?.key ?? null), ...(keepFront ? {} : { shownAt: Date.now() }) })
+  const { front, items: before } = useInbox.getState()
+  // the card for coming back is the one thing that takes the front from what was already there:
+  // it is what you came back to, and it is only ever there right as you do
+  const welcome = away && list[0]?.key === away.key && !before.some((i) => i.key === away.key) ? away.key : null
+  const keepFront = !welcome && list.some((i) => i.key === front)
+  useInbox.setState({ items: list, front: keepFront ? front : (welcome ?? list[0]?.key ?? null), ...(keepFront ? {} : { shownAt: Date.now() }) })
 }
 
 function ciNotice(key: string, item: CiItem, failing: string[]): InboxItem {
@@ -476,8 +520,12 @@ export function useInboxWatcher() {
   const ci = useCi((s) => s.status)
   const fb = useFeedback((s) => s.result)
   const sent = useApp((s) => s.project?.extras.prSent)
+  const rules = useTeamRules((s) => s.rules)
+  const away = useAway((s) => s.summary)
+  useAwayWatcher()
 
-  useEffect(refreshInbox, [projectId, blocked.join(','), sig.join('|'), fleet, ci, fb, sent])
+  useEffect(() => pruneRules(fleet), [fleet])
+  useEffect(refreshInbox, [projectId, blocked.join(','), sig.join('|'), fleet, ci, fb, sent, rules, away])
 
   useEffect(() => {
     if (!blocked.length) {
@@ -496,6 +544,7 @@ export function useInboxWatcher() {
       )
       if (!live) return
       approvals = Object.fromEntries(entries)
+      for (const [id, a] of entries) void answerByRule(id, a.approval)
       refreshInbox()
       // a CLI's hook can say it is asking a moment before it draws the question: look again soon
       const pending = entries.some(([, a]) => !a.approval) && Date.now() - since < 5000
