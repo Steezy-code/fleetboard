@@ -1365,9 +1365,13 @@ export async function register(c: MainContext) {
 }
 
 /** The user's answer to a lead's question (the Inbox on the board or a phone). */
-/** `fromOptions`: the answer must be one the Lead offered, when it offered any (the phone has no free text). */
-export function answerAsk(askId: string, answer: string, opts: { fromOptions?: boolean } = {}): boolean {
+/**
+ * `fromOptions`: the answer must be one the Lead offered, when it offered any (the phone has no free
+ * text). `projectId`: only a question in that project (the phone shows the open one).
+ */
+export function answerAsk(askId: string, answer: string, opts: { fromOptions?: boolean; projectId?: string } = {}): boolean {
   for (const s of states.values()) {
+    if (opts.projectId !== undefined && s.projectId !== opts.projectId) continue
     const ask = s.asks.find((a) => a.id === askId)
     if (!ask) continue
     if (ask.answer) return false
