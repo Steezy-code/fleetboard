@@ -50,12 +50,13 @@ test('commandOf: nothing for prompts that are not about a shell command', async 
 
 test('commandOf: every line of a wrapped command, so a rule never matches on its first line alone', () => {
   const dashes = '╌'.repeat(40)
-  const claude = menu(['────────', ' Bash command', ' Run the tests', dashes, ' npm test &&', ' curl -X POST https://example.com', dashes, ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No'], ['Yes', 'No'])
+  const top = '─'.repeat(40)
+  const claude = menu([top, ' Bash command', ' Run the tests', dashes, ' npm test &&', ' curl -X POST https://example.com', dashes, ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No'], ['Yes', 'No'])
   assert.equal(commandOf(claude), 'npm test &&\ncurl -X POST https://example.com')
   const codex = menu(['  Would you like to run the following command?', '  Reason: tests', '  $ npm test &&', '  rm -rf build', '› 1. Yes, proceed (y)', '  3. No (esc)'], ['Yes, proceed (y)', 'No (esc)'])
   assert.equal(commandOf(codex), 'npm test &&\nrm -rf build')
   // a dialog drawn without its closing rule: unsure, so no command
-  assert.equal(commandOf(menu(['────────', ' Bash command', dashes, ' npm test', ' Do you want to proceed?', ' ❯ 1. Yes'], ['Yes'])), null)
+  assert.equal(commandOf(menu([top, ' Bash command', dashes, ' npm test', ' Do you want to proceed?', ' ❯ 1. Yes'], ['Yes'])), null)
 })
 
 test('approvalFor carries the command, and the Inbox note now reads it (not the dialog header)', async () => {
@@ -169,4 +170,14 @@ test('span: minutes, then hours', () => {
   assert.equal(span(47 * 60_000), '47 min')
   assert.equal(span(125 * 60_000), '2 h 5 min')
   assert.equal(span(120 * 60_000), '2 h')
+})
+
+test('commandNote: a plain word only for a single command; the warnings hold anywhere in it', async () => {
+  const { commandNote } = await import('../../src/shared/approvals')
+  assert.equal(commandNote('npm test'), 'Runs your tests')
+  assert.equal(commandNote('npm test && npm run deploy'), null)
+  assert.equal(commandNote('npm test; echo done'), null)
+  assert.equal(commandNote('ls $(cat list)'), null)
+  assert.equal(commandNote('npm test && rm -rf dist'), 'Deletes or overwrites things')
+  assert.equal(commandNote('npm test | tee out && git push'), 'Sends something off this machine')
 })
