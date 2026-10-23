@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { which } from './env'
-import { ghEnv, git, run, type RunOut } from './run'
+import { ghEnv, git, programsInRepoConfig, run, type RunOut } from './run'
 import { toRendererPath } from './platform'
 import { dirs, readJson } from './paths'
 
@@ -99,6 +99,10 @@ export interface SweepResult {
 
 const CMD_TIMEOUT = 8000
 const FETCH_TIMEOUT = 20000
+
+/** An empty folder for the sweep's git to look for hooks in, so a repo's own hooks never run. */
+const NO_HOOKS = path.join(dirs.root, 'no-hooks')
+fs.mkdirSync(NO_HOOKS, { recursive: true })
 const CONCURRENCY = 6
 const MAX_REPOS = 40
 const DEFAULT_ROOTS = ['~/code', '~/Github', '~/projects', '~/src']
@@ -381,9 +385,12 @@ async function inspect(c: SweepCandidate, opts: { fetch: boolean; gh: string | n
   const t0 = Date.now()
   const ghenv = await ghEnv()
   const cwd = c.path
-  // through run.ts, so core.fsmonitor cannot make `git status` run a command the repo chose: these
-  // are repos found by walking the user's folders, not ones they opened
-  const g = (args: string[], timeout?: number) => git(cwd, args, { timeout: timeout ?? CMD_TIMEOUT, maxBuffer: 16 * 1024 * 1024 })
+  // These are repos found by walking the user's folders, not ones they opened, so nothing they name is
+  // run: through run.ts (no fsmonitor, no signature program), hooks pointed at an empty folder (husky
+  // and the like set a hooks path in the repo's own config), and a repo whose config names any other
+  // program for git to run is left alone below.
+  const g = (args: string[], timeout?: number) =>
+    git(cwd, args, { timeout: timeout ?? CMD_TIMEOUT, maxBuffer: 16 * 1024 * 1024, gitOpts: ['-c', `core.hooksPath=${NO_HOOKS}`] })
   const r: SweepRepo = {
     name: c.name,
     path: toRendererPath(c.path),
@@ -416,6 +423,8 @@ async function inspect(c: SweepCandidate, opts: { fetch: boolean; gh: string | n
   }
   try {
     if (!fs.existsSync(cwd)) throw new Error('Folder not found')
+    const programs = await programsInRepoConfig(cwd)
+    if (programs.length) throw new Error(`its git config names programs for git to run (${programs.slice(0, 3).join(', ')}), so the sweep left it alone`)
 
     // remote first: an opt-in fetch needs it, and gh needs the slug
     const remotes = await g(['remote'])
