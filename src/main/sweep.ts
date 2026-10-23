@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { which } from './env'
-import { ghEnv, git, programsInRepoConfig, run, type RunOut } from './run'
+import { NO_HOOKS, ghEnv, git, programsInRepoConfig, run, type RunOut } from './run'
 import { toRendererPath } from './platform'
 import { dirs, readJson } from './paths'
 
@@ -100,9 +100,6 @@ export interface SweepResult {
 const CMD_TIMEOUT = 8000
 const FETCH_TIMEOUT = 20000
 
-/** An empty folder for the sweep's git to look for hooks in, so a repo's own hooks never run. */
-const NO_HOOKS = path.join(dirs.root, 'no-hooks')
-fs.mkdirSync(NO_HOOKS, { recursive: true })
 const CONCURRENCY = 6
 const MAX_REPOS = 40
 const DEFAULT_ROOTS = ['~/code', '~/Github', '~/projects', '~/src']
@@ -390,7 +387,7 @@ async function inspect(c: SweepCandidate, opts: { fetch: boolean; gh: string | n
   // and the like set a hooks path in the repo's own config), and a repo whose config names any other
   // program for git to run is left alone below.
   const g = (args: string[], timeout?: number) =>
-    git(cwd, args, { timeout: timeout ?? CMD_TIMEOUT, maxBuffer: 16 * 1024 * 1024, gitOpts: ['-c', `core.hooksPath=${NO_HOOKS}`] })
+    git(cwd, args, { timeout: timeout ?? CMD_TIMEOUT, maxBuffer: 16 * 1024 * 1024, gitOpts: NO_HOOKS })
   const r: SweepRepo = {
     name: c.name,
     path: toRendererPath(c.path),

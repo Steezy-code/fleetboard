@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { loginEnv } from './env'
+import { dirs } from './paths'
 
 // One way to run a child process, and one answer to what git's environment and arguments must be.
 //
@@ -129,6 +130,14 @@ export async function programsInRepoConfig(cwd: string): Promise<string[]> {
   }
   return found
 }
+
+/**
+ * For git calls the app makes on its own behalf, where a repository's hooks must not run: hooks are
+ * programs, and with husky or lefthook they live in tracked files that an agent allowed to edit files
+ * (but not to run commands) can change. An empty folder as the hooks path, since `--no-verify` covers
+ * only the commit hooks and not post-checkout, post-merge or reference-transaction.
+ */
+export const NO_HOOKS = ['-c', `core.hooksPath=${dirs.noHooks}`]
 
 /** Options for a git call. `gitOpts` go before the subcommand, where git wants them. */
 export interface GitOpts {

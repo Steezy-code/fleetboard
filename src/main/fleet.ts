@@ -14,7 +14,7 @@ import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
 import { loginEnv } from './env'
-import { ghEnv, run, git as runGit } from './run'
+import { NO_HOOKS, ghEnv, run, git as runGit } from './run'
 import { append as journal, answered } from './journal'
 import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
@@ -136,7 +136,9 @@ function findMember(s: FleetState, ref: string): FleetMember | undefined {
  * and it used to set GIT_TERMINAL_PROMPT alone.
  */
 async function git(cwd: string, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
-  const r = await runGit(cwd, args, { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 })
+  // the team's commits, merges, worktree adds and removals are the app's, made on files agents wrote:
+  // no repository hook runs on them, the user's own checkout included (see run.ts NO_HOOKS)
+  const r = await runGit(cwd, args, { timeout: 120_000, maxBuffer: 8 * 1024 * 1024, gitOpts: NO_HOOKS })
   return { ok: r.code === 0, out: r.stdout.trim(), err: r.stderr.trim() }
 }
 

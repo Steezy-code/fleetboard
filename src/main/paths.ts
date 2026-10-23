@@ -11,7 +11,9 @@ export const dirs = {
   profiles: path.join(ROOT, 'profiles'),
   hooks: path.join(ROOT, 'hooks'),
   exports: path.join(ROOT, 'exports'),
-  assets: path.join(ROOT, 'assets')
+  assets: path.join(ROOT, 'assets'),
+  /** always empty: git calls that must not run a repository's hooks point core.hooksPath here */
+  noHooks: path.join(ROOT, 'no-hooks')
 }
 for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true })
 
