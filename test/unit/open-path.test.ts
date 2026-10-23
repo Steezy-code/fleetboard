@@ -41,3 +41,13 @@ test('on Windows only what opens in a viewer is opened: the shell runs more type
   assert.equal(opensSafely(f('tool.js'), 'linux'), false)
   assert.equal(opensSafely(f('notes.txt'), 'linux'), true)
 })
+
+test('a folder macOS would run, an app bundle or an installer, is revealed rather than opened', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-bundle-'))
+  for (const name of ['Evil.app', 'Thing.prefPane', 'Do.workflow', 'Setup.pkg']) {
+    fs.mkdirSync(path.join(root, name))
+    assert.equal(opensSafely(path.join(root, name)), false, name)
+  }
+  fs.mkdirSync(path.join(root, 'docs'))
+  assert.equal(opensSafely(path.join(root, 'docs')), true, 'a plain folder still opens')
+})
