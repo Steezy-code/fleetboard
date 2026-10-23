@@ -346,19 +346,29 @@ const ASKED: Partial<Record<Action['type'], RegExp>> = {
 /** Why this plan needs a spoken "confirm" (empty when it can run straight away). */
 export function confirmReasons(actions: Action[], userText: string, fromPlanner: boolean): string[] {
   const reasons: string[] = []
+  // counted over the whole plan: split across steps, eight spawns and seven sends ask like one would
+  let spawns = 0
+  const messaged = new Set<string>()
   for (const a of actions) {
     if (a.type === 'kill' && resolveRefs(a.targets, 'workspace').ids.length) reasons.push('closes consoles')
     if (a.type === 'deleteTeam') {
       const g = resolveTeam(a.team)
       if (g && teamMembers(g.id).some(isLive)) reasons.push('closes live consoles')
     }
-    if (a.type === 'send' && resolveRefs(a.targets).ids.length > 6) reasons.push('messages more than 6 consoles')
-    if (a.type === 'spawn' && a.count > 8) reasons.push(`spawns ${a.count} consoles`)
+    if (a.type === 'send') for (const id of resolveRefs(a.targets).ids) messaged.add(id)
+    if (a.type === 'spawn') {
+      spawns += Math.max(1, Math.round(Number(a.count) || 1))
+      // a new agent sets to work on words a model wrote, in its own console: worth a look first, and
+      // always when it would act on them without asking
+      if (a.prompt && (fromPlanner || useApp.getState().settings.autoApprove)) reasons.push('starts an agent with a task')
+    }
     if (fromPlanner) {
       const re = ASKED[a.type]
       if (re && !re.test(userText)) reasons.push(`adds a step you didn't ask for (${a.type})`)
     }
   }
+  if (messaged.size > 6) reasons.push('messages more than 6 consoles')
+  if (spawns > 8) reasons.push(`spawns ${spawns} consoles`)
   return [...new Set(reasons)]
 }
 
