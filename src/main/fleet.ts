@@ -1352,6 +1352,9 @@ const merging = new Set<string>()
 export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string; commit?: string }> {
   const s = states.get(projectId)
   if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
+  // The board offers no Merge once a PR is open (closeOnly), but the phone's /api/merge reaches this
+  // too: merging here would delete the branch the open PR is built on, where Done keeps it.
+  if (s.ready.prUrl) return { ok: false, error: `A pull request is open for this work (${s.ready.prUrl}); merge it there, or press Done to close the team.` }
   // the desktop and the phone can both press Merge
   if (merging.has(projectId)) return { ok: false, error: 'Already merging.' }
   merging.add(projectId)

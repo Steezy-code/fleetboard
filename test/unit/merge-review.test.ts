@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyFleet, type FleetMember, type FleetReady, type FleetState } from '../../src/shared/fleet'
 import { coerceCharter } from '../../src/shared/charter'
-import { excludedBy, ownedBy, reviewReady, stalled } from '../../src/shared/mergeReview'
+import { closeOnly, excludedBy, ownedBy, reviewReady, stalled } from '../../src/shared/mergeReview'
 
 const member = (over: Partial<FleetMember> & { id: string; name: string }): FleetMember => ({
   role: 'worker',
@@ -159,6 +159,15 @@ test('reviewers carry no claim and own nothing', () => {
     r.claims.map((c) => c.who),
     ['Nadia']
   )
+})
+
+test('closeOnly: no branch, no commits, or an open PR leave nothing to merge into the checkout', () => {
+  assert.equal(closeOnly({ branch: 'fleet/x', commits: 3 }), false)
+  assert.equal(closeOnly({ branch: '', commits: 3 }), true)
+  assert.equal(closeOnly({ branch: 'fleet/x', commits: 0 }), true)
+  // the board and the phone both read this: once the work went to a PR, merging it here would delete
+  // the branch the PR is built on
+  assert.equal(closeOnly({ branch: 'fleet/x', commits: 3, prUrl: 'https://github.com/o/r/pull/7' }), true)
 })
 
 test('no Ready card, nothing to review', () => {

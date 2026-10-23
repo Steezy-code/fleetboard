@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { MainContext } from './context'
 import { describeAnswer, type AnswerResult, type PromptAnswer } from '@shared/prompt'
 import { approvalFor } from '@shared/approvals'
+import { closeOnly } from '@shared/mergeReview'
 import { qrSvg } from '@shared/qr'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { newSecret, sameSecret } from './localserver'
@@ -196,7 +197,7 @@ export function remoteState() {
     consoles,
     approvals,
     asks: (fleet?.asks ?? []).filter((a) => !a.answer).map((a) => ({ id: a.id, from: memberName(a.from), question: a.question, options: a.options })),
-    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length } : null
+    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length, closeOnly: closeOnly(ready), prUrl: ready.prUrl } : null
   }
 }
 
