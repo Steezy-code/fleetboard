@@ -3,7 +3,7 @@ import { create } from 'zustand'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { useFleet } from '../engine/fleet'
-import { awaySummary, span, type JournalLine } from './awaySummary'
+import { awaySummary, spanMs, type JournalLine } from './awaySummary'
 import type { InboxItem } from './inboxModel'
 
 // Noticing that you left and came back, so the Inbox can open with what happened meanwhile
@@ -58,7 +58,7 @@ export function awayItem(): InboxItem | null {
     tone: 'info',
     key: `away:${s.since}`,
     who: 'While you were away',
-    sub: `${span(s.back - s.since)}, from ${from}`,
+    sub: `${spanMs(s.back - s.since)}, from ${from}`,
     head: '',
     lines: s.lines,
     since: s.back,
