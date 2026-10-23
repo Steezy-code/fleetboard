@@ -62,3 +62,34 @@ test('a console starting, and a prompt answered for you, are both in the night l
     await app.close()
   }
 })
+
+test('coming back after a while: the Inbox opens on what happened meanwhile, in front of what was there', async () => {
+  const sb = makeSandbox()
+  const repo = makeRepo(sb)
+  const app = await App.launch({ sandbox: sb, scenario: { solo: [{ match: 'deploy', bash: 'npm run build', reply: 'built' }] } })
+  try {
+    await app.openProject(repo)
+    const id = await app.eval(() => (window as any).__fleetboard.spawnConsoles({ agentId: 'claude' })[0] as string)
+    await app.waitStatus(id, 'idle')
+    // left 47 minutes ago; since then a loop fired, and this console asked something
+    const left = Date.now() - 47 * 60_000
+    await app.eval((left) => (window as any).__fleetboard.useAway.setState({ since: left }), left)
+    await app.invoke('journal:append', { kind: 'loop.fire', text: 'Loop “Progress check” sent its instruction' })
+    await app.eval(({ id }) => (window as any).__fleetboard.sendToConsole(id, 'deploy', true), { id })
+    await app.waitStatus(id, 'needs-you')
+    await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).length > 0, { label: 'the approval is in front first' })
+
+    // back: the window takes focus again
+    await app.eval(() => window.dispatchEvent(new Event('focus')))
+    const card = await app.waitFor(async () => (await app.texts('.it-card')).find((t) => t.startsWith('While you were away')), { label: 'the away card, in front' })
+    assert.match(card, /47 min/)
+    assert.match(card, /Loops sent 1 instruction/)
+    assert.equal((await app.texts('.it-card .it-actions button'))[0]?.replace(/\s*\d$/, ''), 'Got it')
+
+    await app.click('.it-card .it-actions button', 'Got it')
+    await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).length > 0, { label: 'the approval is back in front' })
+    assert.deepEqual(app.rendererErrors, [])
+  } finally {
+    await app.close()
+  }
+})

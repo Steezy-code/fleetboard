@@ -62,6 +62,19 @@ test('a stale answer is refused and types nothing', async () => {
   assert.deepEqual(await app.invoke('pty:answer', 'no-such-console', { enter: true }), { ok: false, reason: 'not-live' })
 })
 
+test("a team rule's answer types nothing unless the dialog asks for exactly its command", async () => {
+  const id = await spawnClaude()
+  await app.waitStatus(id, 'idle')
+  await send(id, 'please deploy')
+  await app.waitStatus(id, 'needs-you')
+  const keysBefore = app.fakeLog((e) => e.event === 'keys').length
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'rm -rf', 'Maya'), { ok: false, reason: 'changed' }, 'a prefix is not the command')
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, '', 'Maya'), { ok: false, reason: 'changed' })
+  assert.equal(app.fakeLog((e) => e.event === 'keys').length, keysBefore, 'no keystrokes reached the agent')
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'rm -rf build', 'Maya'), { ok: true })
+  await app.waitStatus(id, 'idle')
+})
+
 test('pty:prompt reads the dialog structurally', async () => {
   const id = await spawnClaude()
   await app.waitStatus(id, 'idle')

@@ -1,4 +1,5 @@
-import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert, X } from 'lucide-react'
+import { removeRule } from './teamRules'
 import type { MergeReview } from '@shared/mergeReview'
 import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
@@ -117,7 +118,7 @@ export function InboxTray({ floating }: { floating?: boolean }) {
               <b>{item.who}</b> <span className="it-headtext">{headOf(item)}</span>
             </div>
             <div className="it-meta">
-              {[item.sub, item.kind === 'ask' ? item.ask && progressOf(item) : '', item.kind === 'ready' ? readyMeta(item) : `${item.kind === 'notice' ? '' : 'waiting '}${ago(item.since)}${item.kind === 'notice' ? ' ago' : ''}`]
+              {[item.sub, item.kind === 'ask' ? item.ask && progressOf(item) : '', item.kind === 'ready' ? readyMeta(item) : `${item.kind === 'notice' ? '' : 'waiting '}${ago(item.since)}${item.kind === 'notice' && ago(item.since) !== 'just now' ? ' ago' : ''}`]
                 .filter(Boolean)
                 .join(' · ')}
             </div>
@@ -207,6 +208,23 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
   )
 }
 
+/** What this team is allowed without asking, where you decide whether to allow one more. */
+function TeamRules({ lead, rules }: { lead: string; rules: string[] }) {
+  return (
+    <div className="it-rules">
+      <span className="it-meta">Allowed for this team:</span>
+      {rules.map((r) => (
+        <span key={r} className="it-rule mono" title={r}>
+          {r.split('\n')[0]}
+          <button className="icon-btn xs" title="Ask about this command again" onClick={() => removeRule(lead, r)}>
+            <X size={11} />
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function Body({ item }: { item: InboxItem }) {
   switch (item.kind) {
     case 'charter':
@@ -231,6 +249,7 @@ function Body({ item }: { item: InboxItem }) {
           )}
           {item.note && <div className="it-meta">{item.note}</div>}
           {!ap && <div className="it-meta">Its question isn't one Fleetboard can read. Open the console to answer it.</div>}
+          {item.team && item.rules.length > 0 && <TeamRules lead={item.team} rules={item.rules} />}
         </>
       )
     }
