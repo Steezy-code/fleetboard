@@ -121,6 +121,12 @@ test('a CRLF file keeps its line endings when an editor (which hands back \\n) s
   fs.writeFileSync(f, 'a\r\nb\r\n')
   assert.deepEqual(writeText(f, 'a\nX\nb\n', 'a\r\nb\r\n'), { ok: true })
   assert.equal(fs.readFileSync(f, 'utf8'), 'a\r\nX\r\nb\r\n')
+  // the next save names as its base the LF text it sent last time: that is still the file on disk
+  assert.deepEqual(writeText(f, 'a\nX\nY\nb\n', 'a\nX\nb\n'), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'a\r\nX\r\nY\r\nb\r\n')
+  // while a real change on disk is still refused
+  fs.writeFileSync(f, 'agent\r\n')
+  assert.equal(writeText(f, 'mine\n', 'a\nX\nY\nb\n').ok, false)
   // an LF file, or a new one, is written as given
   const g = path.join(dir, 'notes.md')
   fs.writeFileSync(g, 'a\nb\n')
