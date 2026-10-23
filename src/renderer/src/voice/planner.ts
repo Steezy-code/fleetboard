@@ -621,7 +621,8 @@ export function inboxPick(light: string): number | 'next' | null {
   if (spokenAt !== undefined && spokenAt < f.actions.length) return spokenAt
   const byLabel = f.actions.findIndex((a) => a.label.toLowerCase().replace(/[^a-z ]/g, '').trim() === t)
   if (byLabel >= 0) return byLabel
-  if (f.kind === 'approval' || f.kind === 'ready') {
+  // a plain yes allows a prompt, but never merges: that takes saying "merge" (the button's label, above)
+  if (f.kind === 'approval') {
     if (/^(yes|yeah|yep|allow|approve|go ahead|do it|ok|okay|sure)$/.test(t)) {
       const p = f.actions.findIndex((a) => a.primary)
       return p >= 0 ? p : null
@@ -717,8 +718,12 @@ export async function runCommand(raw: string, source: Source) {
   let helmFailed = false
   if (app.settings.helm !== false) {
     try {
+      const asked = app.project.id
       const res = await askHelm(text)
       if (!res) return // cancelled with the stop button
+      // an answer about the board it read, not whichever one is open now: its options name consoles
+      // and playbooks there, and one of them may run on its own
+      if (useApp.getState().project?.id !== asked) return
       showHelm(res, text, source)
       return
     } catch (e: any) {

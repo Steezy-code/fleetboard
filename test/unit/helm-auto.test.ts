@@ -25,10 +25,11 @@ test('a message is never typed for you, sent or not', () => {
   assert.equal(autoSafe(option({ kind: 'send', targets: [] })), false)
 })
 
-test('only the read-only playbooks run themselves, and only with every input filled', () => {
+test('only a playbook that starts no agents runs itself, and only with every input filled', () => {
   assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'morning-sweep', inputs: {} } })), true)
-  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'pr-review', inputs: {} } })), true)
-  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'db-safety', inputs: {} } })), true)
+  // review-only in what they ask, but each starts a Lead and reviewers
+  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'pr-review', inputs: {} } })), false)
+  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'db-safety', inputs: {} } })), false)
   // anything not on that list — including one that does not exist — waits for a click
   assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'ship-it', inputs: {} } })), false)
   assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: '', inputs: {} } })), false)
