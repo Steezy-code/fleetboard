@@ -90,8 +90,13 @@ jobs:
           retention-days: 7
 
   windows:
-    # the platform layer for real: PowerShell consoles, .cmd agents, process trees, the installer
-    runs-on: windows-latest
+    # the platform layer for real: PowerShell consoles, .cmd agents, process trees, the installer.
+    # On our own machine: a Windows runner bills at twice the rate of a Linux one, and this job is the
+    # half that cannot be checked anywhere else. Self-hosted minutes are free, so this is the expensive
+    # half for nothing, and the Linux job stays on GitHub's runners where it is a clean environment
+    # every time. The cost is that the job waits for that machine to be on; `windows-latest` here
+    # instead puts it back on a hosted runner.
+    runs-on: [self-hosted, windows, x64]
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
