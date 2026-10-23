@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { ipcMain } from '../support/electron-stub'
 import { parseFrontmatter } from '../../src/main/skills'
 
@@ -69,6 +70,10 @@ test('reading, writing and deleting stay inside the skills folders', async () =>
   assert.match(await ipcMain.invoke('skills:read', file, project), /before/)
   await ipcMain.invoke('skills:save', file, '---\nname: editable\ndescription: x\n---\nafter\n', project)
   assert.match(fs.readFileSync(file, 'utf8'), /after/)
+  // a CRLF skill keeps its line endings when the editor (which hands back \n) saves it
+  fs.writeFileSync(file, '---\r\nname: editable\r\n---\r\nbefore\r\n')
+  await ipcMain.invoke('skills:save', file, '---\nname: editable\n---\nafter\n', project)
+  assert.equal(fs.readFileSync(file, 'utf8'), '---\r\nname: editable\r\n---\r\nafter\r\n')
 
   // a secret outside the roots is neither readable nor writable
   const secret = path.join(os.homedir(), '.ssh', 'id_ed25519')
@@ -118,4 +123,15 @@ test('"Open folder" cannot be pointed at any folder on the machine', async () =>
   await ipcMain.invoke('skills:open', dir, project)
   await ipcMain.invoke('skills:open', userSkills, project)
   await ipcMain.invoke('skills:open', projectSkills, project)
+})
+
+test('a SKILL.md that is not a regular file is skipped, not read', { skip: process.platform === 'win32' && 'no FIFOs' }, async () => {
+  // a FIFO here used to hang the main process on skills:list
+  const dir = path.join(userSkills, 'fifo')
+  fs.mkdirSync(dir, { recursive: true })
+  execFileSync('mkfifo', [path.join(dir, 'SKILL.md')])
+  const listed = (await ipcMain.invoke('skills:list', project)).user.map((s: { slug: string }) => s.slug)
+  assert.ok(!listed.includes('fifo'))
+  await assert.rejects(() => ipcMain.invoke('skills:read', path.join(dir, 'SKILL.md'), project), /Not a regular file/)
+  fs.rmSync(dir, { recursive: true })
 })
