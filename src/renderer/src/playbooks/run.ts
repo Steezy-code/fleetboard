@@ -2,7 +2,8 @@ import type { FleetMember } from '@shared/fleet'
 import { invoke } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { CONSOLE_H, CONSOLE_W, nextName } from '../engine/consoles'
-import { confirmTeamFolder } from '../engine/fleet'
+import { activeLead, confirmTeamFolder, stillInProject } from '../engine/fleet'
+import { draftCharter, gateCharter } from '../fleet/charter'
 import { playbookById } from './catalog'
 
 /** Remember what was typed last time, per playbook. */
@@ -37,12 +38,22 @@ export async function runPlaybook(id: string, inputs: Record<string, string> = {
   rememberInputs(id, values)
 
   const goal = pb.brief!(values)
+  // short title for the Ready card, branch name and merge commit: "Hotfix: wordCount gives 1 for…"
+  const given = pb.inputs.map((i) => values[i.key]).filter((v): v is string => !!v && v !== 'yes')
+  const first = given[0]
+  const title = first ? `${pb.name}: ${first.length > 70 ? first.slice(0, 68) + '…' : first}` : pb.name
+  // The charter is about what the user asked for, in their words; the step list is the goal, which is not the
+  // request, so it follows the charter to the Lead. The draft is told the procedure, so it is not left to assert a
+  // job the procedure contradicts (a review-only playbook).
+  const drafted = await draftCharter(given.length ? `${pb.name}: ${given.join('; ')}` : pb.name, goal)
+  // a playbook always starts its own Lead, and startLead clears the running team's tasks and Ready
+  // card, so the card says whose team this takes the place of rather than offering a bare "New team"
+  const running = activeLead()
+  const charter = await gateCharter({ ...drafted, ...(running ? { replaces: running.name } : {}) })
+  if (!charter || !stillInProject(p.id)) return null
   if (!(await confirmTeamFolder(p.path))) return null
   app.toast(`${pb.name}: starting a Lead…`)
-  // short title for the Ready card, branch name and merge commit: "Hotfix: wordCount gives 1 for…"
-  const first = pb.inputs.map((i) => values[i.key]).find((v) => v && v !== 'yes')
-  const title = first ? `${pb.name}: ${first.length > 70 ? first.slice(0, 68) + '…' : first}` : pb.name
-  const lead = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal, title })
+  const lead = await invoke<FleetMember>('fleet:startLead', { projectId: p.id, projectPath: p.path, goal, title, charter })
 
   // extra tiles (live preview, dev server) go to the right of the new Lead once it is on the board
   const tiles = pb.tiles?.(values) ?? []
