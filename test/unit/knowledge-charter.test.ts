@@ -53,7 +53,7 @@ test('a read of the repo lands in the board’s own state', async () => {
   ipc.handle('knowledge:read', () => reading())
   const k = await refreshKnowledge()
   assert.equal(k.facts[0]?.command, 'npm test')
-  assert.equal((extrasOf()?.knowledge as RepoKnowledge).facts[0]?.key, 'checks.test')
+  assert.equal((extrasOf()?.knowledge as RepoKnowledge | undefined)?.facts[0]?.key, 'checks.test')
   assert.deepEqual(ipc.callsTo('knowledge:read'), [['/tmp/p']])
 })
 
@@ -250,7 +250,7 @@ test('the draft prompt carries the facts, and the fragment says how to cite one'
   project('p', { knowledge: knowing(NPM_TEST, fact('done.green', 'inferred')) })
   ipc.handle('cli:run', () => ({ code: 0, text: '{}' }))
   await draftCharter('add split')
-  const prompt = (ipc.callsTo('cli:run')[0]?.[0] as any).prompt as string
+  const prompt = String((ipc.callsTo('cli:run')[0]?.[0] as any)?.prompt)
   assert.match(prompt, /fact:checks\.test \(read from the repo, package\.json\)/)
   assert.match(prompt, /fact:done\.green \(inferred — not evidence/)
   assert.match(CHARTER_FIELDS, /"fact:" and that fact's key/)
@@ -261,7 +261,7 @@ test('a repo with nothing known drafts the prompt it always did', async () => {
   project()
   ipc.handle('cli:run', () => ({ code: 0, text: '{}' }))
   await draftCharter('add split')
-  assert.doesNotMatch((ipc.callsTo('cli:run')[0]?.[0] as any).prompt, /Known about this repo/)
+  assert.doesNotMatch(String((ipc.callsTo('cli:run')[0]?.[0] as any)?.prompt), /Known about this repo/)
 })
 
 // ---------------------------------------------------------------- Oracle reads it
