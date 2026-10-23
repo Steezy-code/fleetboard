@@ -179,6 +179,42 @@ test('Merge on a detached HEAD is refused, and pressing it twice merges once', a
   assert.equal(git(sb, repo, 'log', '--merges', '--first-parent', '--oneline').split('\n').filter(Boolean).length, 1, 'one merge commit')
 })
 
+test("Merge is refused on a branch without the commit the team started from, which would bring in history the card never showed", async () => {
+  const sb = makeSandbox()
+  const repo = makeRepo(sb)
+  fs.writeFileSync(path.join(repo, 'later.txt'), 'on main only')
+  git(sb, repo, 'add', '-A')
+  git(sb, repo, 'commit', '-qm', 'later')
+  app = await App.launch({ sandbox: sb, scenario: TWO_WORKERS })
+  const projectId = await app.openProject(repo)
+  await app.invoke('fleet:startLead', { projectId, projectPath: repo, goal: 'add the files' })
+  await waitReady(projectId)
+  // a release branch cut before the team's starting point
+  git(sb, repo, 'checkout', '-q', '-b', 'release', 'HEAD~1')
+  const head = git(sb, repo, 'rev-parse', 'HEAD')
+  const res = await app.invoke('fleet:mergeReady', projectId)
+  assert.equal(res.ok, false)
+  assert.match(res.error, /release does not have the commit the team started from.*1 commit /)
+  assert.equal(git(sb, repo, 'rev-parse', 'HEAD'), head, 'nothing merged')
+  assert.ok((await fleet(projectId)).ready, 'the Ready card stays')
+  git(sb, repo, 'checkout', '-q', '-')
+  const again = await app.invoke('fleet:mergeReady', projectId)
+  assert.equal(again.ok, true, JSON.stringify(again))
+})
+
+test("a new team closes the last one, whose work stays on its branch", async () => {
+  const { sb, repo, projectId } = await team(TWO_WORKERS)
+  const first = await waitReady(projectId)
+  const old = (await fleet(projectId)).members[first.leadId]
+  await app!.invoke('fleet:startLead', { projectId, projectPath: repo, goal: 'something else' })
+  const s = await fleet(projectId)
+  const open = Object.values(s.members).filter((m: any) => m.status !== 'closed')
+  assert.deepEqual(open.map((m: any) => m.role), ['lead'], "only the new Lead: the old team's members are closed")
+  assert.equal(s.members[first.leadId].status, 'closed')
+  assert.ok(git(sb, repo, 'rev-parse', '--verify', `refs/heads/${old.branch}`), "the old team's branch is kept")
+  assert.ok(!fs.existsSync(old.cwd), "and its worktree is gone")
+})
+
 test('two workers editing the same file: the second merge reports the conflict and the lead branch stays clean', async () => {
   const { projectId } = await team({
     lead: {
