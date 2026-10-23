@@ -62,8 +62,16 @@ export function markSent(pr: PrFeedback, list: PrComment[] = pr.comments) {
   remember('prSent', list.map((c) => c.id))
 }
 
-/** Who works on this branch now: a console we gave it to, or the live Lead whose branch it is. */
-export function ownerOf(branch: string): { id: string; name: string; lead: boolean } | null {
+/** A pull request as far as who works on it goes: its branch, and whether it comes from a fork. */
+type PrRef = { branch: string; fork: boolean }
+
+/**
+ * Who works on this PR's branch now: a console we gave it to, or the live Lead whose branch it is.
+ * Never for a fork's PR: anyone can name a branch like one of ours, and what they write would reach
+ * our agent as if it were about its own work.
+ */
+export function ownerOf({ branch, fork }: PrRef): { id: string; name: string; lead: boolean } | null {
+  if (fork) return null
   const mine = (extras().prAgents ?? {})[branch] as string | undefined
   const nameOf = (id: string) => (allConsoles().find((c) => c.id === id)?.data.name as string) ?? 'its agent'
   if (mine && isLive(mine)) return { id: mine, name: nameOf(mine), lead: false }
@@ -72,8 +80,9 @@ export function ownerOf(branch: string): { id: string; name: string; lead: boole
   return null
 }
 
-/** Did an agent of ours make this PR? (a team branch, or one we already sent an agent to) */
-export function agentMade(branch: string): boolean {
+/** Did an agent of ours make this PR? (a team branch, or one we already sent an agent to; never a fork's) */
+export function agentMade({ branch, fork }: PrRef): boolean {
+  if (fork) return false
   if (branch.startsWith('fleet/')) return true
   if ((extras().prAgents ?? {})[branch]) return true
   return Object.values(useFleet.getState().state?.members ?? {}).some((m) => m.branch === branch)
@@ -121,7 +130,7 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   const list = opts.list ?? (unsent(pr).length ? unsent(pr) : pr.comments)
   if (!list.length) return null
   const msg = feedbackMessage(pr, list)
-  const owner = ownerOf(pr.branch)
+  const owner = ownerOf(pr)
   if (owner && opts.auto && autoApproves(owner.id)) {
     // it would act on these words without asking: tell the user instead, who can still send it by hand
     app.toast(`${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}: ${owner.name} approves everything, so they were not sent automatically`, 'warn')
@@ -175,7 +184,7 @@ export function applyFeedback(result: PrFeedbackResult) {
     // only people with write access get to instruct an agent without a person reading first
     const trusted = list.filter((c) => trustedAuthor(c, result.viewer))
     const outside = list.filter((c) => !trustedAuthor(c, result.viewer))
-    if (autoRouteOn() && agentMade(pr.branch) && trusted.length) {
+    if (autoRouteOn() && agentMade(pr) && trusted.length) {
       const from = [...new Set(trusted.map((c) => '@' + c.author))].join(', ')
       void routeFeedback(pr, { list: trusted, auto: true }).then((id) => id && notifyFeedback(`Review comments on PR #${pr.number}`, `${trusted.length} from ${from}, sent to its agent`, false))
     }
@@ -187,7 +196,7 @@ export function applyFeedback(result: PrFeedbackResult) {
           ? `${outside.length} more from ${from}, not sent on: no write access to this repo`
           : `${outside.length} from ${from}: ${clip((outside[0]?.body ?? '').replace(/\s+/g, ' '), 90)}`
       )
-    } else if (!(autoRouteOn() && agentMade(pr.branch) && trusted.length)) {
+    } else if (!(autoRouteOn() && agentMade(pr) && trusted.length)) {
       notifyFeedback(`New review comments on PR #${pr.number}`, `${list.length} from ${who}: ${clip((list[0]?.body ?? '').replace(/\s+/g, ' '), 90)}`)
     }
   }
