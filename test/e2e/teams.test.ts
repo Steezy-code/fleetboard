@@ -215,6 +215,25 @@ test("a new team closes the last one, whose work stays on its branch", async () 
   assert.ok(!fs.existsSync(old.cwd), "and its worktree is gone")
 })
 
+test("Merge merges the commit the Ready card described, not one the Lead made after it", async () => {
+  const { sb, repo, projectId } = await team(TWO_WORKERS)
+  const ready = await waitReady(projectId)
+  assert.ok(ready.head, 'the card names its commit')
+  const lead = (await fleet(projectId)).members[ready.leadId]
+  // the Lead stays on after finishing; this is a commit nobody was shown
+  fs.writeFileSync(path.join(lead.cwd, 'late.txt'), 'unseen')
+  git(sb, lead.cwd, 'add', 'late.txt')
+  git(sb, lead.cwd, 'commit', '-qm', 'late')
+  const stale = await app!.invoke('fleet:mergeReady', projectId, 'f'.repeat(40))
+  assert.equal(stale.ok, false, 'a card that has been replaced is not merged')
+  assert.match(stale.error, /changed since you looked/)
+  const res = await app!.invoke('fleet:mergeReady', projectId, ready.head)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.ok(fs.existsSync(path.join(repo, 'a.txt')), 'the work the card showed')
+  assert.ok(!fs.existsSync(path.join(repo, 'late.txt')), 'not the commit made after it')
+  assert.ok(git(sb, repo, 'rev-parse', '--verify', `refs/heads/${ready.branch}`), 'whose branch is kept, as -d refuses it')
+})
+
 test('two workers editing the same file: the second merge reports the conflict and the lead branch stays clean', async () => {
   const { projectId } = await team({
     lead: {

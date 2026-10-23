@@ -210,9 +210,9 @@ const UNDO_WINDOW = 15 * 60_000
 type Merge = { projectId: string; commit: string; into: string; at: number }
 let lastMerge: Merge | null = null
 
-async function mergeReady(projectId: string) {
+async function mergeReady(projectId: string, head: string | undefined) {
   const app = useApp.getState()
-  const r = await invoke<{ ok: boolean; into?: string; error?: string; commit?: string }>('fleet:mergeReady', projectId)
+  const r = await invoke<{ ok: boolean; into?: string; error?: string; commit?: string }>('fleet:mergeReady', projectId, head)
   if (r.ok) {
     app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
     lastMerge = r.commit ? { projectId, commit: r.commit, into: r.into ?? '', at: Date.now() } : null
@@ -464,7 +464,7 @@ function build() {
       ? [{ label: 'Done', primary: true, run: () => invoke('fleet:done', project.id) }]
       : blocked
         ? []
-        : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id) }]
+        : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id, ready.head) }]
     // a blocked review keeps this on purpose: pushing is not merging, and a draft PR is how a person
     // other than the user gets to see the file that was ruled out
     if (ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl) actions.push({ label: 'Open draft PR', keeps: true, run: () => openPr(project.id, ready) })
