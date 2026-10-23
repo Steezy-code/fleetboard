@@ -581,6 +581,13 @@ button {
 .toast.ok {
   border-color: color-mix(in srgb, var(--ok) 50%, transparent);
 }
+/* the one toast you can click: its action (an Undo) */
+.toast.with-action {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
+}
 
 /* ---------- markdown ---------- */
 .md {

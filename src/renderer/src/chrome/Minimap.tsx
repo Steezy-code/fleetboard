@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import { useApp, activeWs, stopCameraAnimation } from '../state/store'
 import { agentColor } from '../engine/consoles'
 import { ROLE_TINT } from '@shared/types'
+import { groupBox, hiddenIds, occupied } from '../board/place'
 
 const W = 220
 const H = 140
@@ -25,7 +26,8 @@ export function Minimap() {
 
   const cam = ws.camera
   const view = { x: -cam.x / cam.zoom, y: -cam.y / cam.zoom, w: vp.w / cam.zoom, h: vp.h / cam.zoom }
-  const boxes = [...ws.nodes, ...ws.groups, ...ws.ink, view]
+  const folded = hiddenIds(ws)
+  const boxes = [...occupied(ws), view]
   const l = Math.min(...boxes.map((b) => b.x))
   const t = Math.min(...boxes.map((b) => b.y))
   const r = Math.max(...boxes.map((b) => b.x + b.w))
@@ -63,13 +65,13 @@ export function Minimap() {
       title="Click or drag to move the view"
     >
       <svg viewBox={`0 0 ${W} ${H}`}>
-        {ws.groups.map((g) => (
+        {ws.groups.map((g) => ({ ...g, ...groupBox(g) })).map((g) => (
           <rect key={g.id} x={mx(g.x)} y={my(g.y)} width={g.w * k} height={g.h * k} rx={3} fill="none" stroke={ROLE_TINT[g.role]} strokeOpacity={0.6} strokeDasharray="2 2" />
         ))}
         {ws.ink.map((i) => (
           <rect key={i.id} x={mx(i.x)} y={my(i.y)} width={Math.max(1, i.w * k)} height={Math.max(1, i.h * k)} fill="none" style={{ stroke: 'var(--text)' }} strokeOpacity={0.35} />
         ))}
-        {ws.nodes.map((n) => {
+        {ws.nodes.filter((n) => !folded.has(n.id)).map((n) => {
           const isConsole = n.type === 'console'
           const st = statuses[n.id]
           const fill = isConsole ? (st ? STATUS_FILL[st] : undefined) ?? 'var(--line-3)' : 'var(--line-2)'

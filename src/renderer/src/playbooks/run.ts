@@ -5,6 +5,7 @@ import { CONSOLE_H, CONSOLE_W, nextName } from '../engine/consoles'
 import { activeLead, confirmTeamFolder, stillInProject } from '../engine/fleet'
 import { draftCharter, gateCharter } from '../fleet/charter'
 import { playbookById } from './catalog'
+import { findFreeSpot, occupied } from '../board/place'
 
 /** Remember what was typed last time, per playbook. */
 export async function lastInputs(id: string): Promise<Record<string, string>> {
@@ -71,22 +72,26 @@ function placeTiles(leadId: string, tiles: { type: 'web' | 'console'; data: Reco
       return
     }
     const app = useApp.getState()
+    // a column to the right of the Lead, each tile in the free spot nearest its place in it
     let y = lead.y
+    const spot = (w: number, h: number) => findFreeSpot(occupied(activeWs()!), { w, h }, { x: lead.x + lead.w + 40, y })
     for (const t of tiles) {
       if (t.type === 'web') {
-        app.addNode({ type: 'web', x: lead.x + lead.w + 40, y, w: 900, h: 620, data: { url: t.data.url } })
-        y += 660
+        const at = spot(900, 620)
+        app.addNode({ type: 'web', ...at, w: 900, h: 620, data: { url: t.data.url } })
+        y = at.y + 660
       } else {
         const taken = allConsoles().map((c) => c.data.name as string)
+        const h = Math.round(CONSOLE_H * 0.7)
+        const at = spot(CONSOLE_W, h)
         app.addNode({
           type: 'console',
-          x: lead.x + lead.w + 40,
-          y,
+          ...at,
           w: CONSOLE_W,
-          h: Math.round(CONSOLE_H * 0.7),
+          h,
           data: { agentId: t.data.agentId ?? 'shell', command: t.data.command, name: t.data.name ?? nextName(taken), cwd, launch: 'fresh', createdAt: Date.now() }
         })
-        y += Math.round(CONSOLE_H * 0.7) + 40
+        y = at.y + h + 40
       }
     }
   }

@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { afterEach, beforeEach } from 'node:test'
 
 const require = createRequire(import.meta.url)
 const ROOT = path.resolve(import.meta.dirname, '../..')
@@ -70,8 +71,46 @@ export function killAppTree(pid: number | undefined) {
   }
 }
 
+// Every sandbox is a folder in the temp dir, and nothing removed them: a day of runs left hundreds
+// behind (gigabytes, on a /tmp that is a small tmpfs, until runs failed for want of space). Now a
+// sandbox made during a test goes when that test passed, and one made outside any test (a file's
+// before hook) goes when every test in the file passed. A failed test's is kept, and named in the
+// test's output, because that is when its logs and board files are worth reading. FB_E2E_KEEP=1 keeps
+// them all. Removal waits for the process to end: a test file's own afterEach or after may still be
+// closing the app that writes into it, and a relaunch test reuses one sandbox across several apps.
+const KEEP = process.env.FB_E2E_KEEP === '1'
+const frames: string[][] = []
+const fileLevel: string[] = []
+const passedDirs: string[] = []
+let anyFailed = false
+
+beforeEach(() => {
+  frames.push([])
+})
+afterEach((t) => {
+  const dirs = frames.pop() ?? []
+  if (t.passed) passedDirs.push(...dirs)
+  else {
+    anyFailed = true
+    for (const d of dirs) t.diagnostic(`sandbox kept: ${d}`)
+  }
+})
+// at exit, after every hook of every test file in this process (a file's own after() closing its
+// app included) has run: synchronous, which is all an exit handler may be
+process.once('exit', () => {
+  if (KEEP) return
+  for (const d of [...passedDirs, ...(anyFailed ? [] : fileLevel)]) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 })
+    } catch {
+      /* still in use (Windows): it is only a temp folder */
+    }
+  }
+})
+
 export function makeSandbox(opts: { fake?: boolean } = {}): Sandbox {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-e2e-'))
+  ;(frames.at(-1) ?? fileLevel).push(dir)
   const sb: Sandbox = {
     dir,
     home: path.join(dir, 'home'),

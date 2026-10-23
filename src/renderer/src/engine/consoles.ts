@@ -2,6 +2,7 @@ import type { BoardNode, ConsoleData, Role } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
+import { findFreeSpot, occupied, viewCentre } from '../board/place'
 import { setActivity } from './activity'
 
 // Console lifecycle shared by the board, the composer, the orchestrator, voice and loops.
@@ -57,18 +58,12 @@ export function nextName(taken = allConsoles().map((n) => n.data.name as string)
   return `Agent ${used.size + 1}`
 }
 
-/** Free spot to the right of everything on the board. */
-function freeOrigin(): { x: number; y: number } {
+/** Where a block of new consoles goes: as near the middle of the view as it fits without covering anything. */
+function freeOrigin(size: { w: number; h: number }): { x: number; y: number } {
   const ws = activeWs()
-  if (!ws || (!ws.nodes.length && !ws.groups.length)) {
-    const vp = useApp.getState().viewport
-    const cam = ws?.camera ?? { x: 0, y: 0, zoom: 1 }
-    return { x: (vp.w / 2 - cam.x) / cam.zoom - CONSOLE_W, y: (vp.h / 2 - cam.y) / cam.zoom - CONSOLE_H / 2 }
-  }
-  const boxes = [...ws.nodes, ...ws.groups]
-  const right = Math.max(...boxes.map((b) => b.x + b.w))
-  const top = Math.min(...boxes.map((b) => b.y))
-  return { x: right + 80, y: top }
+  const cam = ws?.camera ?? { x: 0, y: 0, zoom: 1 }
+  const near = viewCentre(useApp.getState().viewport, cam, size)
+  return ws ? findFreeSpot(occupied(ws), size, near) : near
 }
 
 export interface SpawnOptions {
@@ -95,7 +90,9 @@ export function spawnConsoles(opts: SpawnOptions = {}): string[] {
   const agents = opts.agents ?? Array.from({ length: opts.count ?? 1 }, () => opts.agentId ?? app.settings.defaultAgent)
   const n = agents.length
   const cols = opts.cols ?? Math.min(4, Math.ceil(Math.sqrt(n)))
-  const origin = opts.at ?? freeOrigin()
+  const rows = Math.ceil(n / cols)
+  const origin =
+    opts.at ?? freeOrigin({ w: 48 + cols * CONSOLE_W + (cols - 1) * GAP, h: (opts.group ? 58 + 24 : 0) + rows * CONSOLE_H + (rows - 1) * GAP })
 
   let groupId: string | undefined
   const headerOffset = opts.group ? 58 : 0

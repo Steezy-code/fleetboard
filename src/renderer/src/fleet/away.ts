@@ -77,11 +77,16 @@ export function useAwayWatcher() {
       // focus moving into a web tile blurs the window too, though you never left it
       window.setTimeout(() => !document.hasFocus() && leave(at), 0)
     }
+    // the window taking focus is itself the sign you are back; a key or the pointer only counts while
+    // the window has it (a pointer passing over a window behind another one is not you returning)
+    const onFocus = () => {
+      if (useAway.getState().since !== null) void back()
+    }
     const onBack = () => {
       if (useAway.getState().since !== null && document.hasFocus()) void back()
     }
     window.addEventListener('blur', onBlur)
-    window.addEventListener('focus', onBack)
+    window.addEventListener('focus', onFocus)
     for (const e of ['keydown', 'pointerdown', 'pointermove'] as const) window.addEventListener(e, onBack, true)
     const t = window.setInterval(async () => {
       if (!document.hasFocus() || useAway.getState().since !== null) return
@@ -90,7 +95,7 @@ export function useAwayWatcher() {
     }, IDLE_POLL_MS)
     return () => {
       window.removeEventListener('blur', onBlur)
-      window.removeEventListener('focus', onBack)
+      window.removeEventListener('focus', onFocus)
       for (const e of ['keydown', 'pointerdown', 'pointermove'] as const) window.removeEventListener(e, onBack, true)
       window.clearInterval(t)
     }
