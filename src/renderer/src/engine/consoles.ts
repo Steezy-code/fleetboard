@@ -148,7 +148,7 @@ export async function startConsole(node: BoardNode<ConsoleData>, cols: number, r
     acceptEdits: node.data.acceptEdits,
     profileId: node.data.profileId,
     extraArgs: node.data.extraArgs,
-    command: (node.data as any).command
+    command: node.data.command
   })
   app.setLive(node.id, true)
   app.setStatus(node.id, info.status)
