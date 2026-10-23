@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { dayKey } from '@shared/time'
 import { homeOf } from './platform'
 
 // Each Claude Code / Gemini CLI console gets its own conversation id, so reopening the board resumes
@@ -188,8 +189,7 @@ const squash = (t: string) => t.replace(/\s+/g, ' ').trim()
  * never reached the model.)
  */
 export function findCodexSession(env: Record<string, string | undefined>, opts: { cwd: string; since: number; claimed: Set<string>; screen: string }): string | undefined {
-  const day = new Date(opts.since - 24 * 3600_000)
-  const sinceDay = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
+  const sinceDay = dayKey(opts.since - 24 * 3600_000)
   const same = (a: string, b: string) => path.resolve(a) === path.resolve(b)
   const found = rollouts(codexRoot(env), sinceDay)
     .map(readCodexSession)

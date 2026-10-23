@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { Modal, Seg } from '../ui/Modal'
 import { useApp } from '../state/store'
-import { invoke, uid } from '../lib/api'
+import { errorText, invoke, uid } from '../lib/api'
 import { AgentPicker, resolveAgent, shortName, useHeadlessAgents } from './docs/AgentPicker'
 import { CUSTOM_ICON, DEPTHS, DOC_PRESETS, presetById, slugify, type Depth } from './docs/presets'
 import { dismissGen, removeDoc, savedDocs, startDoc, stopDoc, useDocStudio, type DocGen, type SavedDoc } from './docs/state'
@@ -276,7 +276,7 @@ function GenView({ gen, onRegenerate }: { gen: DocGen; onRegenerate: () => void 
           <div className="ds-error">
             <TriangleAlert size={18} />
             <div>
-              <b>Nothing to show yet.</b>
+              <b>No document came out of this run.</b>
               <pre>{gen.error}</pre>
             </div>
           </div>
@@ -304,7 +304,7 @@ function DoneView({ doc, agentName, onRegenerate }: { doc: SavedDoc; agentName: 
       invoke('shell:openPath', path)
       useApp.getState().toast('PDF exported', 'ok')
     } catch (e: any) {
-      useApp.getState().toast(`PDF export failed: ${e?.message ?? e}`, 'error')
+      useApp.getState().toast(`PDF export failed: ${errorText(e)}`, 'error')
     } finally {
       setBusy(null)
     }

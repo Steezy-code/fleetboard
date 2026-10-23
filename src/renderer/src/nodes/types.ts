@@ -22,7 +22,7 @@ export interface NodeDef {
   actions?: ComponentType<NodeProps>
   defaultSize: { w: number; h: number }
   minSize: { w: number; h: number }
-  /** no frame/header: the component draws everything and handles its own drag via .drag-handle */
+  /** no frame/header: the component draws everything and starts its own drag with startNodeDrag (board/NodeFrame.tsx) */
   chromeless?: boolean
   /** return false to cancel removal (e.g. confirm killing a live console) */
   /** default data for a new node */

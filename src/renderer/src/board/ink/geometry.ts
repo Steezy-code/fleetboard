@@ -28,7 +28,6 @@ export const rectPts = (i: Box): Pt[] => [
   [i.x, i.y + i.h]
 ]
 
-/** Points of a linear item; falls back to its box diagonal. */
 /** A line's points: its own if it has any, else the two corners of its box — never none. */
 export function linePoints(i: InkItem): [Pt, ...Pt[]] {
   if (i.points && i.points.length) return i.points as [Pt, ...Pt[]]

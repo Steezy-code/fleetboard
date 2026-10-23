@@ -120,8 +120,9 @@ function lastInputBoxEnd(lines: string[]): number {
 interface Menu {
   reason: 'numbered-menu' | 'cursor-menu'
   options: PromptOption[]
-  /** row of the first option */
+  /** row of the first option, and of the last row that belongs to the menu */
   top: number
+  bottom: number
 }
 
 /**
@@ -145,12 +146,14 @@ function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
   }
   const options: PromptOption[] = []
   let wrapped = false
+  let bottom = top
   for (let j = top; j < lines.length; j++) {
     const l = lineAt(lines, j)
     const m = isOption(l)
     if (m) {
       if (m.num !== options.length + 1) break
       options.push({ label: m.label.trim(), selected: m.selected })
+      bottom = j
       // a label that reaches the right edge continues on the next row
       wrapped = l.length >= cols - 12
       continue
@@ -166,9 +169,10 @@ function numberedMenu(lines: string[], i: number, cols: number): Menu | null {
     if (wrapped) o.label += ' ' + l.trim()
     else o.detail = o.detail ? `${o.detail} ${l.trim()}` : l.trim()
     wrapped = wrapped && l.length >= cols - 12
+    bottom = j
   }
   if (options.length < 2 || options.filter((o) => o.selected).length !== 1) return null
-  return { reason: 'numbered-menu', options, top }
+  return { reason: 'numbered-menu', options, top, bottom }
 }
 
 /**
@@ -198,7 +202,7 @@ function cursorMenu(lines: string[], i: number, hinted: boolean, cols: number): 
   }
   const options: PromptOption[] = []
   for (let j = top; j <= bottom; j++) options.push({ label: stripMark(j === i ? after : lineAt(lines, j)), selected: j === i })
-  return { reason: 'cursor-menu', options, top }
+  return { reason: 'cursor-menu', options, top, bottom }
 }
 
 /**
@@ -235,6 +239,19 @@ function questionAbove(lines: string[], top: number): string | undefined {
 const answerKind = (reason: string): Prompt['kind'] =>
   reason === 'password' ? 'input' : /^(yes-no|yes-no-words|default-answer|continue-q)$/.test(reason) ? 'yes-no' : /^(enter-to|press-key)$/.test(reason) ? 'enter' : 'input'
 
+/**
+ * A numbered list the user typed or sent, not a dialog. Codex draws its composer with no rule round
+ * it, so lastInputBoxEnd cannot fence it off, and "› 1. bump the version" reads as a selected option.
+ * A dialog replaces the composer, so a prompt or conversation row below the list means it is not one;
+ * and Codex hides the cursor while a dialog shows, so a cursor inside the list is someone typing it.
+ */
+function typedList(menu: Menu, region: string[], view: ScreenView, start: number): boolean {
+  if (menu.reason !== 'numbered-menu') return false
+  if (region.slice(menu.bottom + 1).some((l) => /^\s*[›❯>•●]\s/.test(l))) return true
+  const cursor = view.cursorY - start
+  return view.alt && !view.cursorHidden && cursor >= menu.top && cursor <= menu.bottom + 1
+}
+
 export function detectPrompt(view: ScreenView): Prompt | null {
   const raw = view.lines.map(normalizeLine)
   const cols = view.cols ?? Math.max(80, ...raw.map((l) => l.length))
@@ -253,7 +270,7 @@ export function detectPrompt(view: ScreenView): Prompt | null {
   if (view.cursorHidden || view.alt) {
     const text = region.join('\n')
     const menu = findMenu(region, cols, MENU_HINT.test(text))
-    if (menu) return { reason: menu.reason, kind: 'menu', lines, question: questionAbove(region, menu.top), options: menu.options }
+    if (menu && !typedList(menu, region, view, start)) return { reason: menu.reason, kind: 'menu', lines, question: questionAbove(region, menu.top), options: menu.options }
     for (const [reason, re] of HINTS) if (re.test(text)) return { reason, kind: answerKind(reason), lines }
     const last = lineAt(raw, end - 1)
     for (const [reason, re] of CURSOR_PROMPTS) if (re.test(last)) return { reason, kind: answerKind(reason), lines: [last.trim()], question: last.trim() }

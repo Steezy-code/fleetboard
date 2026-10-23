@@ -11,7 +11,7 @@ import { emptyFleet, type FleetMember, type FleetState } from '../../src/shared/
 import type { Prompt } from '../../src/shared/prompt'
 
 const { addRule, canRule, pruneRules, removeRule, ruleFor, rulesOf, teamOf, useTeamRules } = await import('@/fleet/teamRules')
-const { awaySummary, span } = await import('@/fleet/awaySummary')
+const { awaySummary, spanMs } = await import('@/fleet/awaySummary')
 
 const prompts = new Map<string, Prompt | null>()
 async function promptAt(file: string, mark: string) {
@@ -167,9 +167,9 @@ test('awaySummary: nothing recorded, nothing to say; too much, and the rest is i
 })
 
 test('span: minutes, then hours', () => {
-  assert.equal(span(47 * 60_000), '47 min')
-  assert.equal(span(125 * 60_000), '2 h 5 min')
-  assert.equal(span(120 * 60_000), '2 h')
+  assert.equal(spanMs(47 * 60_000), '47 min')
+  assert.equal(spanMs(125 * 60_000), '2 h 5 min')
+  assert.equal(spanMs(120 * 60_000), '2 h')
 })
 
 test('commandNote: a plain word only for a single command; the warnings hold anywhere in it', async () => {

@@ -6,7 +6,7 @@
 //   5. Helm off (or failed): work → the Lead; board commands → the CLI planner (JSON actions)
 // Destructive or unrequested steps wait for a spoken / clicked confirmation.
 import { activeLead, looksLikeBoardCommand, sendGoal } from '../engine/fleet'
-import { AGENTS } from '@shared/agents'
+import { AGENTS, readOnlyAgent } from '@shared/agents'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { agentLabel, isLive } from '../engine/consoles'
 import { extractJson, runCli, uid } from '../lib/api'
@@ -122,12 +122,13 @@ export function parseDictation(raw: string): Dictation | null {
   const names = splitList(who.toLowerCase())
   if (!names.length) return null
   // only console names, team names or everyone count as an address (not agents: "codex, …" is ambiguous)
+  const everyone = (n: string) => /^(everyone|everybody|all|all agents|team)$/.test(n)
   for (const n of names) {
-    const isAll = /^(everyone|everybody|all|all agents|team)$/.test(n)
     const named = allConsoles().some((c) => norm(c.data.name) === norm(n)) || !!resolveTeam(n)
-    if (!isAll && !named) return null
+    if (!everyone(n) && !named) return null
   }
-  return { targets: names, text: body.trim() }
+  // a group named "team" is that group; otherwise the word means everyone, which is what targets read as "all"
+  return { targets: names.map((n) => (everyone(n) && !resolveTeam(n) ? 'all' : n)), text: body.trim() }
 }
 
 // ---------------------------------------------------------------- local rules
@@ -463,7 +464,7 @@ export const ACTION_SCHEMA = `Action schema (use console ids or exact console na
 - {"type":"ungroup","team":"<team>"} / {"type":"deleteTeam","team":"<team>"}
 - {"type":"orchestrator"} (adds an orchestrator node) / {"type":"wire","from":"orchestrator|<id/name>","to":"<team or console>"}
 - {"type":"handoff","from":["<console>"],"toAgent":"<agent id>","note":"<extra instruction>?"}
-- {"type":"openPanel","name":"missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|presets|composer|orchestrator|git|ci|accounts|skills|chat"}
+- {"type":"openPanel","name":"missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|presets|composer|orchestrator|git|ci|accounts|skills|chat|journal|sweep"}
 - {"type":"focus","target":"<console or team>"} / {"type":"zoom","mode":"in|out|fit"} / {"type":"newWorkspace","name":"<name>?"}
 - {"type":"say","text":"<answer>"} (for questions about the board; answer from the snapshot)`
 
@@ -490,7 +491,7 @@ async function askPlanner(text: string): Promise<{ actions: Action[]; say: strin
   const app = useApp.getState()
   const project = app.project
   if (!project) return null
-  const run = runCli({ prompt: plannerPrompt(text), cwd: project.path, agentId: app.settings.plannerAgent || undefined })
+  const run = runCli({ prompt: plannerPrompt(text), cwd: project.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
   let cancelled = false
   setVoice({
     phase: 'thinking',
@@ -752,8 +753,14 @@ export async function runCommand(raw: string, source: Source) {
 
   // 5b. CLI planner for board commands the local rules didn't catch
   try {
+    const asked = useApp.getState().project?.id
     const res = await askPlanner(text)
     if (!res) return
+    // a plan is about the board it was asked on: another project opened meanwhile is not where it goes
+    if (useApp.getState().project?.id !== asked) {
+      thread().add('system', 'Another project was opened while that was being planned, so nothing was done.')
+      return
+    }
     await plan(res.actions, res.say, text, true)
   } catch (e: any) {
     const msg = `Planner failed: ${e?.message ?? e}`
@@ -763,5 +770,3 @@ export async function runCommand(raw: string, source: Source) {
   }
 }
 
-/** Speak + record a line from elsewhere (e.g. other features). */
-export const announce = reply

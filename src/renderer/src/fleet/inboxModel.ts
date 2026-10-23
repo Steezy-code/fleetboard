@@ -14,7 +14,7 @@ import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedbac
 import { charterMessage, coerceCharter, FULL_CARD_BELOW, type Charter } from '@shared/charter'
 import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
-import { reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
+import { closeOnly, reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
 import type { Spent } from '@shared/spend'
 
 // The Inbox, as one ordered list: the charter of work that has not started first, then what
@@ -202,25 +202,28 @@ export function openConsole(id: string) {
  *
  * ponytail: module state, so it goes when the window reloads — which is the right lifetime for an
  * offer to undo something that happened minutes ago. Persist it only if undo-after-restart is asked
- * for, and then check it is still HEAD before offering (revertMerge already refuses otherwise).
+ * for, and then check it is still HEAD before offering (revertMerge already refuses otherwise). It
+ * belongs to the project it was made in: opening another project swaps the board without a reload,
+ * and that project's Inbox must neither claim the merge nor send its undo to the wrong checkout.
  */
 const UNDO_WINDOW = 15 * 60_000
-let lastMerge: { commit: string; into: string; at: number } | null = null
+type Merge = { projectId: string; commit: string; into: string; at: number }
+let lastMerge: Merge | null = null
 
-async function mergeReady(projectId: string) {
+async function mergeReady(projectId: string, head: string | undefined) {
   const app = useApp.getState()
-  const r = await invoke<{ ok: boolean; into?: string; error?: string; commit?: string }>('fleet:mergeReady', projectId)
+  const r = await invoke<{ ok: boolean; into?: string; error?: string; commit?: string }>('fleet:mergeReady', projectId, head)
   if (r.ok) {
     app.toast(r.into ? `Merged into ${r.into}. The team is dismissed.` : 'Done. The team is dismissed.', 'ok')
-    lastMerge = r.commit ? { commit: r.commit, into: r.into ?? '', at: Date.now() } : null
+    lastMerge = r.commit ? { projectId, commit: r.commit, into: r.into ?? '', at: Date.now() } : null
     refreshInbox()
   } else app.toast(`Merge failed: ${r.error}`, 'error')
 }
 
-async function undoMerge(projectId: string, m: { commit: string; into: string }) {
+async function undoMerge(m: Merge) {
   const app = useApp.getState()
   if (!(await app.confirm({ title: `Undo the merge into ${m.into}?`, body: 'Adds a commit that reverses everything the team merged. Its branches and worktrees are already gone, so this cannot be re-merged with one click.', confirm: 'Undo the merge', danger: true }))) return
-  const r = await invoke<{ ok: boolean; error?: string }>('fleet:revertMerge', projectId, m.commit)
+  const r = await invoke<{ ok: boolean; error?: string }>('fleet:revertMerge', m.projectId, m.commit)
   if (r.ok) {
     app.toast(`Reverted. ${m.into} is back where it was.`, 'ok')
     lastMerge = null
@@ -454,20 +457,19 @@ function build() {
     const workers = Object.values(fleet?.members ?? {}).filter((m) => m.leadId === ready.leadId && m.role === 'worker').length
     const review = fleet ? reviewReady(fleet) : null
     fetchSpend(key, review?.claims.map((c) => c.cwd) ?? [])
-    const closeOnly = !ready.branch || ready.commits === 0 || !!ready.prUrl
     // the diff touches a file the charter ruled out: the card offers no Merge at all, as fleet_merge
     // refuses the same work on the Lead's side. Reading the diff is what is left to do.
     const blocked = !!review?.blocked
-    const actions: InboxAction[] = closeOnly
+    const actions: InboxAction[] = closeOnly(ready)
       ? [{ label: 'Done', primary: true, run: () => invoke('fleet:done', project.id) }]
       : blocked
         ? []
-        : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id) }]
+        : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id, ready.head) }]
     // a blocked review keeps this on purpose: pushing is not merging, and a draft PR is how a person
     // other than the user gets to see the file that was ruled out
     if (ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl) actions.push({ label: 'Open draft PR', keeps: true, run: () => openPr(project.id, ready) })
     // primary only where Merge was taken away; with nothing to merge, Done is already the primary
-    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked && !closeOnly, keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
+    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked && !closeOnly(ready), keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
     if (ready.prUrl) actions.push({ label: 'Open PR', keeps: true, run: () => invoke('shell:openExternal', ready.prUrl) })
     actions.push({ label: 'Discard', tone: 'deny', run: () => discardTeam(project.id) })
     items.push({
@@ -503,10 +505,10 @@ function build() {
   }
 
   // the merge that just happened, while undoing it is still one click
-  if (lastMerge && Date.now() - lastMerge.at < UNDO_WINDOW) {
+  if (lastMerge && lastMerge.projectId === project.id && Date.now() - lastMerge.at < UNDO_WINDOW) {
     const m = lastMerge
     const key = `merged:${m.commit}`
-    if (!dismissed.has(key)) items.push(mergedNotice(key, m, project.id))
+    if (!dismissed.has(key)) items.push(mergedNotice(key, m))
   }
 
   const fb = useFeedback.getState().result
@@ -575,7 +577,7 @@ function stalledNotice(key: string, x: Stall): InboxItem {
   }
 }
 
-function mergedNotice(key: string, m: { commit: string; into: string }, projectId: string): InboxItem {
+function mergedNotice(key: string, m: Merge): InboxItem {
   return {
     kind: 'notice',
     tone: 'info',
@@ -587,7 +589,7 @@ function mergedNotice(key: string, m: { commit: string; into: string }, projectI
     since: seen(key),
     actions: [
       { label: 'Looks right', primary: true, run: () => undefined },
-      { label: 'Undo the merge', tone: 'deny', run: () => undoMerge(projectId, m) }
+      { label: 'Undo the merge', tone: 'deny', run: () => undoMerge(m) }
     ]
   }
 }

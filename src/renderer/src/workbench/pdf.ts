@@ -1,4 +1,4 @@
-import { invoke } from '../lib/api'
+import { errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { escapeHtml, firstHeading, renderMarkdown } from './markdown'
 
@@ -83,7 +83,7 @@ export async function exportMarkdownPdf(md: string, title: string, opts: { defau
     app.toast(`Exported ${out.split('/').pop()}`, 'ok')
     return out
   } catch (e: any) {
-    app.toast(`PDF export failed: ${e?.message ?? e}`, 'error')
+    app.toast(`PDF export failed: ${errorText(e)}`, 'error')
     return null
   }
 }

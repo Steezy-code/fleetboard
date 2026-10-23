@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { extractJson, invoke, runCli } from '../../lib/api'
+import { errorText, extractJson, invoke, runCli } from '../../lib/api'
 import { activeWs, useApp } from '../../state/store'
 import { buildDiagramPrompt } from './presets'
 import { layoutDiagram } from './layout'
@@ -100,7 +100,7 @@ export async function generateDiagram(opts: { id: string; label: string; brief?:
     if (useApp.getState().project?.id !== project.id) return
     placeDiagram(spec)
   } catch (e: any) {
-    if (!cancelled) app.toast(`Diagram failed: ${e?.message ?? e}`, 'error')
+    if (!cancelled) app.toast(`Diagram failed: ${errorText(e)}`, 'error')
   } finally {
     cancelRun = null
     useDiagramStudio.setState({ busy: null, activity: '' })
@@ -124,7 +124,7 @@ export async function exportPng(figureId: string) {
     await invoke('fs:writeBase64', path, await figureToPngBase64(items, 2))
     useApp.getState().toast('PNG exported', 'ok')
   } catch (e: any) {
-    useApp.getState().toast(`PNG export failed: ${e?.message ?? e}`, 'error')
+    useApp.getState().toast(`PNG export failed: ${errorText(e)}`, 'error')
   }
 }
 

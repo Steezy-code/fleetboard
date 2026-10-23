@@ -1,5 +1,6 @@
 import { Ban, BookMarked, CircleHelp, TerminalSquare } from 'lucide-react'
 import type { Ambiguity, Charter } from '@shared/charter'
+import { enforceable } from '@shared/mergeReview'
 import { fullCard } from './inboxModel'
 
 // The charter on the command bar, in the two renderings the design asks for: the full card where it
@@ -69,7 +70,11 @@ export function CharterCard({ charter: c }: { charter: Charter }) {
           <span className="ch-label">Won’t touch</span>
           <span className="ch-paths">
             {c.wontTouch.map((p, i) => (
-              <span key={i}>{p}</span>
+              <span key={i}>
+                {p}
+                {/* a description names no path: the merge gate cannot hold anyone to it */}
+                {!enforceable(p) && <em className="ch-inert"> (not enforced: names no file or folder)</em>}
+              </span>
             ))}
           </span>
         </div>

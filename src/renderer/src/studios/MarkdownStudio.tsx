@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpenText, Check, ChevronRight, FileDown, LayoutDashboard, Loader2, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { Modal, Seg } from '../ui/Modal'
-import { invoke } from '../lib/api'
+import { errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { FileTree, ancestors, graft, flattenFiles, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
@@ -10,6 +10,7 @@ import { exportMarkdownPdf } from '../workbench/pdf'
 import { baseName, dirname, joinPath, relativeTo, stripExt, isInside } from '../workbench/paths'
 import type { FileStat } from '../workbench/useFileText'
 import type { WriteResult } from '@shared/types'
+import { setUnsaved } from '../lib/unsaved'
 
 type Mode = 'reading' | 'source' | 'graph'
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
@@ -79,6 +80,13 @@ export default function MarkdownStudio(props: { path?: string }) {
   /** what each note held on disk when last read or saved: a save goes only over that (an agent may write it too) */
   const onDisk = useRef(new Map<string, string>())
   const asking = useRef(false)
+  /**
+   * The disk version of a note the user chose to keep their own edits over, unsaved. Autosave does
+   * not ask about that version again; Ctrl+S does, and so does a newer change on disk.
+   */
+  const keptOver = useRef(new Map<string, string | null>())
+  /** false once the studio has closed: its last save must not keep re-arming a timer nothing clears */
+  const alive = useRef(true)
   /** notes we have already said we cannot save over, so every keystroke does not toast again */
   const noBaseTold = useRef(new Set<string>())
   const currentRef = useRef<string | null>(null)
@@ -138,7 +146,7 @@ export default function MarkdownStudio(props: { path?: string }) {
   }, [loadTree, loadAll])
 
   // ---------- saving ----------
-  const flush = useCallback(async () => {
+  const flush = useCallback(async (explicit = false) => {
     window.clearTimeout(saveTimer.current)
     const p = pending.current
     if (!p || asking.current) return
@@ -163,6 +171,7 @@ export default function MarkdownStudio(props: { path?: string }) {
         // changed on disk since we read it: never overwrite that silently
         pending.current ??= p
         setSave('conflict')
+        if (!explicit && keptOver.current.has(p.path) && keptOver.current.get(p.path) === r.current) return
         asking.current = true
         try {
           const app = useApp.getState()
@@ -179,21 +188,24 @@ export default function MarkdownStudio(props: { path?: string }) {
               toast(`${baseName(p.path)} changed again while you were deciding; your version is still unsaved.`, 'warn')
             } else {
               onDisk.current.set(p.path, p.text)
+              keptOver.current.delete(p.path)
               if (pending.current?.path === p.path && pending.current.text === p.text) pending.current = null
               setSave(pending.current ? 'dirty' : 'saved')
             }
-          } else if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your edits since the last save are lost. Otherwise you keep yours, unsaved, and are asked again on the next save.', confirm: 'Load the version on disk', danger: true }))) {
+          } else if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your edits since the last save are lost. Otherwise you keep yours, unsaved, and are asked again when you press Ctrl+S or the file changes again.', confirm: 'Load the version on disk', danger: true }))) {
             pending.current = null
+            keptOver.current.delete(p.path)
             onDisk.current.set(p.path, disk)
             setNotes((m) => new Map(m).set(p.path, disk))
             if (currentRef.current === p.path) setText(disk)
             setSave('saved')
-          }
+          } else keptOver.current.set(p.path, disk)
         } finally {
           asking.current = false
           // flush() returns without re-arming while a dialog is up: anything still pending would
-          // otherwise wait for the next keystroke or for unmount
-          if (pending.current) {
+          // otherwise wait for the next keystroke or for unmount. Not a note the user just chose to
+          // keep unsaved, which would only bring the dialog straight back.
+          if (alive.current && pending.current && !keptOver.current.has(pending.current.path)) {
             window.clearTimeout(saveTimer.current)
             saveTimer.current = window.setTimeout(flushRef.current, 600)
           }
@@ -206,7 +218,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       if (!pending.current) setSave('saved')
     } catch (e: any) {
       setSave('error')
-      toast(`Could not save ${baseName(p.path)}: ${e?.message ?? e}`, 'error')
+      toast(`Could not save ${baseName(p.path)}: ${errorText(e)}`, 'error')
     }
   }, [])
 
@@ -214,7 +226,20 @@ export default function MarkdownStudio(props: { path?: string }) {
   const flushRef = useRef(flush)
   flushRef.current = flush
 
-  useEffect(() => () => void flush(), [flush])
+  useEffect(
+    () => () => {
+      alive.current = false
+      void flush()
+    },
+    [flush]
+  )
+
+  // a note kept unsaved over a change on disk is lost when the window or the studio closes: ask first
+  useEffect(() => {
+    const p = pending.current
+    setUnsaved('markdown', (save === 'conflict' || save === 'error') && p ? baseName(p.path) : null)
+  }, [save])
+  useEffect(() => () => setUnsaved('markdown', null), [])
 
   function edit(v: string) {
     if (!current) return
@@ -303,7 +328,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       await open(path, 'source')
       toast(`Created ${relativeTo(root, path)}`, 'ok')
     } catch (e: any) {
-      toast(String(e?.message ?? e), 'error')
+      toast(errorText(e), 'error')
     }
   }
 
@@ -475,7 +500,7 @@ export default function MarkdownStudio(props: { path?: string }) {
                   <span className={i === crumbs.length - 1 ? 'wb-crumb-last' : 'wb-crumb'}>{i === crumbs.length - 1 ? stripExt(c) : c}</span>
                 </span>
               ))}
-              {current && mode === 'source' && (
+              {current && (mode === 'source' || save === 'conflict' || save === 'error') && (
                 <span className={`wb-save-state ${save}`}>
                   {save === 'saving' ? (
                     <>
@@ -537,7 +562,7 @@ export default function MarkdownStudio(props: { path?: string }) {
                 onKeyDown={(e) => {
                   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
                     e.preventDefault()
-                    flush()
+                    flush(true)
                   }
                 }}
                 autoFocus

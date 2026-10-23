@@ -126,3 +126,25 @@ test('a project id is checked before it becomes a file or folder name', async ()
     assert.ok(!f.includes('..'), f)
   }
 })
+
+test('dependency folders are left out of staging only while the repo tracks nothing under them', async () => {
+  // a Go or PHP repo commits vendor/: leaving it out by name meant a worker's edits there were never
+  // committed, keepUncommitted said 'clean', and removing the worktree threw them away
+  const { outsideWork } = await import('../../src/main/live')
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-wt-heavy-'))
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
+  const sh = (...a: string[]) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', env })
+  sh('init', '-q', '-b', 'main')
+  fs.mkdirSync(path.join(repo, 'vendor', 'lib'), { recursive: true })
+  fs.writeFileSync(path.join(repo, 'vendor', 'lib', 'x.go'), 'package lib')
+  fs.writeFileSync(path.join(repo, 'a.txt'), 'a')
+  sh('add', '-A')
+  sh('commit', '-qm', 'init')
+  const skip = await outsideWork(repo)
+  assert.ok(!skip.includes(':(exclude)vendor'), 'a tracked vendor/ is work')
+  assert.ok(skip.includes(':(exclude)node_modules'), 'an untracked node_modules is not')
+
+  fs.writeFileSync(path.join(repo, 'vendor', 'lib', 'x.go'), 'package lib // edited')
+  sh('add', '-A', '--', '.', ...skip)
+  assert.match(sh('diff', '--cached', '--name-only'), /vendor\/lib\/x\.go/)
+})

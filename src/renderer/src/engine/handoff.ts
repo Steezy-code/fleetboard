@@ -4,6 +4,7 @@
 import type { BoardNode, ConsoleData } from '@shared/types'
 import { runCli } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
+import { findFreeSpot, occupied } from '../board/place'
 import { CONSOLE_H, CONSOLE_W, agentLabel, consoleTail, isLive, sendToConsole, spawnConsoles } from './consoles'
 
 export interface HandoffRequest {
@@ -67,15 +68,17 @@ export function writeBrief(fromIds: string[], note?: string, onChunk?: (all: str
   }
 }
 
-/** First free spot right of `n` that does not overlap other nodes. */
+/**
+ * The free spot nearest to the right of `n`, clear of other tiles, other teams' frames and drawings.
+ * The receiver joins n's group, so that group's own frame is not an obstacle: it grows around the
+ * newcomer (fitGroup), where counting it would push the receiver outside the team it is joining.
+ */
 function spotBeside(n: BoardNode) {
   const ws = activeWs()
-  let x = n.x + n.w + 48
-  const y = n.y
-  const hits = (cx: number) =>
-    ws?.nodes.some((o) => o.id !== n.id && cx < o.x + o.w && cx + CONSOLE_W > o.x && y < o.y + o.h && y + CONSOLE_H > o.y)
-  for (let i = 0; i < 20 && hits(x); i++) x += CONSOLE_W + 24
-  return { x, y }
+  const near = { x: n.x + n.w + 48, y: n.y }
+  if (!ws) return near
+  const others = occupied({ ...ws, groups: ws.groups.filter((g) => g.id !== n.groupId) })
+  return findFreeSpot(others, { w: CONSOLE_W, h: CONSOLE_H }, near, 24)
 }
 
 /** Compose the message typed into the receiving console. */

@@ -35,8 +35,8 @@ export function TopBar() {
                 className={`menu-item ${p.id === project.id ? 'on' : ''}`}
                 onClick={() => {
                   setProjMenu(false)
-                  app.closeProject()
-                  app.openProject(p.path)
+                  // it asks about unsaved work and saves this board itself: one question, not two
+                  void app.openProject(p.path)
                 }}
               >
                 <Folder size={13} className="ic" />
@@ -52,10 +52,7 @@ export function TopBar() {
               onClick={async () => {
                 setProjMenu(false)
                 const dir = await invoke<string | null>('dialog:openFolder')
-                if (dir) {
-                  app.closeProject()
-                  app.openProject(dir)
-                }
+                if (dir) void app.openProject(dir)
               }}
             >
               <Plus size={13} className="ic" /> Open folder…

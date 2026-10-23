@@ -74,7 +74,7 @@ test('review feedback: what a person asked for, not bots, bare approvals, resolv
         { isResolved: true, path: 'src/b.ts', line: 7, comments: { nodes: [{ databaseId: 21, author: user, body: 'Old nit', createdAt: '2026-10-19T08:00:00Z', url: 'u21' }] } }
       ]
     }
-  })
+  }, 'alice') // the signed-in user, whom agents post as
   assert.deepEqual(
     got.map((c) => [c.id, c.kind, c.path ?? c.state ?? '']),
     [
@@ -105,6 +105,11 @@ test("each comment carries how its author relates to the repo", () => {
       ['i3', 'OWNER']
     ]
   )
+  // agents post as the signed-in user, so only the user's own 🤖 is an agent's: from anyone else the
+  // mark would hide a comment from the user
+  const marked = (login: string) => ({ comments: { nodes: [{ databaseId: 5, author: { login, __typename: 'User' }, body: '🤖 done', createdAt: '2026-10-20T10:04:00Z', url: 'u5' }] } })
+  assert.equal(feedbackOf(marked('me'), 'me').length, 0)
+  assert.equal(feedbackOf(marked('drive-by'), 'me').length, 1)
   // an older gh or a field GitHub withheld leaves it undefined, which must not read as trusted
   const none = feedbackOf({ comments: { nodes: [{ databaseId: 9, author: outsider, body: 'x', createdAt: '2026-10-20T10:03:00Z', url: 'u9' }] } })
   assert.equal(none[0].association, undefined)

@@ -8,6 +8,9 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # a release a week old: a compromised package is usually caught and pulled within days
+    cooldown:
+      default-days: 7
     groups:
       # Electron and the build chain move together: a split upgrade usually fails to build
       electron-toolchain:

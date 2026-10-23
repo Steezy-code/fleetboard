@@ -10,6 +10,14 @@ declare global {
 export const fb = window.fb
 export const invoke = <T = any>(channel: string, ...args: unknown[]) => fb.invoke(channel, ...args) as Promise<T>
 export const on = fb.on
+
+/**
+ * What to show a person for a failed call. Electron wraps a handler's thrown error as
+ * `Error invoking remote method 'x': Error: …`, and only the part after that is meant for them.
+ * invoke() itself keeps the wrapping: the channel name is all strayErrors.ts has to log for an IPC
+ * failure nobody caught.
+ */
+export const errorText = (e: unknown) => String((e as any)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
 /** Windows can't pause a process (no SIGSTOP): Pause controls are hidden there. */
 export const IS_WIN = fb.platform === 'win32'
 export const CAN_PAUSE = !IS_WIN

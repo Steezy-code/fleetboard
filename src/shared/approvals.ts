@@ -51,8 +51,11 @@ function shortLabel(raw: string, t: ApprovalOption['tone'], permission: boolean)
   return label.length > 64 ? label.slice(0, 61) + '…' : label
 }
 
-/** Options an Inbox button can't sensibly answer: they change app-wide modes or need typing. */
-const HIDDEN = /switch to auto mode|bypass permissions|^type something\.?$/i
+/**
+ * Options an Inbox button can't sensibly answer: they change app-wide modes (the user's Claude Code
+ * default for every session, "set auto mode as my default permission mode", among them) or need typing.
+ */
+const HIDDEN = /switch to auto mode|bypass permissions|\bas (my )?default\b|default permission mode|^type something\.?$/i
 
 /**
  * The row in `p.lines` where the menu starts: the last row reading "1. <first option>". Everything
@@ -208,7 +211,16 @@ function unmarkedApprovalFor(p: Prompt | null): Approval | null {
     const rank = { allow: 0, always: 1, other: 2, deny: 3 }
     if (permission) options.sort((a, b) => rank[a.tone] - rank[b.tone])
     const command = permission ? commandOf(p) : null
-    return { title: p.question ?? 'Choose an option', detail: detailOf(p) ?? plainDetailOf(p) ?? command ?? undefined, ...(command ? { command } : {}), options }
+    const detail = detailOf(p) ?? plainDetailOf(p) ?? command ?? undefined
+    // A tool permission (one that offers "don't ask again") whose dialog could not be read, its top
+    // scrolled out of view, asks to allow something nobody here can see: it can be refused from the
+    // card, and allowed only in the console. Folder trust and sign-in menus carry no detail anyway.
+    if (permission && !detail && options.some((o) => o.tone === 'always')) {
+      const refusals = options.filter((o) => o.tone === 'deny')
+      if (!refusals.length) return null
+      return { title: p.question ?? 'Choose an option', detail: 'What it asks to do is not on screen here. Open the console to read it before allowing it.', options: refusals }
+    }
+    return { title: p.question ?? 'Choose an option', detail, ...(command ? { command } : {}), options }
   }
   if (p.kind === 'yes-no') {
     return {

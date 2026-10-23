@@ -62,7 +62,7 @@ export function awaySummary({ since, entries, fleet }: { since: number; entries:
 }
 
 /** "47 min", "2 h 5 min" */
-export function span(ms: number): string {
+export function spanMs(ms: number): string {
   const m = Math.max(1, Math.round(ms / 60_000))
   const h = Math.floor(m / 60)
   return h ? `${h} h${m % 60 ? ` ${m % 60} min` : ''}` : `${m} min`

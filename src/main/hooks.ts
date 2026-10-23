@@ -4,6 +4,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
 import { newSecret, refuse, sameSecret } from './localserver'
+import { logError } from './errors'
+import { loginEnv } from './env'
 import { IS_WIN, findExecutable } from './platform'
 
 // Claude Code reports its own lifecycle through hooks. Each console's CLI gets a settings file
@@ -59,17 +61,36 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
     })
     // the app lives as long as Electron does, not as long as this server listens
     server.unref()
+    // no loopback to listen on: start without hooks (port 0, which hookEnv and claudeHookArgs read
+    // as none) rather than wait here for ever with no window
+    server.once('error', (e) => {
+      logError('hooks', `the hook server could not listen, so consoles start without hooks: ${e.message}`)
+      resolve(0)
+    })
     server.listen(0, '127.0.0.1', () => {
       port = (server.address() as { port: number }).port
-      writeSettingsFile()
+      writeSettingsFile(findExecutable('node', process.env))
       resolve(port)
+      // An app started from the desktop often has no node on its PATH where the user's shell does
+      // (nvm, mise): without it the hook falls back to curl, whose argv carries the token. Look again
+      // with the login shell's PATH, without holding the window up for it.
+      void loginEnv()
+        .then((env) => {
+          const node = findExecutable('node', env)
+          if (node) writeSettingsFile(node)
+        })
+        .catch(() => {})
     })
   })
 }
 
 const settingsFile = () => path.join(dirs.hooks, 'claude-hooks.json')
 
-/** Windows: the hook as a tiny node script (or PowerShell without node). Reads the console's FB_* env itself. */
+/**
+ * The hook as a tiny node script, which reads the console's FB_* env itself: the token never appears
+ * on a command line, where every account on the machine can read it. Windows falls back to
+ * PowerShell without node, POSIX to curl.
+ */
 export const NODE_HOOK = `// Fleetboard: forwards a Claude Code hook event (stdin) to the board. Always exits 0.
 const http = require('http')
 const event = process.argv[2]
@@ -102,24 +123,23 @@ exit 0
 `
 
 /**
- * The hook command line. POSIX: curl. Windows: a script, written so the line works whether Claude Code
- * runs hooks through Git Bash or cmd.exe (forward slashes, no variables on the line).
+ * The hook command line: node with the script where there is node, written so the line works whether
+ * Claude Code runs hooks through a POSIX shell, Git Bash or cmd.exe (forward slashes, no variables on
+ * the line). Without node, PowerShell on Windows and curl elsewhere, whose URL carries the token in
+ * its argv: a fallback only.
  */
-function hookCommand(event: string): string {
-  if (!IS_WIN) return `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_HOOK_TOKEN}/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
+function hookCommand(event: string, node: string | null): string {
   const slash = (p: string) => p.replace(/\\/g, '/')
-  const node = findExecutable('node', process.env)
   if (node) return `"${slash(node)}" "${slash(path.join(dirs.hooks, 'fb-hook.cjs'))}" ${event}`
+  if (!IS_WIN) return `curl -s -m 2 -X POST "http://127.0.0.1:\${FB_HOOK_PORT}/hook/\${FB_HOOK_TOKEN}/\${FB_CONSOLE_ID}/${event}" --data-binary @- -o /dev/null >/dev/null 2>&1 || true`
   return `powershell -NoProfile -ExecutionPolicy Bypass -File "${slash(path.join(dirs.hooks, 'fb-hook.ps1'))}" ${event}`
 }
 
-function writeSettingsFile() {
-  if (IS_WIN) {
-    fs.mkdirSync(dirs.hooks, { recursive: true })
-    fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.cjs'), NODE_HOOK)
-    fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.ps1'), PS_HOOK)
-  }
-  const cmd = (event: string) => ({ type: 'command', command: hookCommand(event) })
+function writeSettingsFile(node: string | null) {
+  fs.mkdirSync(dirs.hooks, { recursive: true })
+  fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.cjs'), NODE_HOOK)
+  if (IS_WIN) fs.writeFileSync(path.join(dirs.hooks, 'fb-hook.ps1'), PS_HOOK)
+  const cmd = (event: string) => ({ type: 'command', command: hookCommand(event, node) })
   const hooks: Record<string, unknown[]> = {}
   for (const event of HOOK_EVENTS) {
     hooks[event] = [{ ...(event.endsWith('ToolUse') || event === 'PermissionRequest' ? { matcher: '*' } : {}), hooks: [cmd(event)] }]

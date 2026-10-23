@@ -13,19 +13,19 @@ import { useApp } from '../state/store'
 import { setVoice, useVoice } from '../voice/thread'
 import { extractJson, invoke, runCli } from '../lib/api'
 import { currentKnowledge, recordCharterEdits, refreshKnowledge } from './knowledge'
+import { readOnlyAgent } from '@shared/agents'
 
 /**
  * The charter's JSON and the rules a model writes it by. One text, sent by Oracle inside its `team`
  * option and by `draftCharter` on its own, so the two producers cannot drift apart.
  *
- * The wontTouch rule is the load-bearing one: the merge gate matches a path, a folder or a trailing
- * `*` and nothing else, so an exclusion written as prose or a glob matches nothing and protects
- * nothing while the card says it does.
+ * The wontTouch rule is the load-bearing one: the merge gate matches a path, a folder or a glob, so
+ * an exclusion written as prose matches nothing and protects nothing (the card marks it so).
  */
-export const CHARTER_FIELDS = `{"understood":"<one or two sentences: the result the user wants, in your own words>","assumptions":[{"text":"<something you are taking as given>","known":true,"from":"<repo-relative path, or fact:<key>>"},{"text":"<something you are guessing>","known":false}],"wontTouch":["<repo-relative file, folder or folder/*>"],"doneWhen":"<the check that proves it is finished>","estimate":<minutes>,"ambiguity":"scope|acceptance|subject|constraint","question":{"text":"<the one thing to ask>","options":["<a likely answer>"]}}
+export const CHARTER_FIELDS = `{"understood":"<one or two sentences: the result the user wants, in your own words>","assumptions":[{"text":"<something you are taking as given>","known":true,"from":"<repo-relative path, or fact:<key>>"},{"text":"<something you are guessing>","known":false}],"wontTouch":["<repo-relative file, folder or glob>"],"doneWhen":"<the check that proves it is finished>","estimate":<minutes>,"ambiguity":"scope|acceptance|subject|constraint","question":{"text":"<the one thing to ask>","options":["<a likely answer>"]}}
 Charter rules:
 - assumptions: whatever you are taking as given that the request did not say. "known":true only when you looked and the repo shows it, and "from" is then the repo-relative path that shows it and nothing else on that line; for a command, the file that defines it ("package.json" for an npm script). Where one of the facts known about this repo says it, "from" is "fact:" and that fact's key instead ("fact:checks.test"); a fact marked inferred is not evidence, so an assumption resting on one is "known":false. Everything else is "known":false with no "from". A guess marked as a guess is fine; a guess dressed up as known is not.
-- wontTouch: what this work must leave alone, each entry a repo-relative file ("package.json"), folder ("src/renderer") or folder prefix ("src/renderer/*": a single trailing * and no other wildcard), with no leading slash. These are matched against the files a worker changes and a merge is refused when one is touched, so never write a description ("the renderer") or a glob ("src/renderer/**", "src/**/*.tsx"): they match nothing and protect nothing. [] when the user ruled nothing out; do not invent exclusions.
+- wontTouch: what this work must leave alone, each entry a repo-relative file ("package.json"), folder ("src/renderer") or glob ("*.lock", "src/**/*.tsx"), with no leading slash. These are matched against the files a worker changes and a merge is refused when one is touched, so never write a description ("the renderer"): it matches nothing and protects nothing. [] when the user ruled nothing out; do not invent exclusions.
 - doneWhen: the shell command that proves it where one exists ("npm test"), otherwise one short sentence; "" when nothing can be checked.
 - estimate: how many minutes the whole job should take a team, as a plain number. It is shown against the time actually taken, so a guess is fine; leave it out rather than inventing precision.
 - ambiguity and question: only when something material is unclear. ambiguity names the kind of gap: scope (how much), acceptance (how to tell it is finished), subject (which thing the request means) or constraint (a limit it did not state). Ask at most one question, the one with the most leverage, and guess the rest, marked as guesses. Leave both out when nothing is unclear.
@@ -62,7 +62,7 @@ export async function draftCharter(request: string, procedure?: string): Promise
   if (!app.project) return coerceCharter(null, request)
   // what is already stored, not a fresh read: the draft is the wait the user sees, and the board's
   // repo was read when it opened (watchKnowledge). The gate reads again before it checks the citations.
-  const run = runCli({ prompt: draftPrompt(request, procedure, currentKnowledge()), cwd: app.project.path, agentId: app.settings.plannerAgent || undefined })
+  const run = runCli({ prompt: draftPrompt(request, procedure, currentKnowledge()), cwd: app.project.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
   // the same thinking orb and stop button a planner call gets: this one used to run with nothing on screen
   setVoice({ phase: 'thinking', cancelThinking: () => run.cancel() })
   let timer = 0

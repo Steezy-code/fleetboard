@@ -6,6 +6,7 @@ import type { Profile } from '@shared/types'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
+import { userEnv } from './env'
 
 // Profiles: several accounts of one CLI side by side. Each profile is its own config dir
 // (~/.fleetboard/profiles/<id>/) handed to the CLI through its config env var
@@ -44,8 +45,8 @@ export function profileEnv(agentId: string, profileId?: string): Record<string, 
 
 const home = () => os.homedir()
 const defaultDir = (agentId: string) => {
-  if (agentId === 'claude') return process.env.CLAUDE_CONFIG_DIR || path.join(home(), '.claude')
-  if (agentId === 'codex') return process.env.CODEX_HOME || path.join(home(), '.codex')
+  if (agentId === 'claude') return userEnv().CLAUDE_CONFIG_DIR || path.join(home(), '.claude')
+  if (agentId === 'codex') return userEnv().CODEX_HOME || path.join(home(), '.codex')
   return path.join(home(), `.${agentId}`)
 }
 
@@ -84,7 +85,7 @@ function decodeJwtEmail(token: unknown): string | undefined {
 function inspect(agentId: string, dir: string, isDefault: boolean): { signedIn: boolean; account?: string } {
   if (agentId === 'claude') {
     // with CLAUDE_CONFIG_DIR the global config lives inside the dir; by default it is ~/.claude.json
-    const cfgFile = isDefault && !process.env.CLAUDE_CONFIG_DIR ? path.join(home(), '.claude.json') : path.join(dir, '.claude.json')
+    const cfgFile = isDefault && !userEnv().CLAUDE_CONFIG_DIR ? path.join(home(), '.claude.json') : path.join(dir, '.claude.json')
     const cfg = readJson<any>(cfgFile, null)
     const acct = cfg?.oauthAccount
     const creds = fs.existsSync(path.join(dir, '.credentials.json'))
@@ -157,7 +158,7 @@ export function register(ctx: MainContext) {
     const copied: string[] = []
     if (agentId === 'claude') {
       copyIfExists(path.join(src, '.credentials.json'), path.join(dir, '.credentials.json'), copied)
-      const cfg = process.env.CLAUDE_CONFIG_DIR ? path.join(src, '.claude.json') : path.join(home(), '.claude.json')
+      const cfg = userEnv().CLAUDE_CONFIG_DIR ? path.join(src, '.claude.json') : path.join(home(), '.claude.json')
       copyIfExists(cfg, path.join(dir, '.claude.json'), copied)
       copyIfExists(path.join(src, 'settings.json'), path.join(dir, 'settings.json'), copied)
     } else if (agentId === 'codex') {

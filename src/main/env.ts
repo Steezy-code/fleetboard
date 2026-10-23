@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import os from 'node:os'
 import { IS_WIN, defaultShell, findExecutable, normalizePathKey } from './platform'
 
 const run = promisify(execFile)
@@ -34,15 +33,23 @@ export async function loginEnv(): Promise<Record<string, string>> {
   base.COLORTERM = 'truecolor'
   base.TERM_PROGRAM = 'Fleetboard'
   delete base.ELECTRON_RUN_AS_NODE
+  // the app's own dev and test switches: never a console's
+  delete base.ELECTRON_RENDERER_URL
+  delete base.FLEETBOARD_DEVTOOLS
   delete base.ELECTRON_NO_ATTACH_CONSOLE
   cached = base
   return base
 }
 
 export const shellPath = () => defaultShell(cached ?? process.env)
-export const home = () => os.homedir()
 
-/** `which` against the login PATH. */
+/**
+ * The environment the user's CLIs run with, once the login shell has been read (the app reads it at
+ * start): where CLAUDE_CONFIG_DIR and CODEX_HOME point for them, which a desktop launcher's own
+ * environment often does not say.
+ */
+export const userEnv = (): Record<string, string | undefined> => cached ?? process.env
+
 /** Where an executable is, searched on the login PATH like a shell does (no `which` program needed). */
 export async function which(bin: string): Promise<string | null> {
   if (bin === '$SHELL') return shellPath()

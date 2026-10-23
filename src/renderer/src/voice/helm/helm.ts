@@ -9,13 +9,15 @@ import { activeLead, sendGoal } from '../../engine/fleet'
 import { playbookById } from '../../playbooks/catalog'
 import { runPlaybook } from '../../playbooks/run'
 import { type Action, coerceAction, describe, resolveRefs } from '../actions'
-import { setVoice, useThread, useVoice } from '../thread'
+import { setVoice, useThread } from '../thread'
 import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planner'
 import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
-import { autoApproves, routeFeedback, useFeedback } from '../../workbench/prFeedback'
+import { autoApproves, routeFeedback, trustedAuthor, unsent, useFeedback } from '../../workbench/prFeedback'
+import type { PrFeedback } from '../../../../main/ci'
 import { startBrainstorm } from './brainstorm'
 import { CHARTER_FIELDS } from '../../fleet/charter'
+import { readOnlyAgent } from '@shared/agents'
 
 // ---------------------------------------------------------------- types / store
 
@@ -68,7 +70,7 @@ export const useHelm = create<HelmState>(() => ({ card: null, thinking: false, d
 
 export const dismissHelm = () => useHelm.setState({ card: null })
 
-export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
+export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills', 'journal']
 
 /** Read-only playbooks Helm may start without a click. */
 // only what starts no agents: the PR review and database playbooks are review-only in what they ask
@@ -255,7 +257,7 @@ export async function askHelm(text: string): Promise<HelmResult | null> {
   try {
     const board = await boardContext(() => cancelled)
     if (cancelled) return null
-    run = runCli({ prompt: helmPrompt(text, board), cwd: project.path, agentId: app.settings.plannerAgent || undefined })
+    run = runCli({ prompt: helmPrompt(text, board), cwd: project.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
     const res = await run.promise
     if (cancelled) return null
     const json = extractJson<any>(res.text)
@@ -413,7 +415,14 @@ async function execOption(o: HelmOption, request: string) {
         const t = githubTarget(o.github!.do, o.github!.target)
         if (!t) throw new Error('that is no longer red or waiting')
         if (o.github!.do === 'fix-ci') await fixCi(t as ReturnType<typeof ciItems>[number])
-        else await routeFeedback(t as any)
+        else {
+          // nobody read these first: only what is new, from people who can push (the rest waits in the CI drawer)
+          const pr = t as PrFeedback
+          const result = useFeedback.getState().result
+          const list = unsent(pr).filter((c) => trustedAuthor(c, result?.ok ? result.viewer : undefined))
+          if (!list.length) return reply(`Nothing new on PR #${pr.number} from reviewers who can push. The CI drawer has the rest.`)
+          await routeFeedback(pr, { list })
+        }
         return
       }
       case 'answer':
@@ -438,5 +447,3 @@ export function editHelmOption(i: number | null = primaryIndex()) {
   useHelm.setState((s) => ({ draft: { text, n: (s.draft?.n ?? 0) + 1 } }))
 }
 
-/** Is a Helm call running right now? (for the bar's "Thinking…" text) */
-export const helmThinking = () => useHelm.getState().thinking && useVoice.getState().phase === 'thinking'

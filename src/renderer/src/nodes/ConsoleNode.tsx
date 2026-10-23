@@ -3,9 +3,9 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Copy, Pause, Play, RotateCcw } from 'lucide-react'
-import type { ConsoleData } from '@shared/types'
+import type { ConsoleData, PtyInfo } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { CAN_PAUSE, invoke } from '../lib/api'
+import { CAN_PAUSE, errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
@@ -13,17 +13,7 @@ import { useFleet } from '../engine/fleet'
 import { useActivity } from '../engine/activity'
 import { diffLabel } from '@shared/live'
 import { currentTerminalTheme } from '../ui/theme'
-
-
-export const STATUS_LABEL: Record<string, string> = {
-  starting: 'starting',
-  working: 'working',
-  idle: 'ready',
-  'needs-you': 'needs you',
-  done: 'done',
-  paused: 'paused',
-  exited: 'exited'
-}
+import { STATUS_TEXT } from '../orchestration/fleet'
 
 export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
   const host = useRef<HTMLDivElement>(null)
@@ -80,7 +70,10 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       if (buffer !== null) {
         term.write(buffer)
         setPhase('running')
-        useApp.getState().setLive(node.id, true)
+        // started elsewhere, or before a reload: how it was started is the main process's to say
+        const info = await invoke<PtyInfo | null>('pty:info', node.id)
+        if (cancelled) return
+        useApp.getState().setLive(node.id, true, !!info?.autoApproves)
         // started elsewhere (a team console the fleet launched): a reopened board asks before resuming it too
         if (node.data.launch !== 'ask') useApp.getState().updateNodeData(node.id, { launch: 'ask' })
         return
@@ -135,7 +128,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
   // Deliver a queued first prompt (spawn with a prompt, a handoff's brief). The main process waits until
   // the CLI can take input and makes sure Enter took: typed at the first "idle", Claude Code could drop it.
   useEffect(() => {
-    const pending = (node.data as any).pendingPrompt as string | undefined
+    const pending = node.data.pendingPrompt
     if (!pending || !live) return
     useApp.getState().updateNodeData(node.id, { pendingPrompt: undefined })
     invoke<boolean>('pty:deliver', node.id, pending.trim()).then(
@@ -153,7 +146,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       // From now on a reopened board asks before resuming.
       useApp.getState().updateNodeData(node.id, { launch: 'ask' })
     } catch (e) {
-      const why = String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      const why = errorText(e)
       term.write(`\r\n\x1b[31mCould not start ${agentLabel(node.data.agentId)}: ${why}\x1b[0m\r\n`)
       setPhase('exited')
     }
@@ -207,7 +200,9 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
   const [editing, setEditing] = useState(false)
   // what it is doing, while it works: a CLI whose output does not say keeps the plain status
   const doing = useActivity((s) => (status === 'working' ? s.of[node.id] : undefined))
-  const yolo = node.data.autoApprove ?? useApp.getState().settings.autoApprove
+  // what its process was started with while it runs; what it would be started with otherwise
+  const approving = useApp((s) => (s.live[node.id] ? !!s.approving[node.id] : undefined))
+  const yolo = approving ?? node.data.autoApprove ?? useApp.getState().settings.autoApprove
   return (
     <div className={`row grow st-${status}`} style={{ gap: 7, minWidth: 0 }}>
       <span className="agent-dot" style={{ background: agentColor(node.data.agentId) }} />
@@ -235,7 +230,7 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
       <span className="spacer" />
       <span className="status-pill" title={doing}>
         <span className="status-dot" />
-        {doing ? <span className="status-doing">{doing}</span> : (STATUS_LABEL[status] ?? status)}
+        {doing ? <span className="status-doing">{doing}</span> : STATUS_TEXT[status]}
       </span>
     </div>
   )

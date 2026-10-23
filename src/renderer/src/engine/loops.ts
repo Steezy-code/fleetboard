@@ -5,6 +5,7 @@ import { maySpendOn, spendable } from './guards'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
 import type { ConsoleStatus } from '@shared/types'
 import { stripAnsi } from '@shared/ansi'
+import { readOnlyAgent } from '@shared/agents'
 
 // Loops: recurring instructions typed into consoles on a schedule, when an agent goes idle, or when
 // its output matches. Stored per project in extras.loops; run by startLoops() (registered engine).
@@ -89,6 +90,19 @@ export function upsertLoop(loop: Loop) {
 }
 export function updateLoop(id: string, patch: Partial<Loop>) {
   saveLoops(getLoops().map((l) => (l.id === id ? { ...l, ...patch } : l)))
+}
+
+/**
+ * Save what the editor changes on a loop that already exists: its settings, never its run state.
+ * The draft was copied when the editor opened, and the engine has gone on counting runs, checking
+ * the goal and perhaps retiring the loop since; writing the copy back would undo all of it. False
+ * when the loop was deleted meanwhile, rather than bringing it back.
+ */
+export function saveEditedLoop(draft: Loop): boolean {
+  if (!getLoops().some((l) => l.id === draft.id)) return false
+  const { name, instruction, trigger, target, stop, background } = draft
+  updateLoop(draft.id, { name, instruction, trigger, target, stop, background })
+  return true
 }
 export function removeLoop(id: string) {
   saveLoops(getLoops().filter((l) => l.id !== id))
@@ -302,7 +316,9 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
     '',
     'Reply on the first line with exactly MET or NOT_MET, then one short sentence why.'
   ].join('\n')
-  const { text } = await runCli({ prompt, cwd, agentId: s.judgeAgent || undefined }).promise
+  const { code, text } = await runCli({ prompt, cwd, agentId: readOnlyAgent(s.judgeAgent) }).promise
+  // a judge that errored (signed out, an API outage) gave no verdict: a check that could not be made
+  if (code !== 0) return { met: false, failed: true, note: `the judge could not answer: ${text.trim().split('\n').at(-1)?.slice(0, 140) || `exit ${code}`}` }
   const first = text.trim().split('\n')[0] ?? ''
   const met = /^\W*MET\b/i.test(first) && !/NOT[_ ]?MET/i.test(first)
   return { met, note: text.trim().split('\n').slice(1).join(' ').trim().slice(0, 200) || first }

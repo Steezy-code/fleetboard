@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronUp, CornerDownRight, Mic, Sparkles, Square } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
-import { ROLE_TINT } from '@shared/types'
+import { ROLE_TINT, type ConsoleStatus } from '@shared/types'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { agentColor, agentLabel } from '../engine/consoles'
+import { STATUS_TEXT } from '../orchestration/fleet'
 import { norm } from './actions'
 import { cancelPending, runCommand } from './planner'
 import { cancelListening, toggleListening } from './stt'
@@ -123,7 +124,7 @@ interface MentionOption {
   meta: string
   color?: string
   team?: boolean
-  status?: string
+  status?: ConsoleStatus
 }
 
 function useMentionOptions(query: string | null): MentionOption[] {
@@ -166,10 +167,6 @@ function useMentionOptions(query: string | null): MentionOption[] {
     return out.slice(0, 9)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, sig])
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  working: 'working', idle: 'ready', 'needs-you': 'needs you', starting: 'starting', paused: 'paused', done: 'done', exited: 'off'
 }
 
 /** Text input that routes through runCommand; shared by the bar and the thread drawer. */
@@ -381,7 +378,7 @@ export function CommandInput({
               {o.status && (
                 <span className={`st-${o.status}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
                   <span className="status-dot" />
-                  <span className="mi-meta">{STATUS_LABEL[o.status] ?? o.status}</span>
+                  <span className="mi-meta">{STATUS_TEXT[o.status]}</span>
                 </span>
               )}
               <span className="mi-meta">{o.meta}</span>

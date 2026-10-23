@@ -32,6 +32,3 @@ export function readinessOf(def: AgentDef, found: AgentAvailability | undefined,
   if (signIn && !signIn.signedIn) return { state: 'signin', detail: 'Installed, no sign-in found', command: def.bin }
   return { state: 'ready', detail: [signIn?.account, version].filter(Boolean).join(' · ') || 'Installed' }
 }
-
-/** Whether at least one agent can take a goal now: the first step of getting started. */
-export const anyReady = (rs: Readiness[]) => rs.some((r) => r.state === 'ready')

@@ -26,8 +26,8 @@ const FILES = walk(SRC).map((p) => ({ rel: path.relative(SRC, p).split(path.sep)
 
 /**
  * `marked` turns markdown into HTML and has had no sanitizer of its own since v5, so its output is
- * only safe once it has been through sanitizeHtml. These are the two modules that do that, and they
- * are the only ones allowed to import it.
+ * only safe once it has been through sanitizeHtml. This is the one module that does that, and the
+ * only one allowed to import it.
  */
 // One module parses markdown now. studios/docs/render.ts used to call marked.parse itself, which is
 // why a document there got no relative images and no highlighting; it goes through renderMarkdown.
