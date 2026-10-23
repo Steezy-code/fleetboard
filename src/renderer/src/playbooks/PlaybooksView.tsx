@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { CATEGORY_LABEL, PLAYBOOKS, playbookById, type Playbook, type PlaybookCategory } from './catalog'
 import { lastInputs, runPlaybook } from './run'
+import { errorText } from '../lib/api'
 import { useApp } from '../state/store'
 import { Switch } from '../ui/Modal'
 
@@ -80,7 +81,7 @@ function PlaybookForm({ pb, preset, onBack }: { pb: Playbook; preset?: Record<st
       await runPlaybook(pb.id, values)
       useApp.getState().closePanel()
     } catch (e: any) {
-      setError(e?.message ?? String(e))
+      setError(errorText(e))
       setBusy(false)
     }
   }

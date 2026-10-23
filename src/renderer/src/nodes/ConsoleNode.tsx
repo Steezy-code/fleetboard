@@ -5,7 +5,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Copy, Pause, Play, RotateCcw } from 'lucide-react'
 import type { BoardNode, ConsoleData } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { CAN_PAUSE, invoke } from '../lib/api'
+import { CAN_PAUSE, errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
@@ -153,7 +153,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       // From now on a reopened board asks before resuming.
       useApp.getState().updateNodeData(node.id, { launch: 'ask' })
     } catch (e) {
-      const why = String((e as Error)?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      const why = errorText(e)
       term.write(`\r\n\x1b[31mCould not start ${agentLabel(node.data.agentId)}: ${why}\x1b[0m\r\n`)
       setPhase('exited')
     }

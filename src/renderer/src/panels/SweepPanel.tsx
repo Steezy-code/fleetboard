@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import type { SweepRepo, SweepResult } from '../../../main/sweep'
 import { isFailing } from '@shared/ci'
-import { invoke, on, runCli } from '../lib/api'
+import { errorText, invoke, on, runCli } from '../lib/api'
 import { useApp } from '../state/store'
 import { Modal } from '../ui/Modal'
 import { runPlaybook } from '../playbooks/run'
@@ -106,7 +106,7 @@ export default function SweepPanel() {
       else cache = r
       if (alive.current) setRes(cache)
     } catch (e) {
-      useApp.getState().toast(`Sweep failed: ${String((e as Error)?.message ?? e)}`, 'error')
+      useApp.getState().toast(`Sweep failed: ${errorText(e)}`, 'error')
     } finally {
       if (alive.current) {
         setRunning(null)
@@ -204,7 +204,7 @@ export default function SweepPanel() {
       if (closeAfter) close()
       await fn()
     } catch (e) {
-      useApp.getState().toast(String((e as Error)?.message ?? e), 'error')
+      useApp.getState().toast(errorText(e), 'error')
     }
   }
 
