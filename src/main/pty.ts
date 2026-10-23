@@ -56,6 +56,9 @@ const killGroup = (pid: number) => killTree(pid, 'SIGKILL')
 type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void
 type SpawnListener = (req: PtySpawnRequest) => void
 
+/** Text the board types, and only text: a carriage return, Ctrl-C or an escape inside it would act as a key. */
+export const pasteText = (text: string) => text.replace(/\r?\n|\t/g, ' ').replace(/[\x00-\x1f\x7f]/g, '')
+
 export class PtyManager {
   private sessions = new Map<string, Session>()
   private exitListeners = new Set<ExitListener>()
@@ -310,9 +313,23 @@ export class PtyManager {
   paste(id: string, text: string, submit = true) {
     const s = this.sessions.get(id)
     if (!s) return
-    const clean = text.replace(/\r?\n/g, ' ').replace(/\x1b/g, '')
+    const clean = pasteText(text)
     this.write(id, s.bracketed ? `\x1b[200~${clean}\x1b[201~` : clean)
-    if (submit) setTimeout(() => this.write(id, '\r'), s.bracketed ? 150 : 350)
+    if (submit) setTimeout(() => void this.enter(id), s.bracketed ? 150 : 350)
+  }
+
+  /**
+   * Enter after text the board typed, pressed only while no question is on screen. A permission dialog
+   * that appeared between the paste and this Enter would take it as its answer (Enter picks the
+   * highlighted option, usually "Yes"); then the text stays typed and is submitted once the question
+   * has been answered.
+   */
+  private async enter(id: string) {
+    const s = this.sessions.get(id)
+    if (!s) return
+    await s.screen.flush()
+    if ((detectPrompt(s.screen.view()) || s.tracker.status === 'needs-you') && !(await this.whenNoQuestion(id))) return
+    if (this.sessions.has(id)) this.write(id, '\r')
   }
 
   /**
@@ -355,7 +372,7 @@ export class PtyManager {
         if (!this.sessions.has(id)) return
         // on a retry, report focus first: that unsticks an input box that ignored the first Enter
         if (attempt) this.write(id, '\x1b[I')
-        this.write(id, '\r')
+        void this.enter(id)
         setTimeout(() => {
           if (attempt >= 2 || this.status(id) !== 'idle') return
           const probe = text.slice(0, 40).replace(/\s+/g, ' ')

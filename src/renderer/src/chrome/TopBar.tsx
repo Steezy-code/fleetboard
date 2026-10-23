@@ -3,6 +3,7 @@ import { ArrowLeft, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smart
 import { invoke, on, IS_WIN } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { UsagePill } from './UsagePill'
+import { closeWorkspaceAsking } from './closeWorkspace'
 
 export function TopBar() {
   const project = useApp((s) => s.project)!
@@ -88,21 +89,10 @@ export function TopBar() {
               {project.workspaces.length > 1 && (
                 <button
                   className="ws-x"
-                  onClick={async (e) => {
+                  title="Close workspace"
+                  onClick={(e) => {
                     e.stopPropagation()
-                    const consoles = w.nodes.filter((n) => n.type === 'console' && live[n.id])
-                    if (
-                      consoles.length &&
-                      !(await app.confirm({
-                        title: `Close ${w.name}?`,
-                        body: consoles.length === 1 ? 'Its running console is closed with it.' : `Its ${consoles.length} running consoles are closed with it.`,
-                        confirm: 'Close workspace',
-                        danger: true
-                      }))
-                    )
-                      return
-                    for (const c of consoles) invoke('pty:kill', c.id)
-                    app.closeWorkspace(w.id)
+                    void closeWorkspaceAsking(w.id)
                   }}
                 >
                   <X size={11} />

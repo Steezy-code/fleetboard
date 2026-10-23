@@ -114,7 +114,8 @@ export function GitView({ cwd, variant }: { cwd: string; variant: 'node' | 'draw
     if (!selected.length || busy) return
     const msg = message.trim() || defaultMessage(selected)
     setBusy('commit')
-    const c = await git<{ hash: string }>('commit', cwd, msg, allSelected ? null : selected.map((f) => ({ path: f.path, from: f.from })))
+    // everything ticked commits "all", held to the list on screen (main refuses if more changed since)
+    const c = await git<{ hash: string; count: number }>('commit', cwd, msg, allSelected ? null : selected.map((f) => ({ path: f.path, from: f.from })), allSelected ? files.map((f) => f.path) : undefined)
     if (!c.ok) {
       toast(c.error, 'error')
       setBusy('')

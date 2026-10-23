@@ -9,9 +9,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A newer push to a pull request makes its older run moot; on master every push is checked, since a
+# cancelled run there is a commit nobody ever saw go green.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # the default for a token is whatever the repository settings say, which may include write. Nothing
 # here needs more than reading the code.
@@ -85,6 +87,7 @@ jobs:
           name: e2e-screenshots
           path: ${{ runner.temp }}/e2e-shots
           if-no-files-found: ignore
+          retention-days: 7
 
   windows:
     # the platform layer for real: PowerShell consoles, .cmd agents, process trees, the installer
@@ -122,16 +125,11 @@ jobs:
           name: e2e-screenshots-windows
           path: ${{ runner.temp }}/e2e-shots
           if-no-files-found: ignore
+          retention-days: 7
 
-      # Nothing consumes this artifact — release.yml builds the installer again from scratch on a tag —
-      # and it is nearly four minutes of Windows runner time, billed at double, on every push.
+      # Packaging is checked on master, since electron-builder fails in ways the build does not, but the
+      # installer is not kept: release.yml builds the one users get, and at ~240 MB a copy per push
+      # filled the account's artifact storage until master itself went red on the upload.
       - name: Installer
-        if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
+        if: github.ref == 'refs/heads/master'
         run: npx electron-builder --win --x64 --publish never
-
-      - uses: actions/upload-artifact@v4
-        if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/')
-        with:
-          name: fleetboard-windows-installer
-          path: release/*.exe
-          if-no-files-found: error

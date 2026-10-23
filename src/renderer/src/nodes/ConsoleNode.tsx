@@ -3,11 +3,11 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Copy, Pause, Play, RotateCcw } from 'lucide-react'
-import type { BoardNode, ConsoleData } from '@shared/types'
+import type { ConsoleData } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { CAN_PAUSE, errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
-import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
+import { agentColor, agentLabel, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
 import { useActivity } from '../engine/activity'
@@ -255,13 +255,6 @@ export function ConsoleActions({ node }: NodeProps<ConsoleData>) {
         <Copy size={13} />
       </button>
     </>
-  )
-}
-
-export async function beforeRemoveConsoles(nodes: BoardNode[]) {
-  return killConsoles(
-    nodes.map((n) => n.id),
-    { remove: false }
   )
 }
 

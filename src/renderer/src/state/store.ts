@@ -101,6 +101,8 @@ interface AppState {
   switchWorkspace: (id: string) => void
   renameWorkspace: (id: string, name: string) => void
   closeWorkspace: (id: string) => void
+  /** put back a closed workspace at the place it had (an Undo) */
+  restoreWorkspace: (ws: Workspace, index: number) => void
   setProjectExtra: (key: string, value: any) => void
   setWsExtra: (key: string, value: any) => void
 
@@ -417,6 +419,13 @@ export const useApp = create<AppState>((set, get) => {
         const workspaces: [Workspace, ...Workspace[]] = kept ? [kept, ...rest] : [newWorkspace('Workspace 1')]
         const activeWorkspaceId = p.activeWorkspaceId === id ? workspaces[0].id : p.activeWorkspaceId
         return { ...p, workspaces, activeWorkspaceId }
+      }),
+    restoreWorkspace: (ws, index) =>
+      mutateProject((p) => {
+        if (p.workspaces.some((w) => w.id === ws.id)) return p
+        const list = [...p.workspaces]
+        list.splice(Math.min(Math.max(0, index), list.length), 0, ws)
+        return { ...p, workspaces: list as [Workspace, ...Workspace[]] }
       }),
     setProjectExtra: (key, value) => mutateProject((p) => ({ ...p, extras: { ...p.extras, [key]: value } })),
     setWsExtra: (key, value) => mutateWs((w) => ({ ...w, extras: { ...w.extras, [key]: value } })),

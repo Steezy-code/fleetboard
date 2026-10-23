@@ -558,11 +558,25 @@ async function execute(actions: Action[], sayText: string) {
   if (spoken) speak(spoken)
 }
 
-const CONFIRM_RE = /^(confirm|confirmed|yes|yeah|yep|yup|do it|go|go ahead|ok|okay|sure|proceed|affirmative|correct|confirm it)\b/
-const CANCEL_RE = /^(cancel|no|nope|stop|never ?mind|abort|don'?t|wait|forget it|scratch that|not now)\b/
+// A destructive plan waits for a yes. Only a reply that is all yes is one ("okay, cancel that" and
+// "go to Rafa" used to be, because they start with one), a "no" anywhere in it cancels, and the plan
+// is for the project it was asked in, for a minute: not for whatever board is open when someone
+// finally says "confirm".
+const CONFIRM_RE = /^(confirm|confirmed|yes|yeah|yep|yup|do it|go|go ahead|ok|okay|sure|proceed|affirmative|correct|confirm it)( please)?$/
+const CANCEL_RE = /\b(cancel|no|nope|stop|never ?mind|abort|don'?t|wait|forget it|scratch that|not now)\b/
+const PENDING_MS = 60_000
+
+/** The parked plan, while it still applies: same project, asked recently. */
+function livePending() {
+  const p = useVoice.getState().pending
+  if (!p) return null
+  if (p.projectId === useApp.getState().project?.id && Date.now() - p.at < PENDING_MS) return p
+  setVoice({ pending: null })
+  return null
+}
 
 export async function confirmPending() {
-  const p = useVoice.getState().pending
+  const p = livePending()
   if (!p) return
   setVoice({ pending: null })
   thread().add('system', 'Confirmed.')
@@ -586,7 +600,7 @@ export async function plan(actions: Action[], sayText: string, userText: string,
   const reasons = confirmReasons(actions, userText, fromPlanner)
   if (reasons.length) {
     const prompt = confirmPrompt(actions)
-    setVoice({ pending: { id: uid('plan'), actions, steps, prompt, say: sayText }, captionUntil: 0 })
+    setVoice({ pending: { id: uid('plan'), actions, steps, prompt, say: sayText, projectId: useApp.getState().project?.id ?? '', at: Date.now() }, captionUntil: 0 })
     thread().add('system', prompt)
     speak(prompt)
     return
@@ -607,7 +621,8 @@ export function inboxPick(light: string): number | 'next' | null {
   if (spokenAt !== undefined && spokenAt < f.actions.length) return spokenAt
   const byLabel = f.actions.findIndex((a) => a.label.toLowerCase().replace(/[^a-z ]/g, '').trim() === t)
   if (byLabel >= 0) return byLabel
-  if (f.kind === 'approval' || f.kind === 'ready') {
+  // a plain yes allows a prompt, but never merges: that takes saying "merge" (the button's label, above)
+  if (f.kind === 'approval') {
     if (/^(yes|yeah|yep|allow|approve|go ahead|do it|ok|okay|sure)$/.test(t)) {
       const p = f.actions.findIndex((a) => a.primary)
       return p >= 0 ? p : null
@@ -631,9 +646,9 @@ export async function runCommand(raw: string, source: Source) {
   const light = text.toLowerCase().replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim()
 
   // 1. confirmation
-  if (useVoice.getState().pending) {
-    if (CONFIRM_RE.test(light)) return confirmPending()
+  if (livePending()) {
     if (CANCEL_RE.test(light)) return cancelPending()
+    if (CONFIRM_RE.test(light)) return confirmPending()
     setVoice({ pending: null })
     thread().add('system', 'Previous plan dropped.')
   }
@@ -703,8 +718,12 @@ export async function runCommand(raw: string, source: Source) {
   let helmFailed = false
   if (app.settings.helm !== false) {
     try {
+      const asked = app.project.id
       const res = await askHelm(text)
       if (!res) return // cancelled with the stop button
+      // an answer about the board it read, not whichever one is open now: its options name consoles
+      // and playbooks there, and one of them may run on its own
+      if (useApp.getState().project?.id !== asked) return
       showHelm(res, text, source)
       return
     } catch (e: any) {

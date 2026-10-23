@@ -262,7 +262,7 @@ export function panelFor(word: string) {
 export function describe(a: Action): string {
   switch (a.type) {
     case 'spawn':
-      return `spawn ${a.count} ${agentLabel(agentFromWord(a.agent) ?? a.agent)}${a.team ? ` in ${a.team}` : ''}`
+      return `spawn ${a.count} ${agentLabel(agentFromWord(a.agent) ?? a.agent)}${a.team ? ` in ${a.team}` : ''}${a.prompt ? `, told “${clip(a.prompt)}”` : ''}`
     case 'send':
       return `${a.submit ? 'send' : 'type'} “${clip(a.text)}” → ${who(a.targets)}`
     case 'pause':
@@ -287,7 +287,7 @@ export function describe(a: Action): string {
     case 'orchestrator':
       return 'add an orchestrator'
     case 'handoff':
-      return `hand off ${namesOf(resolveRefs(a.from).ids) || 'the current console'} → ${a.toAgent ? `new ${agentLabel(agentFromWord(a.toAgent) ?? a.toAgent)}` : (a.to ?? []).join(', ')}`
+      return `hand off ${namesOf(resolveRefs(a.from).ids) || 'the current console'} → ${a.toAgent ? `new ${agentLabel(agentFromWord(a.toAgent) ?? a.toAgent)}` : (a.to ?? []).join(', ')}${a.note ? ` with “${clip(a.note)}”` : ''}`
     case 'openPanel':
       return `open ${a.name}`
     case 'focus':

@@ -42,7 +42,7 @@ export interface Loop {
   lastRunAt?: number
   runs: number
   /** why the loop retired itself */
-  ended?: { reason: 'goal' | 'runs' | 'time' | 'stalled'; at: number; note?: string }
+  ended?: { reason: 'goal' | 'runs' | 'time' | 'stalled' | 'unchecked'; at: number; note?: string }
   /** last goal check verdict */
   lastCheck?: { at: number; met: boolean; note: string }
 }
@@ -178,6 +178,8 @@ const dataSubs = new Map<string, () => void>()
 const lastSent = new Map<string, number>()
 /** last fire per `${loopId}:${consoleId}` */
 const lastFire = new Map<string, number>()
+/** goal checks in a row that could not run, per loop */
+const goalFailures = new Map<string, number>()
 const busy = new Set<string>()
 
 /**
@@ -260,20 +262,21 @@ const RETIRED: Record<NonNullable<Loop['ended']>['reason'], string> = {
   goal: 'goal met ✓',
   runs: 'finished its runs',
   time: 'reached its time limit',
-  stalled: 'stopped: nothing is changing'
+  stalled: 'stopped: nothing is changing',
+  unchecked: 'stopped: its goal could not be checked'
 }
 
 function retire(l: Loop, reason: NonNullable<Loop['ended']>['reason'], note?: string) {
   updateLoop(l.id, { enabled: false, ended: { reason, at: Date.now(), note } })
   progress.delete(l.id)
   const msg = `Loop “${l.name}” ${RETIRED[reason]}`
-  useApp.getState().toast(msg, reason === 'stalled' ? 'warn' : 'ok')
+  useApp.getState().toast(msg, reason === 'stalled' || reason === 'unchecked' ? 'warn' : 'ok')
   // the toast is gone in four seconds, and this is how a loop ends
   journal('loop.end', note ? `${msg} — ${note}` : msg, { loop: l.id, name: l.name, reason, runs: l.runs })
 }
 
 /** Ask a CLI whether the goal is met. Resolves { met, note }. */
-export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: boolean; note: string }> {
+export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: boolean; note: string; failed?: boolean }> {
   const app = useApp.getState()
   const cwd = app.project?.path
   if (!cwd) return { met: false, note: 'no project' }
@@ -283,8 +286,8 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
     const r = await invoke<{ code: number | null; tail: string; timedOut?: boolean; error?: string }>('goal:check', cwd, s.command)
     const last = r.tail.trim().split('\n').filter((l) => l.trim()).at(-1)?.trim().slice(0, 140)
     if (r.code === 0) return { met: true, note: `\`${s.command}\` passed` }
-    if (r.error) return { met: false, note: `\`${s.command}\` could not run: ${r.error}` }
-    if (r.timedOut) return { met: false, note: `\`${s.command}\` took too long and was stopped` }
+    if (r.error) return { met: false, failed: true, note: `\`${s.command}\` could not run: ${r.error}` }
+    if (r.timedOut) return { met: false, failed: true, note: `\`${s.command}\` took too long and was stopped` }
     return { met: false, note: `\`${s.command}\` failed (exit ${r.code})${last ? `: ${last}` : ''}` }
   }
   const names = new Map(allConsoles().map((c) => [c.id, c.data.name as string]))
@@ -319,11 +322,21 @@ async function fire(loopId: string, ids: string[]) {
   }
   busy.add(loopId)
   try {
-    if (l.stop.goal && l.runs > 0 && (l.stop.goalKind === 'command' || maySpendOn(l.stop.judgeAgent, 'judging whether a loop can stop'))) {
-      const verdict = await checkGoal(l, targets).catch((e) => ({ met: false, note: String(e) }))
-      updateLoop(l.id, { lastCheck: { at: Date.now(), ...verdict } })
-      journal('loop.goal', `Loop “${l.name}”: goal ${verdict.met ? 'met' : 'not met'} — ${verdict.note}`, { loop: l.id, met: verdict.met })
+    if (l.stop.goal && l.runs > 0) {
+      // A goal is how this loop ends, so it does not go on unchecked: with its judge at the spend
+      // ceiling it waits (and its schedule moves on), and a check that cannot run three times in a
+      // row ends it, rather than firing forever on a "not met" that was never a verdict.
+      if (l.stop.goalKind === 'judge' && !maySpendOn(l.stop.judgeAgent, 'judging whether a loop can stop')) {
+        if (l.trigger.kind === 'schedule') updateLoop(l.id, { lastRunAt: Date.now() })
+        return
+      }
+      const verdict = await checkGoal(l, targets).catch((e) => ({ met: false, failed: true, note: String(e) }))
+      updateLoop(l.id, { lastCheck: { at: Date.now(), met: verdict.met, note: verdict.note } })
+      journal('loop.goal', `Loop “${l.name}”: goal ${verdict.met ? 'met' : verdict.failed ? 'not checked' : 'not met'} — ${verdict.note}`, { loop: l.id, met: verdict.met })
       if (verdict.met) return retire(l, 'goal', verdict.note)
+      const failures = verdict.failed ? (goalFailures.get(l.id) ?? 0) + 1 : 0
+      goalFailures.set(l.id, failures)
+      if (failures >= 3) return retire(l, 'unchecked', verdict.note)
     }
     const cur = getLoops().find((x) => x.id === loopId)
     if (!cur?.enabled) return
