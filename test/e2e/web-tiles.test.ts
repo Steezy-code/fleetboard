@@ -28,7 +28,9 @@ before(async () => {
       (async () => {
         const results = {}
         results.notifications = await Notification.requestPermission().catch((e) => 'error')
-        results.geolocation = await new Promise((r) => navigator.geolocation.getCurrentPosition(() => r('granted'), (e) => r(e.code === 1 ? 'denied' : 'unavailable'), { timeout: 3000 }))
+        // 1 is the refusal this test is about; a timeout is a slow runner, and is named as one so it
+        // never passes for (or hides) "unavailable", which would mean the request got past the check
+        results.geolocation = await new Promise((r) => navigator.geolocation.getCurrentPosition(() => r('granted'), (e) => r(e.code === 1 ? 'denied' : e.code === 3 ? 'timeout' : 'unavailable'), { timeout: 15000 }))
         results.camera = await navigator.mediaDevices.getUserMedia({ video: true }).then(() => 'granted', (e) => e.name)
         results.microphone = await navigator.mediaDevices.getUserMedia({ audio: true }).then(() => 'granted', (e) => e.name)
         fetch('/report', { method: 'POST', body: JSON.stringify({ host: location.hostname, results }) })
@@ -51,7 +53,7 @@ test('a site in a web tile gets nothing; a dev server gets the microphone and no
   for (const [i, host] of ['127.0.0.2', 'localhost'].entries()) {
     await app.eval(({ url, i }) => (window as any).__fleetboard.useApp.getState().addNode({ type: 'web', x: 100 + i * 700, y: 100, w: 640, h: 480, data: { url } }), { url: `http://${host}:${port}/`, i })
   }
-  await app.waitFor(() => reports['127.0.0.2'] && reports.localhost, { timeout: 20_000, label: 'both pages reported' })
+  await app.waitFor(() => reports['127.0.0.2'] && reports.localhost, { timeout: 45_000, label: 'both pages reported' })
   assert.equal(reports['127.0.0.2'].notifications, 'denied')
   assert.equal(reports['127.0.0.2'].geolocation, 'denied')
   assert.equal(reports['127.0.0.2'].camera, 'NotAllowedError')
