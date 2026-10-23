@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { FleetMember, FleetState } from '@shared/fleet'
+import { LINKED_DIRS, type FleetMember, type FleetState } from '@shared/fleet'
 import { type CheckRun, failingCount, liveDiff, mayRun, sameDiff, withRun } from '@shared/live'
 import type { MainContext } from './context'
 import { runGoalCheck } from './goal'
@@ -30,9 +30,6 @@ const DIFF_TICK_MS = 15_000
 /** the done-when only runs again on this tick if the integration branch moved (mayRun) */
 const CHECK_TICK_MS = 5 * 60_000
 const CHECK_TIMEOUT_MS = 10 * 60_000
-
-/** Folders fleet.ts links into a worktree from the user's checkout: not the worker's work, whatever git thinks of a symlink. */
-const LINKED = ['node_modules', '.venv', 'venv', 'vendor']
 
 /** Record a newer output time when it has moved enough to matter. True when it changed. */
 export function stampOutput(m: FleetMember, at: number | null): boolean {
@@ -91,7 +88,7 @@ async function sampleDiff(s: FleetState, m: FleetMember) {
     const opts = { timeout: 20_000, maxBuffer: 4 * 1024 * 1024 }
     const [num, others] = await Promise.all([
       git(m.cwd, ['diff', '--numstat', 'HEAD'], opts),
-      git(m.cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ...LINKED.map((d) => `:(exclude)${d}`)], opts)
+      git(m.cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ...LINKED_DIRS.map((d) => `:(exclude)${d}`)], opts)
     ])
     if (num.code !== 0 || others.code !== 0) return
     const untracked = others.stdout
