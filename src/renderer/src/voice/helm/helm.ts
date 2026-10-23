@@ -68,7 +68,7 @@ export const useHelm = create<HelmState>(() => ({ card: null, thinking: false, d
 
 export const dismissHelm = () => useHelm.setState({ card: null })
 
-export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
+export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
 
 /** Read-only playbooks Helm may start without a click. */
 const AUTO_PLAYBOOKS = ['morning-sweep', 'pr-review', 'db-safety']
@@ -89,12 +89,12 @@ Option shapes ("label": button text, 2-5 words; "detail": one line on what it do
 - {"kind":"github","label":"...","detail":"...","github":{"do":"fix-ci","target":"branch|pr:<number>"}}  send an agent to fix a red CI run on this branch or on a PR, with the failed log (a PR's own agent gets it when it has one).
 - {"kind":"github","label":"...","detail":"...","github":{"do":"send-feedback","target":"pr:<number>"}}  give a PR's review comments to the agent that made it (or a new console in that branch).
 - {"kind":"brainstorm","label":"...","detail":"...","topic":"<the question to brainstorm, self-contained>"}  three agents (a pragmatist, a wild card, a critic) brainstorm it in parallel; Oracle merges and ranks the ideas on the board.
-- {"kind":"panel","label":"...","detail":"...","panel":"ci|missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|sweep|presets|git|chat|orchestrator"}  (ci = the CI & reviews drawer)
+- {"kind":"panel","label":"...","detail":"...","panel":"ci|missionMap|loops|memory|knowledge|documents|diagrams|code|markdown|usage|settings|sweep|presets|git|chat|orchestrator"}  (ci = the CI & reviews drawer; knowledge = what Fleetboard knows about this repo, where each fact came from, and the user's edits to charters)
 - {"kind":"answer"}  no button: the answer is the reply itself.
 
 ${ACTION_SCHEMA}
 
-Charter, for a team option: what you understood the job to be, which the user confirms before any agent starts. Look in the repo only as far as the request needs.
+Charter, for a team option: what you understood the job to be, which the user confirms before any agent starts. Look in the repo only as far as the request needs; what is already known about it is under KNOWN ABOUT THIS REPO in the snapshot.
 ${CHARTER_FIELDS}
 
 Rules:
