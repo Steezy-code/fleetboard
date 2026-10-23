@@ -101,3 +101,10 @@ test('the read is offered only for a folder Fleetboard may read', async () => {
   assert.equal(await ipcMain.invoke('knowledge:read', outside), null)
   assert.equal(await ipcMain.invoke('knowledge:read', 42), null)
 })
+
+test('an .editorconfig value padded to its size limit is read in linear time', () => {
+  const t = Date.now()
+  const r = readRepo(repo({ '.editorconfig': `[*]\nindent_style = space${' '.repeat(250_000)}x\nindent_size = 4\n` }))
+  assert.ok(Date.now() - t < 1000, `took ${Date.now() - t} ms`)
+  assert.ok(r)
+})

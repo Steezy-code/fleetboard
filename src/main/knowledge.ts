@@ -156,10 +156,12 @@ export function readRepo(root: string, at: number = Date.now()): RepoReading {
     const all: Record<string, string> = {}
     let section = ''
     for (const l of text.split(/\r?\n/)) {
-      const head = /^\s*\[(.*)\]\s*$/.exec(l)
-      if (head) section = head[1]!.trim()
-      const kv = /^\s*([\w-]+)\s*=\s*(.*?)\s*$/.exec(l)
-      if (kv && section === '*') all[kv[1]!.toLowerCase()] = kv[2]!.toLowerCase()
+      // trim, then match: a pattern with \s* on both sides of a lazy middle backtracks over every
+      // space in a long value, and a repo's .editorconfig is read on the main process as a board opens
+      const t = l.trim()
+      if (t.startsWith('[') && t.endsWith(']')) section = t.slice(1, -1).trim()
+      const kv = /^([\w-]+)\s*=(.*)$/.exec(t)
+      if (kv && section === '*') all[kv[1]!.toLowerCase()] = kv[2]!.trim().toLowerCase()
     }
     const style = all.indent_style
     const size = /^\d+$/.test(all.indent_size ?? '') ? all.indent_size : undefined
