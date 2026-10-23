@@ -223,12 +223,23 @@ export function checkTrend(c: DoneWhenCheck | undefined, doneWhen: string): stri
 }
 
 /** Why a run may not start now, or true when it may. One rule for every trigger, so they cannot disagree. */
-export function mayRun(o: { command: string; off?: boolean; running?: number; leadWorking: boolean; head?: string; lastHead?: string; reason: 'start' | 'merge' | 'finish' | 'tick' }): true | string {
+export function mayRun(o: {
+  command: string
+  off?: boolean
+  running?: number
+  leadWorking: boolean
+  /** the Lead has an integration worktree of its own: the only place merged work lands, and the only place it runs */
+  inWorktree: boolean
+  head?: string
+  lastHead?: string
+  reason: 'start' | 'merge' | 'tick'
+}): true | string {
   if (!commandLike(o.command)) return 'not a command'
   if (o.off) return 'switched off'
   // a long check must not overlap itself
   if (o.running) return 'already running'
   if (!o.leadWorking) return 'its lead is not working'
+  if (!o.inWorktree) return 'no integration worktree'
   // the integration branch only moves when the Lead merges: the same commit gives the same answer
   if (o.reason === 'tick' && o.head && o.head === o.lastHead) return 'nothing new to check'
   return true

@@ -145,12 +145,13 @@ test('the trend reads against where the team started', () => {
 })
 
 test('a run starts only when it may, for every trigger alike', () => {
-  const base = { command: 'npm test', leadWorking: true, reason: 'merge' as const }
+  const base = { command: 'npm test', leadWorking: true, inWorktree: true, reason: 'merge' as const }
   assert.equal(mayRun(base), true)
   assert.equal(mayRun({ ...base, command: 'the tests pass' }), 'not a command')
   assert.equal(mayRun({ ...base, off: true }), 'switched off')
   assert.equal(mayRun({ ...base, running: 5 }), 'already running')
   assert.equal(mayRun({ ...base, leadWorking: false }), 'its lead is not working')
+  assert.equal(mayRun({ ...base, inWorktree: false }), 'no integration worktree', 'a team in the user’s own files has nowhere apart to run it')
   assert.equal(mayRun({ ...base, reason: 'tick', head: 'a', lastHead: 'a' }), 'nothing new to check')
   assert.equal(mayRun({ ...base, reason: 'tick', head: 'b', lastHead: 'a' }), true)
   assert.equal(mayRun({ ...base, reason: 'merge', head: 'a', lastHead: 'a' }), true, 'a merge always checks again')
@@ -162,4 +163,17 @@ test('a finished run is kept, the oldest dropped past the limit, and the run in 
   assert.equal(c.runs.length, MAX_RUNS)
   assert.equal(c.runs[0]?.failing, 3)
   assert.equal(c.running, undefined)
+})
+
+// ---------------------------------------------------------------- stamping output
+
+test('an output time is written when it has moved enough to matter, and only forward', async () => {
+  const { stampOutput } = await import('../../src/main/live')
+  const m = { id: 'w', role: 'worker', name: 'Ada', agentId: 'claude', projectId: 'p', cwd: '/x', status: 'working', createdAt: 0 } as import('../../src/shared/fleet').FleetMember
+  assert.equal(stampOutput(m, null), false, 'a console that is not running says nothing')
+  assert.equal(stampOutput(m, 1000), true)
+  assert.equal(stampOutput(m, 20_000), false, 'a chatty console does not rewrite the fleet file every tick')
+  assert.equal(stampOutput(m, 31_000), true)
+  assert.equal(m.lastOutputAt, 31_000)
+  assert.equal(stampOutput(m, 5_000), false)
 })

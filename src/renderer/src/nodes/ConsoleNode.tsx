@@ -11,6 +11,7 @@ import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, sta
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
 import { useActivity } from '../engine/activity'
+import { diffLabel } from '@shared/live'
 import { currentTerminalTheme } from '../ui/theme'
 
 
@@ -274,13 +275,24 @@ export async function beforeRemoveConsoles(nodes: BoardNode[]) {
   )
 }
 
-/** LEAD / WORKER / REVIEWER badge with the member's task as a tooltip. */
+/**
+ * LEAD / WORKER / REVIEWER badge with the member's task as a tooltip, and a working worker's changes
+ * so far: its worktree is invisible until Ready otherwise, and Ready should confirm, not reveal.
+ */
 function FleetBadge({ id }: { id: string }) {
   const m = useFleet((s) => s.state?.members[id])
   if (!m || m.status === 'closed') return null
+  const diff = m.role === 'worker' && m.status === 'working' ? diffLabel(m.diff) : ''
   return (
-    <span className={`pill fleet-${m.role}`} title={m.task}>
-      {m.role}
-    </span>
+    <>
+      <span className={`pill fleet-${m.role}`} title={m.task}>
+        {m.role}
+      </span>
+      {diff && (
+        <span className="fleet-diff" title="Changed in its worktree so far, not yet reported">
+          {diff}
+        </span>
+      )}
+    </>
   )
 }
