@@ -25,7 +25,6 @@ export interface NodeDef {
   /** no frame/header: the component draws everything and handles its own drag via .drag-handle */
   chromeless?: boolean
   /** return false to cancel removal (e.g. confirm killing a live console) */
-  beforeRemove?: (nodes: BoardNode[]) => Promise<boolean>
   /** default data for a new node */
   create?: () => Record<string, any>
 }
