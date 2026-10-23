@@ -79,8 +79,12 @@ test('coming back after a while: the Inbox opens on what happened meanwhile, in 
     await app.waitStatus(id, 'needs-you')
     await app.waitFor(async () => (await app.texts('.it-card[data-kind="approval"]')).length > 0, { label: 'the approval is in front first' })
 
-    // back: the window takes focus again
-    await app.eval(() => window.dispatchEvent(new Event('focus')))
+    // back: the window takes focus again. document.hasFocus() can still say no at that moment (on CI
+    // another test's window holds the X focus), and the focus event alone has to be enough
+    await app.eval(() => {
+      Object.defineProperty(document, 'hasFocus', { value: () => false, configurable: true })
+      window.dispatchEvent(new Event('focus'))
+    })
     const card = await app.waitFor(async () => (await app.texts('.it-card')).find((t) => t.startsWith('While you were away')), { label: 'the away card, in front' })
     assert.match(card, /47 min/)
     assert.match(card, /Loops sent 1 instruction/)
