@@ -6,6 +6,7 @@ import { agentColor, sendToConsole } from '../engine/consoles'
 import { pushTargets, type PushTarget } from '../continuity/memory'
 import { Modal, Seg } from '../ui/Modal'
 import type { SkillInfo } from '../continuity/types'
+import { mayDropUnsaved, setUnsaved } from '../lib/unsaved'
 
 interface SkillList {
   user: SkillInfo[]
@@ -33,6 +34,13 @@ export default function SkillsPanel() {
   const [data, setData] = useState<SkillList | null>(null)
   const [sel, setSel] = useState<string | null>(null)
   const [mode, setMode] = useState<'view' | 'new'>('view')
+  // another skill replaces the editor, and with it any unsaved edits
+  const pick = async (file: string) => {
+    if (file === sel && mode === 'view') return
+    if (!(await mayDropUnsaved('Open another skill'))) return
+    setSel(file)
+    setMode('view')
+  }
 
   const load = useCallback(async () => {
     const d = await invoke<SkillList>('skills:list', projectPath)
@@ -52,6 +60,7 @@ export default function SkillsPanel() {
 
   return (
     <Modal
+      onClose={async () => (await mayDropUnsaved('Close skills')) && useApp.getState().closePanel()}
       title="Skills"
       sub="Claude Code skills — reusable instructions Claude loads when a task matches, or you call with /name."
       icon={<Sparkles size={17} />}
@@ -66,11 +75,11 @@ export default function SkillsPanel() {
     >
       <div className="skills">
         <div className="skills-list scrollable">
-          <button className={`skills-new ${mode === 'new' ? 'on' : ''}`} onClick={() => setMode('new')}>
+          <button className={`skills-new ${mode === 'new' ? 'on' : ''}`} onClick={async () => (await mayDropUnsaved('Start a new skill')) && setMode('new')}>
             <Plus size={13} /> New skill
           </button>
-          {projectPath && <Section title="This project" items={data?.project ?? []} sel={mode === 'view' ? sel : null} onPick={(f) => (setSel(f), setMode('view'))} empty=".claude/skills/ is empty" />}
-          <Section title="Personal" items={data?.user ?? []} sel={mode === 'view' ? sel : null} onPick={(f) => (setSel(f), setMode('view'))} empty="~/.claude/skills/ is empty" />
+          {projectPath && <Section title="This project" items={data?.project ?? []} sel={mode === 'view' ? sel : null} onPick={(f) => void pick(f)} empty=".claude/skills/ is empty" />}
+          <Section title="Personal" items={data?.user ?? []} sel={mode === 'view' ? sel : null} onPick={(f) => void pick(f)} empty="~/.claude/skills/ is empty" />
         </div>
         <div className="skills-main">
           {mode === 'new' ? (
@@ -122,6 +131,11 @@ function SkillDetail({ skill, projectPath, onDeleted }: { skill: SkillInfo; proj
   const [text, setText] = useState<string | null>(null)
   const [saved, setSaved] = useState('')
   const dirty = text !== null && text !== saved
+  // so quitting, or picking another skill, asks before these edits go (lib/unsaved.ts)
+  useEffect(() => {
+    setUnsaved('skill', dirty ? `/${skill.slug}` : null)
+    return () => setUnsaved('skill', null)
+  }, [dirty, skill.slug])
 
   useEffect(() => {
     invoke<string>('skills:read', skill.file, projectPath).then((t) => {
