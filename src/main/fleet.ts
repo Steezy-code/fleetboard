@@ -832,6 +832,8 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
+  // its token outlives its console, and a team that was closed is not to be acted for
+  if (m.status === 'closed') return fail('This console has left its team.')
   const denied = toolDenial(name, m.role)
   if (denied) return fail(denied)
   const schema = toolSchema(name)
@@ -1087,6 +1089,8 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   await ctx.ptys.stop(m.id)
   await removeWorktree(s, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
+  // its MCP config holds its bearer token
+  fs.rmSync(mcpFile(m.id), { force: true })
   changed(s)
 }
 
