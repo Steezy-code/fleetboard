@@ -122,12 +122,13 @@ export function parseDictation(raw: string): Dictation | null {
   const names = splitList(who.toLowerCase())
   if (!names.length) return null
   // only console names, team names or everyone count as an address (not agents: "codex, …" is ambiguous)
+  const everyone = (n: string) => /^(everyone|everybody|all|all agents|team)$/.test(n)
   for (const n of names) {
-    const isAll = /^(everyone|everybody|all|all agents|team)$/.test(n)
     const named = allConsoles().some((c) => norm(c.data.name) === norm(n)) || !!resolveTeam(n)
-    if (!isAll && !named) return null
+    if (!everyone(n) && !named) return null
   }
-  return { targets: names, text: body.trim() }
+  // a group named "team" is that group; otherwise the word means everyone, which is what targets read as "all"
+  return { targets: names.map((n) => (everyone(n) && !resolveTeam(n) ? 'all' : n)), text: body.trim() }
 }
 
 // ---------------------------------------------------------------- local rules

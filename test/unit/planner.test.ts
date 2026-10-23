@@ -166,3 +166,8 @@ test('panels by name: the night log and the sweep can be asked for, and a panel 
   assert.deepEqual(panelFor('fleetDiff'), { name: 'fleetDiff', drawer: false })
   assert.equal(panelFor('spaceship'), null)
 })
+
+test('"team, …" and "everyone, …" address every console, unless a group is called that', async () => {
+  const { parseDictation } = await import('@/voice/planner')
+  for (const word of ['team', 'everyone', 'all']) assert.deepEqual(parseDictation(`${word}, run the tests`), { targets: ['all'], text: 'run the tests' }, word)
+})
