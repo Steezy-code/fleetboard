@@ -13,17 +13,7 @@ import { useFleet } from '../engine/fleet'
 import { useActivity } from '../engine/activity'
 import { diffLabel } from '@shared/live'
 import { currentTerminalTheme } from '../ui/theme'
-
-
-export const STATUS_LABEL: Record<string, string> = {
-  starting: 'starting',
-  working: 'working',
-  idle: 'ready',
-  'needs-you': 'needs you',
-  done: 'done',
-  paused: 'paused',
-  exited: 'exited'
-}
+import { STATUS_TEXT } from '../orchestration/fleet'
 
 export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
   const host = useRef<HTMLDivElement>(null)
@@ -235,7 +225,7 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
       <span className="spacer" />
       <span className="status-pill" title={doing}>
         <span className="status-dot" />
-        {doing ? <span className="status-doing">{doing}</span> : (STATUS_LABEL[status] ?? status)}
+        {doing ? <span className="status-doing">{doing}</span> : STATUS_TEXT[status]}
       </span>
     </div>
   )
