@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { ipc } from '../support/renderer-env'
 
-const { normalizeUrl } = await import('@/nodes/WebNode')
+const { normalizeUrl, loadsOnOpen } = await import('@/nodes/WebNode')
 void ipc
 
 test('the shortcuts people actually type', () => {
@@ -43,4 +43,9 @@ test('javascript: is never navigated to', () => {
   for (const u of ['javascript:alert(1)', 'javascript://comment%0Aalert(1)']) {
     assert.match(normalizeUrl(u), /^https:\/\/www\.google\.com\/search/, u)
   }
+})
+
+test('a board file can only make a tile load a web page by itself; local files and inline pages wait for a click', () => {
+  for (const u of ['https://example.com', 'http://localhost:5173/', 'about:blank']) assert.equal(loadsOnOpen(u), true, u)
+  for (const u of ['file:///home/me/secret.txt', 'data:text/html,<p>x</p>', 'blob:https://x/1', 'about:srcdoc', '']) assert.equal(loadsOnOpen(u), false, u)
 })
