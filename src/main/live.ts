@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { HEAVY_DIRS, type FleetMember, type FleetState } from '@shared/fleet'
+import { HEAVY_DIRS, LINKED_DIRS, type FleetMember, type FleetState } from '@shared/fleet'
 import { type CheckRun, failingCount, liveDiff, mayRun, sameDiff, withRun } from '@shared/live'
 import type { MainContext } from './context'
 import { runGoalCheck } from './goal'
@@ -81,14 +81,23 @@ function linesIn(file: string): number {
   }
 }
 
+const isLink = (p: string) => {
+  try {
+    return fs.lstatSync(p).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
 /**
  * Pathspecs that leave the dependency folders out of a worktree's `git add` and untracked list, but
  * only those the repo tracks nothing under: a committed vendor/ is work like any other file.
  */
 export async function outsideWork(cwd: string): Promise<string[]> {
   const tracked = await git(cwd, ['ls-files', '-z', '--', ...HEAVY_DIRS], { timeout: 20_000, maxBuffer: 64 * 1024 * 1024 })
-  // unknown is treated as tracked: committing a dependency folder is cheaper than losing an edit
-  if (tracked.code !== 0) return []
+  // unknown is treated as tracked, committing a dependency folder being cheaper than losing an edit;
+  // but never the link to the user's own node_modules, which is not a folder the repo could hold
+  if (tracked.code !== 0) return LINKED_DIRS.filter((d) => isLink(path.join(cwd, d))).map((d) => `:(exclude)${d}`)
   const has = new Set(tracked.stdout.split('\0').filter(Boolean).map((f) => f.split('/')[0]))
   return HEAVY_DIRS.filter((d) => !has.has(d)).map((d) => `:(exclude)${d}`)
 }

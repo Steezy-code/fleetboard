@@ -146,7 +146,11 @@ export class PtyManager {
         args.push(...fleet.args)
         Object.assign(env, fleet.env)
       }
-      if (req.extraArgs?.length) args.push(...req.extraArgs)
+      if (req.extraArgs?.length) {
+        args.push(...req.extraArgs)
+        // the auto-approval flag typed into a console's own arguments counts as much as the setting
+        if (agent.yoloArgs?.length && agent.yoloArgs.every((f) => req.extraArgs!.includes(f))) autoApproves = true
+      }
     }
 
     // Windows: an npm wrapper (claude.cmd) runs its script with node instead

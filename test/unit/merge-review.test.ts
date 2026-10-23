@@ -338,3 +338,8 @@ test('a member an hour old but still printing is not stalled: silence is what co
   assert.deepEqual(stalled(s, 60 * 60000), [])
 })
 
+
+test('brackets are part of the name, as in a Next.js route, not a character class', () => {
+  assert.equal(excludedBy('app/[id]/page.tsx', ['app/[id]']), 'app/[id]')
+  assert.equal(excludedBy('app/a/page.tsx', ['app/[ab]']), null)
+})
