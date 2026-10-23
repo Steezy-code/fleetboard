@@ -4,11 +4,11 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
-import { emptyFleet } from '@shared/fleet'
+import { LINKED_DIRS, emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
-import { estimateOf, stampTask } from '@shared/live'
+import { estimateOf, numstat, stampTask } from '@shared/live'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -153,7 +153,7 @@ const slugify = (t: string) =>
 
 /** Give a worktree the repo's installed dependencies without copying them. */
 function linkHeavyDirs(projectPath: string, wt: string) {
-  for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
+  for (const d of LINKED_DIRS) {
     const src = path.join(projectPath, d)
     const dst = path.join(wt, d)
     if (fs.existsSync(src) && !fs.existsSync(dst)) {
@@ -165,7 +165,7 @@ function linkHeavyDirs(projectPath: string, wt: string) {
     }
   }
 }
-const ADD_ALL = ['add', '-A', '--', '.', ':(exclude)node_modules', ':(exclude).venv', ':(exclude)venv', ':(exclude)vendor']
+const ADD_ALL = ['add', '-A', '--', '.', ...LINKED_DIRS.map((d) => `:(exclude)${d}`)]
 
 async function createWorktree(repoCwd: string, projectPath: string, projectId: string, dirName: string, branch: string) {
   const dir = path.join(treesDir, assertProjectId(projectId), dirName)
@@ -264,7 +264,7 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   if (!ownWorktree(m, Object.values(s.members), treesDir)) return
   const kept = await keepUncommitted(s, m)
   if (kept === 'failed') return
-  for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
+  for (const d of LINKED_DIRS) {
     const p = path.join(m.cwd, d)
     try {
       if (fs.lstatSync(p).isSymbolicLink()) fs.rmSync(p)
@@ -582,16 +582,6 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
 
 // ---------------------------------------------------------------- tools
 
-type ToolDef = { name: string; description: string; inputSchema: any; roles: FleetRole[] }
-/** `git diff --numstat` → lines added / removed per file (binary files count as 0). */
-export function numstat(out: string): { path: string; add: number; del: number }[] {
-  return out
-    .split('\n')
-    .map((l) => l.split('\t'))
-    .filter((p) => p.length >= 3)
-    .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
-}
-
 /**
  * The commit a branch points at now. Both gates resolve the branch once and then check and merge
  * that commit: a worker is a real CLI that stays alive for follow-ups and knows a merge comes after
@@ -663,6 +653,7 @@ export function excludedMergeRefusal(touched: string[], wontTouch: string[] | un
 const str = (description: string) => ({ type: 'string', description })
 const strArr = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
 
+type ToolDef = { name: string; description: string; inputSchema: any; roles: FleetRole[] }
 type ArgSchema = { properties?: Record<string, { type?: string; items?: { type?: string } }>; required?: string[] }
 
 /**
