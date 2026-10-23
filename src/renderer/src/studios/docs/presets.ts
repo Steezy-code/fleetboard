@@ -175,7 +175,7 @@ export function buildDocPrompt(opts: { preset?: DocPreset; request?: string; dep
   return `You are writing ${what} about the software repository in the current working directory (folder "${projectName}").
 
 How to work:
-- First explore the repository with your read-only tools (Read, Grep, Glob, LS, git log). Ground every statement in files you actually opened. Never invent modules, endpoints, tables, commands or settings; if something is unclear or missing, say so briefly.
+- First explore the repository with your read-only tools (Read, Grep, Glob, LS, and git log --oneline -n 40). Ground every statement in files you actually opened. Never invent modules, endpoints, tables, commands or settings; if something is unclear or missing, say so briefly.
 - ${DEPTH_GUIDE[depth]}
 - Do not modify any files.
 

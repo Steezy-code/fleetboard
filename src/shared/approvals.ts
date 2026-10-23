@@ -51,8 +51,11 @@ function shortLabel(raw: string, t: ApprovalOption['tone'], permission: boolean)
   return label.length > 64 ? label.slice(0, 61) + '…' : label
 }
 
-/** Options an Inbox button can't sensibly answer: they change app-wide modes or need typing. */
-const HIDDEN = /switch to auto mode|bypass permissions|^type something\.?$/i
+/**
+ * Options an Inbox button can't sensibly answer: they change app-wide modes (the user's Claude Code
+ * default for every session, "set auto mode as my default permission mode", among them) or need typing.
+ */
+const HIDDEN = /switch to auto mode|bypass permissions|\bas (my )?default\b|default permission mode|^type something\.?$/i
 
 /**
  * The row in `p.lines` where the menu starts: the last row reading "1. <first option>". Everything

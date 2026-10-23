@@ -22,7 +22,11 @@ export const MAX_ARG_PROMPT = 100_000
 const MAX_TEXT = 4 * 1024 * 1024
 /** stderr is only ever shown as a tail. */
 const MAX_ERR = 64 * 1024
-const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)']
+/**
+ * What a read-only run may use. git log only in the one exact form the prompts ask for: as a prefix
+ * rule it would allow `git log --output=<any file>`, which writes.
+ */
+const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'LS', 'Bash(git log --oneline -n 40)', 'Bash(git ls-files:*)', 'Bash(git status:*)']
 
 export function register(ctx: MainContext) {
   ctx.ipc.handle('cli:run', async (_e, req: CliRunRequest) => {
