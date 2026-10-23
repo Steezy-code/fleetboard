@@ -9,9 +9,14 @@ import { App, git, makeRepo, makeSandbox } from './harness'
 let app: App | null = null
 afterEach(async (t) => {
   if (!app) return
-  if (process.env.E2E_SHOTS) await app.screenshot(path.join(process.env.E2E_SHOTS, `${t.name.replace(/\W+/g, '-')}.png`))
-  await app.close()
-  app = null
+  // a picture of a failure is what is worth keeping; and the app is closed whatever the picture does,
+  // since it runs detached and would outlive the test
+  try {
+    if (process.env.E2E_SHOTS && !t.passed) await app.screenshot(path.join(process.env.E2E_SHOTS, `${t.name.replace(/\W+/g, '-')}.png`)).catch(() => {})
+  } finally {
+    await app.close()
+    app = null
+  }
 })
 
 async function team(scenario: object, goal = 'add the files', files?: Record<string, string>) {
