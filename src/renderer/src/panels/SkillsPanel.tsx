@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { FolderOpen, Plus, RefreshCw, Save, Sparkles, Terminal, Trash2 } from 'lucide-react'
-import { invoke } from '../lib/api'
+import { errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, sendToConsole } from '../engine/consoles'
 import { pushTargets, type PushTarget } from '../continuity/memory'
@@ -259,7 +259,7 @@ function NewSkill({ projectPath, onCreated }: { projectPath?: string; onCreated:
       useApp.getState().toast(`Created /${slug}`, 'ok')
       onCreated(r.file)
     } catch (e: any) {
-      setErr(String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+      setErr(errorText(e))
     }
   }
 

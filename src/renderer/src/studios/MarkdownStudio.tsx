@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpenText, Check, ChevronRight, FileDown, LayoutDashboard, Loader2, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { Modal, Seg } from '../ui/Modal'
-import { invoke } from '../lib/api'
+import { errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { FileTree, ancestors, graft, flattenFiles, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
@@ -218,7 +218,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       if (!pending.current) setSave('saved')
     } catch (e: any) {
       setSave('error')
-      toast(`Could not save ${baseName(p.path)}: ${e?.message ?? e}`, 'error')
+      toast(`Could not save ${baseName(p.path)}: ${errorText(e)}`, 'error')
     }
   }, [])
 
@@ -328,7 +328,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       await open(path, 'source')
       toast(`Created ${relativeTo(root, path)}`, 'ok')
     } catch (e: any) {
-      toast(String(e?.message ?? e), 'error')
+      toast(errorText(e), 'error')
     }
   }
 
