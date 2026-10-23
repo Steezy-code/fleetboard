@@ -1236,7 +1236,10 @@ export async function register(c: MainContext) {
     if (!s?.charter?.doneWhen) return false
     s.check = { ...(s.check ?? { command: s.charter.doneWhen, runs: [] }), off: !!off }
     if (!s.check.off) delete s.check.off
-    if (off) stopCheck(projectId)
+    if (off) {
+      stopCheck(projectId)
+      delete s.check.running
+    }
     changed(s)
     if (!off) void runCheck(s, 'start')
     return true
