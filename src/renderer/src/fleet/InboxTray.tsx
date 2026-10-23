@@ -4,6 +4,7 @@ import type { MergeReview } from '@shared/mergeReview'
 import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
+import { Tip } from '../chrome/Tip'
 import { CharterCard } from './CharterCard'
 import { ago, charterHead, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
 
@@ -95,6 +96,16 @@ export function InboxTray({ floating }: { floating?: boolean }) {
         </div>
       )}
 
+      {!folded && (item.kind === 'approval' || item.kind === 'ask') && (
+        <Tip id="inbox">
+          Agents stop and ask here. Number keys pick a button, <span className="kbd">Tab</span> moves to the next card, <span className="kbd">Ctrl</span>+<span className="kbd">I</span> lists them all.
+        </Tip>
+      )}
+      {!folded && item.kind === 'ready' && (
+        <Tip id="ready">
+          The team's work is on its own branch. <b>Merge</b> brings it into your checkout, and nothing is pushed. <b>View diff</b> shows every line first.
+        </Tip>
+      )}
       <div className={`it-card ${folded ? 'folded' : ''}`} key={item.key} data-kind={item.kind}>
         {/* folded, the header is the whole card, so clicking it is the obvious way back */}
         <div className="it-head" onClick={folded ? toggleFolded : undefined}>
