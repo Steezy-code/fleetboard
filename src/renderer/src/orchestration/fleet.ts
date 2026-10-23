@@ -95,14 +95,15 @@ export function useStatuses(ids: string[]): ConsoleStatus[] {
   return useApp(useShallow((s) => ids.map((id) => statusOf(s.statuses, s.live, id))))
 }
 
+/** How a console's status reads wherever it is shown: its tile, the command bar's @-menu, the mission map, the orchestrator and handoff. */
 export const STATUS_TEXT: Record<ConsoleStatus, string> = {
   starting: 'starting',
   working: 'working',
-  idle: 'resting',
+  idle: 'ready',
   'needs-you': 'needs you',
   done: 'done',
   paused: 'paused',
-  exited: 'stopped'
+  exited: 'exited'
 }
 
 export const BUCKET_LABEL: Record<Bucket, string> = { working: 'Working', 'needs-you': 'Needs you', idle: 'Idle', done: 'Done' }
