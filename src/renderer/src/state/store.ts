@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { findFreeSpot, occupied, viewCentre } from '../board/place'
 import type {
   AgentAvailability,
   BoardNode,
@@ -50,6 +51,8 @@ export interface Toast {
   id: string
   text: string
   tone?: 'info' | 'warn' | 'error' | 'ok'
+  /** one button, such as Undo; the toast stays a little longer to give it a chance */
+  action?: { label: string; run: () => void }
 }
 
 export interface ConfirmRequest {
@@ -146,7 +149,7 @@ interface AppState {
   closePanel: () => void
   openDrawer: (name: string, props?: Record<string, any>) => void
   closeDrawer: () => void
-  toast: (text: string, tone?: Toast['tone']) => void
+  toast: (text: string, tone?: Toast['tone'], action?: Toast['action']) => void
   confirm: (req: Omit<ConfirmRequest, 'id' | 'resolve'>) => Promise<boolean>
   setStatus: (id: string, s: ConsoleStatus) => void
   setLive: (id: string, live: boolean) => void
@@ -427,9 +430,10 @@ export const useApp = create<AppState>((set, get) => {
         const cam = ws.camera
         const w = n.w ?? 480
         const h = n.h ?? 320
-        // default position: center of the current view
-        const x = n.x ?? (vp.w / 2 - cam.x) / cam.zoom - w / 2
-        const y = n.y ?? (vp.h / 2 - cam.y) / cam.zoom - h / 2
+        // default position: as near the middle of the view as it can be without covering anything
+        const spot = n.x === undefined || n.y === undefined ? findFreeSpot(occupied(ws), { w, h }, viewCentre(vp, cam, { w, h })) : null
+        const x = n.x ?? spot!.x
+        const y = n.y ?? spot!.y
         const node: BoardNode = { data: {}, ...n, id, x, y, w, h, z: maxZ(ws) + 1 }
         return { ...ws, nodes: [...ws.nodes, node] }
       })
@@ -570,7 +574,7 @@ export const useApp = create<AppState>((set, get) => {
     fitAll: () => {
       const ws = activeWs()
       if (!ws) return
-      const boxes = [...ws.nodes, ...ws.groups, ...ws.ink]
+      const boxes = occupied(ws)
       if (!boxes.length) return get().centerOn(0, 0, 1)
       const l = Math.min(...boxes.map((b) => b.x))
       const t = Math.min(...boxes.map((b) => b.y))
@@ -621,10 +625,10 @@ export const useApp = create<AppState>((set, get) => {
     closePanel: () => set({ panel: null }),
     openDrawer: (name, props) => set((s) => ({ drawer: s.drawer?.name === name && !props ? null : { name, props } })),
     closeDrawer: () => set({ drawer: null }),
-    toast: (text, tone = 'info') => {
+    toast: (text, tone = 'info', action) => {
       const id = uid('t')
-      set((s) => ({ toasts: [...s.toasts, { id, text, tone }] }))
-      window.setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 4200)
+      set((s) => ({ toasts: [...s.toasts, { id, text, tone, ...(action ? { action } : {}) }] }))
+      window.setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? 9000 : 4200)
     },
     confirm: (req) =>
       new Promise<boolean>((resolve) => {

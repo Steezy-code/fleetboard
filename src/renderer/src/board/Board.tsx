@@ -6,6 +6,7 @@ import { GroupFrame } from './GroupFrame'
 import { Wires } from './Wires'
 import { InkLayer } from './InkLayer'
 import { intersects } from './geometry'
+import { groupBox, hiddenIds } from './place'
 import { fileUrl, invoke } from '../lib/api'
 
 const within = (box: { x: number; y: number; w: number; h: number }, r: { x: number; y: number; w: number; h: number }) =>
@@ -213,7 +214,9 @@ export function Board() {
       } else if (mod && key === 'a') {
         e.preventDefault()
         const ws = activeWs()!
-        app.setSelection(ws.nodes.map((n) => n.id))
+        // not what a folded group hides: a Delete after Ctrl+A should not reach consoles you cannot see
+        const folded = hiddenIds(ws)
+        app.setSelection(ws.nodes.filter((n) => !folded.has(n.id)).map((n) => n.id))
       } else if (!mod && !e.altKey && key === 'z') {
         setCmd('zoom')
         window.clearTimeout(chordTimer)
@@ -323,7 +326,8 @@ export function Board() {
         const crossing = ev.clientX < startX
         const w = activeWs()!
         const pick = (r: { x: number; y: number; w: number; h: number }) => (crossing ? intersects(box, r) : within(box, r))
-        const hits = [...w.nodes, ...w.ink, ...(crossing ? [] : w.groups)].filter(pick).map((n) => n.id)
+        const folded = hiddenIds(w)
+        const hits = [...w.nodes.filter((n) => !folded.has(n.id)), ...w.ink, ...(crossing ? [] : w.groups.map((g) => ({ ...g, ...groupBox(g) })))].filter(pick).map((n) => n.id)
         app.setSelection(additive ? [...new Set([...before, ...hits])] : hits)
       }
       el.addEventListener('pointermove', move)
@@ -368,6 +372,7 @@ export function Board() {
     if (!files.length && /^https?:\/\//.test(url)) app.addNode({ type: 'web', x: p.x, y: p.y, w: 720, h: 480, data: { url: url.trim() } })
   }
 
+  const hidden = hiddenIds(ws)
   return (
     <div
       ref={ref}
@@ -389,7 +394,7 @@ export function Board() {
           n.id === focusedNode ? (
             <NodeFrame key={n.id} node={n} selected={false} zoom={1} maximized />
           ) : (
-            <NodeFrame key={n.id} node={n} selected={selection.includes(n.id)} zoom={cam.zoom} />
+            <NodeFrame key={n.id} node={n} selected={selection.includes(n.id)} zoom={cam.zoom} hidden={hidden.has(n.id)} />
           )
         )}
       </div>

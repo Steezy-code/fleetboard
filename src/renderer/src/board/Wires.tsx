@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import type { Workspace } from '@shared/types'
 import { center, edgePoint, type Rect } from './geometry'
+import { groupBox, hiddenIds } from './place'
 import { useApp } from '../state/store'
 import { useFleet } from '../engine/fleet'
 
@@ -8,7 +9,13 @@ import { useFleet } from '../engine/fleet'
 export const Wires = memo(function Wires({ ws }: { ws: Workspace }) {
   const selection = useApp((s) => s.selection)
   const hot = useFleet((s) => s.hot)
-  const rectOf = (id: string): Rect | undefined => ws.nodes.find((n) => n.id === id) ?? ws.groups.find((g) => g.id === id)
+  const folded = hiddenIds(ws)
+  // a wire to a console in a collapsed group ends at the group's header, where the console now is
+  const rectOf = (id: string): Rect | undefined => {
+    const n = ws.nodes.find((x) => x.id === id)
+    const g = ws.groups.find((x) => x.id === (n && folded.has(n.id) ? n.groupId : id))
+    return g ? groupBox(g) : n
+  }
   return (
     <svg className="wires" width="1" height="1">
       {ws.wires.map((w) => {

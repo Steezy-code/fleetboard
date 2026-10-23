@@ -7,6 +7,7 @@ import { sanitizeSpec, type DiagramSpec } from './spec'
 import { figureSize, layoutToInk, type DiagramStyle } from './toInk'
 import { figureItems, figureTitle, figureToExcalidraw, figureToPngBase64 } from './export'
 import { slugify } from '../docs/presets'
+import { findFreeSpot, occupied, viewCentre } from '../../board/place'
 
 interface DiagramStudioState {
   agentId: string | null
@@ -39,18 +40,8 @@ export function placeDiagram(spec: DiagramSpec, style = useDiagramStudio.getStat
   const layout = layoutDiagram(spec)
   const size = figureSize(layout)
 
-  // to the right of what is already there, top-aligned; or centered in the view on an empty board
-  const boxes = [...ws.nodes, ...ws.groups, ...ws.ink]
-  let origin: { x: number; y: number }
-  if (boxes.length) {
-    const r = Math.max(...boxes.map((b) => b.x + b.w))
-    const t = Math.min(...boxes.map((b) => b.y))
-    origin = { x: Math.round(r + 200), y: Math.round(t) }
-  } else {
-    const vp = app.viewport
-    const cam = ws.camera
-    origin = { x: Math.round((vp.w / 2 - cam.x) / cam.zoom - size.w / 2), y: Math.round((vp.h / 2 - cam.y) / cam.zoom - size.h / 2) }
-  }
+  // as near the middle of the view as it fits without covering anything already there
+  const origin = findFreeSpot(occupied(ws), size, viewCentre(app.viewport, ws.camera, size), 80)
   const items = layoutToInk(layout, origin, style)
   const figureId = items[0]?.figureId ?? null
   app.addInk(items)

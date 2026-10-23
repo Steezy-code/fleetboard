@@ -9,8 +9,19 @@ export function Overlays() {
     <>
       <div className="toasts">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.tone ?? ''}`}>
+          <div key={t.id} className={`toast ${t.tone ?? ''} ${t.action ? 'with-action' : ''}`}>
             {t.text}
+            {t.action && (
+              <button
+                className="btn sm"
+                onClick={() => {
+                  t.action!.run()
+                  useApp.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) }))
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>
