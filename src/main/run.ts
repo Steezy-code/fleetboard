@@ -119,22 +119,31 @@ const KNOWN_FILTER = /^"?git[- ](lfs|crypt)"?(\s|$)/i
  */
 export async function programsInRepoConfig(cwd: string): Promise<string[]> {
   const env = await gitEnv()
-  const r = await run('git', [...GIT_OPTS, 'config', '--includes', '--list', '--show-scope', '-z'], { cwd, env, timeout: 5000 })
-  if (r.code !== 0) return []
-  const found: string[] = []
-  // -z with --show-scope: scope NUL key LF value NUL
-  const parts = r.stdout.split('\0')
-  for (let i = 0; i + 1 < parts.length; i += 2) {
-    if (!/^(local|worktree)$/.test(parts[i]!)) continue
-    const entry = parts[i + 1]!
+  const config = (args: string[]) => run('git', [...GIT_OPTS, 'config', '--includes', '--list', '-z', ...args], { cwd, env, timeout: 5000 })
+  // -z entries are key LF value; with --show-scope each is preceded by its scope
+  let entries: string[] = []
+  const scoped = await config(['--show-scope'])
+  if (scoped.code === 0) {
+    const parts = scoped.stdout.split('\0')
+    for (let i = 0; i + 1 < parts.length; i += 2) if (/^(local|worktree)$/.test(parts[i]!)) entries.push(parts[i + 1]!)
+  } else {
+    // git before 2.26 has no --show-scope: read the two scopes one by one rather than call the repo clean.
+    // --worktree reads .git/config again where the extension is off, which only repeats a key.
+    const [local, worktree] = await Promise.all([config(['--local']), config(['--worktree'])])
+    // not a repository: there is no config of its own, and git will run nothing in it either
+    if (local.code !== 0) return []
+    entries = [local, worktree].flatMap((r) => (r.code === 0 ? r.stdout.split('\0') : []))
+  }
+  const found = new Set<string>()
+  for (const entry of entries) {
     const nl = entry.indexOf('\n')
     const key = nl < 0 ? entry : entry.slice(0, nl)
     const value = nl < 0 ? '' : entry.slice(nl + 1)
     if (!key || !value.trim() || !NAMES_A_PROGRAM.test(key)) continue
     if (/^filter\./i.test(key) && KNOWN_FILTER.test(value.trim())) continue
-    found.push(key)
+    found.add(key)
   }
-  return found
+  return [...found]
 }
 
 /**
