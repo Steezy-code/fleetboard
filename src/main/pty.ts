@@ -9,6 +9,7 @@ import { profileEnv } from './profiles'
 import { fleetLaunch, isTeamConsole } from './fleet'
 import { TermScreen, type ScreenView } from './screen'
 import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
+import { activityOf } from './activity'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
 import { commandOf } from '@shared/approvals'
 import { RunRecord } from './orphans'
@@ -37,6 +38,9 @@ interface Session {
   discover?: { since: number; cwd: string; env: Record<string, string | undefined>; tries: number; lastTry: number }
   /** when the CLI last printed something */
   outputAt: number
+  /** what it is doing (activity.ts), and the output it was last read from */
+  activity: string | null
+  activityAt: number
   /**
    * an agent CLI: everything in its process group ends with the console. A shell's (the user's own
    * terminal) is left as a terminal leaves it: what the user started with nohup outlives it.
@@ -163,6 +167,8 @@ export class PtyManager {
           ? { since: startedAt, cwd: req.cwd, env: { HOME: env.HOME, CODEX_HOME: env.CODEX_HOME }, tries: 0, lastTry: startedAt }
           : undefined,
       outputAt: startedAt,
+      activity: null,
+      activityAt: 0,
       agentGroup: !req.command && !!agent && agent.id !== 'shell'
     }
     this.sessions.set(req.id, s)
@@ -459,9 +465,31 @@ export class PtyManager {
     const prev = s.tracker.status
     const next = s.tracker.evaluate(Date.now(), detectPrompt(s.screen.view()))
     if (next !== prev) this.emit('pty:status', s.id, next)
+    this.readActivity(s, next)
     // after a turn (idle, with new output since the last look): find which saved session is this console's
     const d = s.discover
     if (d && next === 'idle' && s.outputAt > d.lastTry && Date.now() - d.lastTry > 2000) this.discoverSession(s)
+  }
+
+  /**
+   * What the console is doing, read only while it works and only when it printed something since the
+   * last read: on this tick, an idle board costs nothing. A permission prompt keeps the step it is
+   * asking about ("running `npm test`"), which is what the Inbox card is about too.
+   */
+  private readActivity(s: Session, status: ConsoleStatus) {
+    const busy = status === 'working' || status === 'needs-you'
+    const was = s.activity
+    if (!busy) s.activity = null
+    else if (s.outputAt > s.activityAt) {
+      s.activityAt = s.outputAt
+      s.activity = activityOf(s.agentId, s.screen.text(6000))
+    }
+    if (s.activity !== was) this.emit('pty:activity', s.id, s.activity)
+  }
+
+  /** When a console last printed anything, or null when it is not running. */
+  lastOutput(id: string): number | null {
+    return this.sessions.get(id)?.outputAt ?? null
   }
 
   /** Which of the CLI's saved sessions is this console's (see findCodexSession). */

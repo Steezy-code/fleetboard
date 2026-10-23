@@ -35,9 +35,11 @@ export function killGoalChecks() {
   running.clear()
 }
 
-export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_000): Promise<GoalCheck> {
+/** `signal`: whoever started it can end it early (a team dismissed mid-check); it then resolves as stopped. */
+export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_000, signal?: AbortSignal): Promise<GoalCheck> {
   return new Promise((resolve) => {
     if (!command.trim()) return resolve({ code: null, tail: '', error: 'no command' })
+    if (signal?.aborted) return resolve({ code: null, tail: '', error: 'stopped' })
     if (!fs.existsSync(cwd)) return resolve({ code: null, tail: '', error: `folder not found: ${cwd}` })
     void loginEnv().then((env) => {
       let out = ''
@@ -53,17 +55,22 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
         timedOut = true
         killTree(child.pid)
       }, timeoutMs)
+      const stop = () => killTree(child.pid)
+      signal?.addEventListener('abort', stop, { once: true })
       child.stdout.on('data', keep)
       child.stderr.on('data', keep)
       child.on('error', (e) => {
         clearTimeout(timer)
+        signal?.removeEventListener('abort', stop)
         running.delete(child)
         resolve({ code: null, tail: '', error: e.message })
       })
       child.on('close', (code) => {
         clearTimeout(timer)
+        signal?.removeEventListener('abort', stop)
         running.delete(child)
-        resolve({ code: timedOut ? null : code, tail: stripAnsi(out).slice(-TAIL), ...(timedOut ? { timedOut } : {}) })
+        const stopped = !timedOut && !!signal?.aborted
+        resolve({ code: timedOut || stopped ? null : code, tail: stripAnsi(out).slice(-TAIL), ...(timedOut ? { timedOut } : {}), ...(stopped ? { error: 'stopped' } : {}) })
       })
     })
   })

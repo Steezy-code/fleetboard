@@ -36,6 +36,8 @@ export interface MarkResult {
   status: ConsoleStatus
   prompt: Prompt | null
   screen: string[]
+  /** scrollback and screen as plain text, glyphs kept (TermScreen.text) */
+  text: string
 }
 
 /** Run the status tick (every `tick` ms) across the recording and report the state at each mark. */
@@ -67,11 +69,24 @@ export async function replay(cast: Cast, opts: { hooked?: boolean; tick?: number
     } else if (e.kind === 'm') {
       const view = screen.view()
       const prompt = detectPrompt(view)
-      marks.push({ mark: e.data, at: e.t, status: tracker.evaluate(e.t, prompt), prompt, screen: view.lines })
+      marks.push({ mark: e.data, at: e.t, status: tracker.evaluate(e.t, prompt), prompt, screen: view.lines, text: screen.text(6000) })
     }
   }
   screen.dispose()
   return { marks, timeline }
+}
+
+/** What the terminal showed `ms` into the recording, as TermScreen.text() gives it. */
+export async function screenAt(cast: Cast, ms: number, chars = 6000): Promise<string> {
+  const screen = new TermScreen(cast.width, cast.height)
+  for (const e of cast.events) {
+    if (e.t > ms) break
+    if (e.kind === 'o') screen.write(e.data)
+  }
+  await screen.flush()
+  const text = screen.text(chars)
+  screen.dispose()
+  return text
 }
 
 /** Marks are named "<expected status>: <what is on screen>". */

@@ -36,3 +36,18 @@ test('a missing folder or an empty command is an error, not a pass', async () =>
   assert.equal((await runGoalCheck(path.join(dir, 'nope'), 'true')).error?.startsWith('folder not found'), true)
   assert.equal((await runGoalCheck(dir, '  ')).error, 'no command')
 })
+
+test('stopped by its caller: ended at once, with whatever it started, and not read as a result', async () => {
+  const marker = path.join(dir, 'stopped-child-alive')
+  const ac = new AbortController()
+  const t0 = Date.now()
+  const p = runGoalCheck(dir, `(sleep 2 && touch ${marker}) & sleep 30`, 60_000, ac.signal)
+  setTimeout(() => ac.abort(), 300)
+  const r = await p
+  assert.equal(r.code, null)
+  assert.equal(r.error, 'stopped')
+  assert.ok(Date.now() - t0 < 5000)
+  await new Promise((res) => setTimeout(res, 2500))
+  assert.equal(fs.existsSync(marker), false)
+  assert.equal((await runGoalCheck(dir, 'true', 1000, ac.signal)).error, 'stopped', 'an already-stopped signal starts nothing')
+})

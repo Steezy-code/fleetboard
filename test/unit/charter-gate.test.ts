@@ -825,3 +825,8 @@ describe('the gate', () => {
     })
   })
 })
+
+test('the charter asks for one estimate for the job, never a confidence', () => {
+  assert.match(CHARTER_FIELDS, /"estimate":<minutes>/)
+  assert.match(CHARTER_FIELDS, /^- estimate: .*minutes/m)
+})

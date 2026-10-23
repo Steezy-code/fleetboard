@@ -10,6 +10,8 @@ import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
+import { useActivity } from '../engine/activity'
+import { diffLabel } from '@shared/live'
 import { currentTerminalTheme } from '../ui/theme'
 
 
@@ -203,6 +205,8 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
 export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
   const status = useApp((s) => s.statuses[node.id]) ?? (useApp.getState().live[node.id] ? 'idle' : 'exited')
   const [editing, setEditing] = useState(false)
+  // what it is doing, while it works: a CLI whose output does not say keeps the plain status
+  const doing = useActivity((s) => (status === 'working' ? s.of[node.id] : undefined))
   const yolo = node.data.autoApprove ?? useApp.getState().settings.autoApprove
   return (
     <div className={`row grow st-${status}`} style={{ gap: 7, minWidth: 0 }}>
@@ -229,9 +233,9 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
       {yolo && agentById(node.data.agentId)?.yoloArgs && <span className="pill yolo">yolo</span>}
       {!yolo && node.data.acceptEdits && agentById(node.data.agentId)?.editsArgs && <span className="pill">edits</span>}
       <span className="spacer" />
-      <span className="status-pill">
+      <span className="status-pill" title={doing}>
         <span className="status-dot" />
-        {STATUS_LABEL[status] ?? status}
+        {doing ? <span className="status-doing">{doing}</span> : (STATUS_LABEL[status] ?? status)}
       </span>
     </div>
   )
@@ -271,13 +275,24 @@ export async function beforeRemoveConsoles(nodes: BoardNode[]) {
   )
 }
 
-/** LEAD / WORKER / REVIEWER badge with the member's task as a tooltip. */
+/**
+ * LEAD / WORKER / REVIEWER badge with the member's task as a tooltip, and a working worker's changes
+ * so far: its worktree is invisible until Ready otherwise, and Ready should confirm, not reveal.
+ */
 function FleetBadge({ id }: { id: string }) {
   const m = useFleet((s) => s.state?.members[id])
   if (!m || m.status === 'closed') return null
+  const diff = m.role === 'worker' && m.status === 'working' ? diffLabel(m.diff) : ''
   return (
-    <span className={`pill fleet-${m.role}`} title={m.task}>
-      {m.role}
-    </span>
+    <>
+      <span className={`pill fleet-${m.role}`} title={m.task}>
+        {m.role}
+      </span>
+      {diff && (
+        <span className="fleet-diff" title="Changed in its worktree so far, not yet reported">
+          {diff}
+        </span>
+      )}
+    </>
   )
 }

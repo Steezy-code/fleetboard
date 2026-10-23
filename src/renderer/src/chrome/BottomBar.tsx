@@ -8,6 +8,7 @@ import { CommandBar } from '../voice/CommandBar'
 import { BranchBadge } from './BranchBadge'
 import { CiBadge } from './CiBadge'
 import { InboxTray } from '../fleet/InboxTray'
+import { AmbientLine } from '../fleet/AmbientLine'
 import { offerGoal, useGoalIdeas } from './goalIdeas'
 import { useInbox } from '../fleet/inboxModel'
 
@@ -87,6 +88,7 @@ export function BottomBar() {
         </button>
       </div>
       <div className="bar-stack">
+        <AmbientLine />
         <InboxTray />
         <CommandBar />
       </div>
