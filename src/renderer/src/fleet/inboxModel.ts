@@ -454,8 +454,10 @@ function build() {
     const failing = item.pr?.checks.filter((c) => c.state === 'failing').map((c) => c.name) ?? []
     items.push(ciNotice(key, item, failing))
   }
-  // members that have been going a long time and said nothing yet
-  for (const x of fleet ? stalled(fleet, Date.now()) : []) {
+  // members that have gone quiet: silence, not the estimate, so this works on a fresh repo too.
+  // Counted from no earlier than this window opened (performance.timeOrigin): an output time from
+  // before a restart says nothing about the silence since.
+  for (const x of fleet ? stalled(fleet, Date.now(), undefined, performance.timeOrigin) : []) {
     const key = `stalled:${x.consoleId}`
     if (dismissed.has(key)) continue
     items.push(stalledNotice(key, x))
@@ -520,8 +522,8 @@ function stalledNotice(key: string, x: Stall): InboxItem {
     key,
     who: x.who,
     sub: 'Working',
-    head: `has been going ${h ? `${h} h ${x.minutes % 60} min` : `${x.minutes} min`} without reporting`,
-    lines: ['It may be deep in a long task, or it may be waiting on something it cannot ask you about.'],
+    head: `has been silent for ${h ? `${h} h ${x.minutes % 60} min` : `${x.minutes} min`}`,
+    lines: ['Its console has printed nothing in that time and it has not reported. It may be waiting on something it cannot ask you about, or stuck.'],
     since: seen(key),
     actions: [
       { label: 'Ask for a status', primary: true, run: () => nudge(x.consoleId, x.who) },
@@ -609,9 +611,9 @@ export function useInboxWatcher() {
     }
   }, [blocked.join(',')])
 
-  // "waiting 2m" ticks
+  // "waiting 2m" ticks, and silence: a team gone quiet changes nothing that would rebuild the list
   useEffect(() => {
-    const t = window.setInterval(() => useInbox.setState((s) => ({ items: [...s.items] })), 30_000)
+    const t = window.setInterval(refreshInbox, 30_000)
     return () => window.clearInterval(t)
   }, [])
 }
