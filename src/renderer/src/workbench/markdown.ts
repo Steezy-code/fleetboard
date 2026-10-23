@@ -176,6 +176,9 @@ export function safeUrl(v: string, kind: 'href' | 'src'): string | null {
   } catch {
     return null
   }
+  // "//host/x" and "\\host\x" name another machine, not a file here: in the packaged app, whose page is
+  // a file:// URL, one in an <img> is a UNC path, and Windows sends the user's credentials to fetch it
+  if (/^[\s\u0000-\u001f]*[\\/][\s\u0000-\u001f]*[\\/]/.test(s)) return null
   // a path in the document's folder (images, links to other files)
   if (u.origin === new URL(RELATIVE_BASE).origin && !/^[\s\u0000-\u001f]*[a-z][a-z0-9+.\-\s\u0000-\u001f]*:/i.test(s)) return s
   if (u.protocol === 'https:' || u.protocol === 'http:' || (kind === 'href' && u.protocol === 'mailto:')) return s
