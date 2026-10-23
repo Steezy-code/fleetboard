@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { GoalIdea } from '@shared/types'
 import type { MainContext } from './context'
+import { readRegularText } from './paths'
 import { allowed } from './roots'
 import { git } from './run'
 import { nextPlanItem } from './sweep'
@@ -46,7 +47,7 @@ export function testsIn(root: string): boolean | null {
   if (TEST_DIRS.some(has) || TEST_FILES.some(has)) return true
   let pkg: any = null
   try {
-    pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+    pkg = JSON.parse(readRegularText(path.join(root, 'package.json'), 1024 * 1024))
   } catch {
     /* not a Node project, or not readable */
   }

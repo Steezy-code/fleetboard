@@ -94,6 +94,21 @@ export function renameRetrying(from: string, to: string) {
   }
 }
 
+/**
+ * A regular file's contents, refusing anything else before reading. readFileSync on a FIFO waits for
+ * a writer that may never come, and on a device (a symlink to /dev/zero) reads until memory runs out;
+ * in the main process, which also carries every console's output, either one freezes the whole app.
+ * A repo is untrusted content, so anything read from inside one comes through here.
+ */
+export function readRegularFile(file: string, max: number): Buffer {
+  const st = fs.statSync(file)
+  if (!st.isFile()) throw new Error(`Not a regular file: ${file}`)
+  if (st.size > max) throw new Error(`Too large to read here (${Math.ceil(st.size / 1048576)} MB): ${file}`)
+  return fs.readFileSync(file)
+}
+
+export const readRegularText = (file: string, max: number) => readRegularFile(file, max).toString('utf8')
+
 export function readJson<T>(file: string, fallback: T): T {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8')) as T

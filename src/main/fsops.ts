@@ -2,10 +2,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
-import { writeDurable } from './paths'
+import { readRegularText, writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
 import { allowed, grant, outsideMessage } from './roots'
+
+/** The most a text read hands the renderer: any source file, note or log; past this it is not a text to edit here. */
+const MAX_READ = 32 * 1024 * 1024
 
 export interface TreeEntry {
   name: string
@@ -90,9 +93,9 @@ export function writeText(file: string, content: string, base?: string | null): 
   if (base !== undefined) {
     let current: string | null = null
     try {
-      current = fs.readFileSync(file, 'utf8')
+      current = readRegularText(file, MAX_READ)
     } catch {
-      /* gone */
+      /* gone, or not a file this could have written */
     }
     if (current !== base) return { ok: false, reason: 'changed', current }
   }
@@ -155,7 +158,7 @@ export function register(ctx: MainContext) {
   ipc.handle('fs:read', (_e, file: string) => {
     // already throws for a missing file, so callers handle a throw
     if (!allowed(file, 'fs:read')) throw new Error(outsideMessage(file))
-    return fs.readFileSync(file, 'utf8')
+    return readRegularText(file, MAX_READ)
   })
   ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string | null }) => {
     if (!allowed(file, 'fs:write')) throw new Error(outsideMessage(file))
@@ -197,12 +200,22 @@ export function register(ctx: MainContext) {
  * Files the desktop would run rather than show (scripts, binaries, launchers): a link in a README
  * must not start a program. Those are revealed in the file manager instead.
  */
-const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|ps1|vbs|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|x86_64|hta|scr|cpl|wsf|wsh|msc|reg|psm1|appx|msix)$/i
-export function opensSafely(p: string): boolean {
+const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|msp|ps1|psm1|vbs|vbe|js|jse|mjs|cjs|wsf|wsh|wsc|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|pif|x86_64|hta|scr|cpl|chm|msc|reg|xll|appx|msix|application|appref-ms|settingcontent-ms)$/i
+
+/**
+ * On Windows a file's type is all there is to go on, and the shell runs more of them than any list
+ * keeps up with (.js and .jse under Windows Script Host, .pif, .chm, .settingcontent-ms, whatever is
+ * registered next). So there it is the other way round: only types that open in a viewer are opened.
+ * No SVG or HTML: those open in a browser, where they can run script.
+ */
+const VIEWABLE_ON_WINDOWS = /\.(md|markdown|txt|text|log|csv|tsv|json|jsonl|ya?ml|toml|ini|pdf|png|jpe?g|gif|webp|bmp|ico|tiff?|avif|mp3|wav|ogg|flac|m4a|mp4|webm|mov|mkv|avi|zip|docx|xlsx|pptx|odt|ods|odp|rtf|epub)$/i
+
+export function opensSafely(p: string, platform: NodeJS.Platform = process.platform): boolean {
   try {
     const st = fs.statSync(p)
     if (st.isDirectory()) return true
     if (!st.isFile()) return false
+    if (platform === 'win32') return VIEWABLE_ON_WINDOWS.test(p)
     if (st.mode & 0o111) return false
   } catch {
     return false
