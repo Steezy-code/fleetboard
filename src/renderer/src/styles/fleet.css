@@ -214,6 +214,55 @@
   flex-direction: column;
   align-items: stretch;
 }
+/* Oracle's ambient line: quiet, one row, above the tray; it takes the bar's width like the tray */
+.ambient-line {
+  width: 0;
+  min-width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  font-size: 12px;
+  color: var(--text-2);
+  animation: fade 0.2s ease-out;
+}
+.ambient-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.ambient-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ambient-btn {
+  flex: none;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 99px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.ambient-btn:hover {
+  color: var(--text);
+  border-color: var(--line-2);
+}
 /* the tray takes the bar's width, whatever the window: it never sets the width itself */
 .bar-stack > .inbox-tray {
   width: 0;

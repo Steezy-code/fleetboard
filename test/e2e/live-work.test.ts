@@ -86,3 +86,102 @@ test('while a worker works: its changes, its task’s clock against the estimate
   await new Promise((r) => setTimeout(r, 1500))
   assert.equal((await fleet(projectId)).check.runs.length, ran)
 })
+
+/** Put a team on the board's mirror without running one (debug.ts: useFleet is writable for this). */
+const inject = (state: (projectId: string, now: number) => object, projectId: string, live: string[] = []) =>
+  app!.eval(
+    ({ src, projectId, live }) => {
+      const fb = (window as any).__fleetboard
+      for (const id of live) fb.useApp.getState().setLive(id, true)
+      // eslint-disable-next-line no-new-func
+      fb.useFleet.setState({ state: new Function('projectId', 'now', `return (${src})(projectId, now)`)(projectId, Date.now()) })
+    },
+    { src: state.toString(), projectId, live }
+  )
+
+test('a worker gone quiet raises the ambient line and an Inbox card, with nothing estimated anywhere', async () => {
+  const { projectId } = await launch({})
+  await inject(
+    (projectId, now) => {
+      const base = { agentId: 'claude', projectId, cwd: '/x', status: 'working' }
+      return {
+        projectId,
+        projectPath: '/x',
+        members: {
+          lead: { ...base, id: 'lead', role: 'lead', name: 'Lead', createdAt: now - 30 * 60000, lastOutputAt: now },
+          ada: { ...base, id: 'ada', role: 'worker', name: 'Ada', leadId: 'lead', createdAt: now - 25 * 60000, lastOutputAt: now - 20 * 60000 }
+        },
+        tasks: [{ id: 't1', title: 'Write the parser', owner: 'ada', status: 'doing', startedAt: now - 25 * 60000 }],
+        messages: [],
+        asks: [],
+        ready: null
+      }
+    },
+    projectId,
+    ['lead', 'ada']
+  )
+  const line = await app!.waitFor(async () => (await text('.ambient-line .ambient-text')) || null, { label: 'ambient line' })
+  assert.equal(line, 'Ada has been silent for 20 min on “Write the parser”.')
+  assert.match(await text('.ambient-badge'), /Oracle/i)
+  const card = await app!.waitFor(async () => (await app!.texts('.it-card[data-kind="notice"]')).find((t) => /silent/.test(t)), { label: 'stall card' })
+  assert.match(card, /has been silent for 20 min/)
+
+  await app!.click('.ambient-line .icon-btn')
+  await app!.waitFor(async () => ((await text('.ambient-line')) === '' ? true : null), { label: 'line dismissed' })
+  await new Promise((r) => setTimeout(r, 500))
+  assert.equal(await text('.ambient-line'), '', 'and it stays dismissed')
+  assert.ok((await app!.texts('.it-card[data-kind="notice"]')).some((t) => /silent/.test(t)), 'the Inbox card is its own: still there to act on')
+})
+
+test('work on track shows no line at all', async () => {
+  const { projectId } = await launch({})
+  await inject(
+    (projectId, now) => ({
+      projectId,
+      projectPath: '/x',
+      members: { lead: { agentId: 'claude', projectId, cwd: '/x', status: 'working', id: 'lead', role: 'lead', name: 'Lead', createdAt: now - 5 * 60000, lastOutputAt: now } },
+      tasks: [{ id: 't1', title: 'Write the parser', status: 'doing', startedAt: now - 4 * 60000, estimate: 10 }],
+      messages: [],
+      asks: [],
+      ready: null
+    }),
+    projectId,
+    ['lead']
+  )
+  await new Promise((r) => setTimeout(r, 800))
+  assert.equal(await text('.ambient-line'), '')
+})
+
+test('the Ready card shows the choices each worker says it made', async () => {
+  const { projectId } = await launch({})
+  await inject(
+    (projectId, now) => ({
+      projectId,
+      projectPath: '/x',
+      members: {
+        lead: { agentId: 'claude', projectId, cwd: '/x', status: 'reported', id: 'lead', role: 'lead', name: 'Lead', branch: 'fleet/x', createdAt: now - 9 * 60000 },
+        ada: {
+          agentId: 'claude',
+          projectId,
+          cwd: '/x/ada',
+          status: 'merged',
+          id: 'ada',
+          role: 'worker',
+          name: 'Ada',
+          leadId: 'lead',
+          owns: ['a.txt'],
+          doneWhen: 'a.txt exists',
+          report: 'Wrote a.txt\nDecisions:\n- kept the parser pure: easier to test\n- one file over two: nothing else reads it',
+          createdAt: now - 8 * 60000
+        }
+      },
+      tasks: [],
+      messages: [],
+      asks: [],
+      ready: { leadId: 'lead', branch: 'fleet/x', summary: '- Added a.txt', commits: 1, files: ['a.txt'], at: now }
+    }),
+    projectId
+  )
+  const decisions = await app!.waitFor(async () => (await text('.it-card[data-kind="ready"] .it-claim-decisions')) || null, { label: 'decisions on the Ready card' })
+  assert.deepEqual(decisions.split('\n').map((l) => l.replace(/^↳\s*/, '')), ['kept the parser pure: easier to test', 'one file over two: nothing else reads it'])
+})
