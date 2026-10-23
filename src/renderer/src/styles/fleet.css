@@ -861,6 +861,11 @@
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
+.ch-inert {
+  font-family: var(--font);
+  font-style: normal;
+  color: var(--dim);
+}
 /* the one question, set apart from what was understood: its answers are the card's own buttons */
 .ch-ask {
   display: flex;
