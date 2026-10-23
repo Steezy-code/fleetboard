@@ -50,6 +50,13 @@ test('a key in a file the repo config includes counts too', async () => {
   assert.deepEqual(await programsInRepoConfig(d), ['filter.y.smudge'])
 })
 
+test('a key in .git/config.worktree counts too, which --local leaves out', async () => {
+  // git reads config.worktree once extensions.worktreeConfig is set: a filter there runs on git status
+  const d = repo([['extensions.worktreeConfig', 'true']])
+  execFileSync('git', ['config', '--worktree', 'filter.z.clean', 'some-program'], { cwd: d })
+  assert.deepEqual(await programsInRepoConfig(d), ['filter.z.clean'])
+})
+
 test('the hooks path the app’s own git calls use is an empty folder', async () => {
   const { NO_HOOKS } = await import('../../src/main/run')
   assert.equal(NO_HOOKS[0], '-c')

@@ -113,14 +113,20 @@ const KNOWN_FILTER = /^"?git[- ](lfs|crypt)"?(\s|$)/i
 /**
  * The keys in a repository's own config (with what it includes) that would have git run a program
  * the repository chose. Reading config runs nothing, so a repo the user never opened is read before
- * anything else is done in it.
+ * anything else is done in it. Its own is every scope but the user's (global) and the machine's
+ * (system): .git/config, and .git/config.worktree, which git reads too once extensions.worktreeConfig
+ * is set, and which `--local` leaves out.
  */
 export async function programsInRepoConfig(cwd: string): Promise<string[]> {
   const env = await gitEnv()
-  const r = await run('git', [...GIT_OPTS, 'config', '--local', '--includes', '--list', '-z'], { cwd, env, timeout: 5000 })
+  const r = await run('git', [...GIT_OPTS, 'config', '--includes', '--list', '--show-scope', '-z'], { cwd, env, timeout: 5000 })
   if (r.code !== 0) return []
   const found: string[] = []
-  for (const entry of r.stdout.split('\0')) {
+  // -z with --show-scope: scope NUL key LF value NUL
+  const parts = r.stdout.split('\0')
+  for (let i = 0; i + 1 < parts.length; i += 2) {
+    if (!/^(local|worktree)$/.test(parts[i]!)) continue
+    const entry = parts[i + 1]!
     const nl = entry.indexOf('\n')
     const key = nl < 0 ? entry : entry.slice(0, nl)
     const value = nl < 0 ? '' : entry.slice(nl + 1)
