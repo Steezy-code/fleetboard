@@ -49,3 +49,11 @@ test('a key in a file the repo config includes counts too', async () => {
   execFileSync('git', ['config', '--local', 'include.path', extra], { cwd: d })
   assert.deepEqual(await programsInRepoConfig(d), ['filter.y.smudge'])
 })
+
+test('the hooks path the app’s own git calls use is an empty folder', async () => {
+  const { NO_HOOKS } = await import('../../src/main/run')
+  assert.equal(NO_HOOKS[0], '-c')
+  const dir = NO_HOOKS[1]!.replace(/^core\.hooksPath=/, '')
+  assert.ok(fs.statSync(dir).isDirectory())
+  assert.deepEqual(fs.readdirSync(dir), [])
+})
