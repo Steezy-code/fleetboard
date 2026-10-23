@@ -8,6 +8,7 @@ import { CommandBar } from '../voice/CommandBar'
 import { BranchBadge } from './BranchBadge'
 import { CiBadge } from './CiBadge'
 import { InboxTray } from '../fleet/InboxTray'
+import { offerGoal, useGoalIdeas } from './goalIdeas'
 import { useInbox } from '../fleet/inboxModel'
 
 /** Group the selected consoles into a new team (or open the composer when nothing is selected). */
@@ -30,11 +31,16 @@ export function BottomBar() {
   const app = useApp.getState()
   const hint = useApp((s) => s.project?.extras.hintDismissed)
   const tray = useInbox((s) => s.items.length > 0)
+  const idea = useGoalIdeas()[0]
   return (
     <div className={`bottombar ${tray ? 'with-tray' : ''}`}>
       {!hint && !tray && (
         <div className="try-hint">
-          Try <b>"add tests for the parser"</b> · your team plans it
+          Try{' '}
+          <button className="try-idea" title="Put it in the bar" onClick={() => offerGoal(idea?.text ?? 'add tests for the parser')}>
+            "{idea?.text ?? 'add tests for the parser'}"
+          </button>{' '}
+          · your team plans it
           <button className="ws-x" onClick={() => app.setProjectExtra('hintDismissed', true)}>
             ×
           </button>

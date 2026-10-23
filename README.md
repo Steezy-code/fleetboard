@@ -68,7 +68,7 @@ Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1`
 
 ## Teams: give it a goal, not a task list
 
-Type (or say) what you want in the command bar, for example *"add a Split PDF command with tests"*. Anything that isn't a board command goes to a **Lead**, created automatically:
+Type (or say) what you want in the command bar, for example *"add a Split PDF command with tests"*. An empty board offers up to three goals read from the repo itself (the next unchecked item in PLAN.md, a TODO left in the code, a missing README or tests); a click puts one in the bar and Enter is still yours. Anything that isn't a board command goes to a **Lead**, created automatically:
 
 1. The Lead reads the repo and puts a **plan** on the board.
 2. It starts **workers**, one per task, each in its own git worktree with files only it owns, and briefs them.

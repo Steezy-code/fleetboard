@@ -97,6 +97,14 @@ function inspect(agentId: string, dir: string, isDefault: boolean): { signedIn: 
     const email = decodeJwtEmail(auth?.tokens?.id_token)
     return { signedIn: !!(auth.tokens || auth.OPENAI_API_KEY), account: email ?? (auth.OPENAI_API_KEY ? 'API key' : undefined) }
   }
+  if (agentId === 'gemini') {
+    // a Google sign-in leaves its tokens and the active account here; an API key lives in the
+    // environment, which only counts when it reached this process (a desktop launch may not see .bashrc)
+    const creds = fs.existsSync(path.join(dir, 'oauth_creds.json'))
+    const active = readJson<any>(path.join(dir, 'google_accounts.json'), null)?.active
+    const key = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY)
+    return { signedIn: creds || key, account: typeof active === 'string' && active ? active : key ? 'API key' : undefined }
+  }
   return { signedIn: fs.existsSync(dir) && fs.readdirSync(dir).length > 0 }
 }
 
