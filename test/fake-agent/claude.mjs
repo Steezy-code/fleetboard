@@ -101,7 +101,8 @@ if (opts.print !== undefined) {
       await sleep(5)
     }
     // the real CLI exits 0 after a run that ended in an error, and says so in its result
-    out(rule?.isError ? { type: 'result', subtype: 'error_max_turns', is_error: true, result: reply } : { type: 'result', subtype: 'success', result: reply })
+    // noResult: the stream stops before its result, as when the CLI dies mid-run
+    if (!rule?.noResult) out(rule?.isError ? { type: 'result', subtype: 'error_max_turns', is_error: true, result: reply } : { type: 'result', subtype: 'success', result: reply })
   } else process.stdout.write(reply + '\n')
   process.exit(rule?.exit ?? 0)
 }

@@ -116,11 +116,15 @@ export function register(ctx: MainContext) {
       })
       let err = ''
       child.stderr!.on('data', (d) => (err = (err + d.toString()).slice(-MAX_ERR)))
-      child.on('close', (code) => {
+      child.on('close', (code, signal) => {
         runs.delete(req.runId)
         const out = finalResult ?? text
         if (code && !out) ctx.emit('cli:chunk', req.runId, `\n[${agent.name} exited ${code}] ${stripAnsi(err).slice(-600)}`)
-        resolve({ code: code || (failed ? 1 : 0), text: out || stripAnsi(err) })
+        // Not finished: killed by a signal (a crash, the OOM killer, a cancel, whose caller has gone), a
+        // result that says it failed, or a Claude stream that ended before its result. Callers save
+        // what a finished run returns, a document over the last good one among them.
+        const unfinished = code === null || !!signal || failed || (isClaude && finalResult === null)
+        resolve({ code: code || (unfinished ? 1 : 0), text: out || stripAnsi(err) })
       })
       child.on('error', (e) => {
         runs.delete(req.runId)
