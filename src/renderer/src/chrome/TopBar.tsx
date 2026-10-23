@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smartphone, Square, X } from 'lucide-react'
+import { ArrowLeft, ArrowUpCircle, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smartphone, Square, X } from 'lucide-react'
+import type { UpdateCheck } from '../../../main/update'
 import { invoke, on, IS_WIN } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { UsagePill } from './UsagePill'
@@ -136,11 +137,35 @@ export function TopBar() {
       <button className="icon-btn no-drag" title="Accounts" onClick={() => app.openDrawer('accounts')}>
         <Briefcase size={15} />
       </button>
+      <UpdateChip />
       <button className="icon-btn no-drag" title="Settings" onClick={() => app.openPanel('settings')}>
         <Settings size={15} />
       </button>
       <WindowControls />
     </div>
+  )
+}
+
+/**
+ * Shown only when a release newer than this build exists. Checked once a launch — a release does not
+ * appear often enough to poll for — and it opens the release page, since the installer is unsigned and
+ * the repo is private: downloading it is the user's own signed-in browser's job, not ours.
+ */
+function UpdateChip() {
+  const [out, setOut] = useState<UpdateCheck | null>(null)
+  useEffect(() => {
+    invoke<UpdateCheck>('update:check').then(setOut, () => {})
+  }, [])
+  const rel = out?.newer
+  if (!rel) return null
+  return (
+    <button
+      className="needs-badge no-drag"
+      title={`${rel.tag} is out. You are running ${out?.current}. Opens its release page.`}
+      onClick={() => (rel.url ? void invoke('shell:openExternal', rel.url) : useApp.getState().openPanel('settings'))}
+    >
+      <ArrowUpCircle size={12} /> {rel.tag}
+    </button>
   )
 }
 
