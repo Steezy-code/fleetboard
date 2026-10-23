@@ -40,7 +40,6 @@ export async function loginEnv(): Promise<Record<string, string>> {
 
 export const shellPath = () => defaultShell(cached ?? process.env)
 
-/** `which` against the login PATH. */
 /** Where an executable is, searched on the login PATH like a shell does (no `which` program needed). */
 export async function which(bin: string): Promise<string | null> {
   if (bin === '$SHELL') return shellPath()

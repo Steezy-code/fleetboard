@@ -46,9 +46,9 @@ const MAX_BODY = 4 * 1024 * 1024
 const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
-/** lead id → pending fleet_wait resolver */
 /** this module's timers, so they can be stopped (see register / stopFleetTicks) */
 const ticks: NodeJS.Timeout[] = []
+/** lead id → pending fleet_wait resolver */
 const waiters = new Map<string, (events: FleetMessage[]) => void>()
 /** ask id → pending fleet_ask_user resolver */
 const askWaiters = new Map<string, (answer: string) => void>()
@@ -1349,7 +1349,6 @@ export function answerAsk(askId: string, answer: string): boolean {
   return false
 }
 
-/** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
 /** What the user's checkout is in the middle of (a merge, a rebase…), if anything. */
 async function unfinishedOperation(cwd: string): Promise<string | null> {
   const ops: [string, string][] = [
@@ -1461,7 +1460,6 @@ export async function revertMerge(projectId: string, commit: string): Promise<{ 
   return { ok: true }
 }
 
-/** A project's team state, if it has one. */
 /** Stop the team timers. Called when the app quits. */
 export function stopFleetTicks() {
   for (const t of ticks) clearInterval(t)
@@ -1469,6 +1467,7 @@ export function stopFleetTicks() {
   stopLive()
 }
 
+/** A project's team state, if it has one. */
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
