@@ -1,8 +1,9 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { isUtf8 } from 'node:buffer'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
-import { readRegularText, writeDurable } from './paths'
+import { readRegularFile, readRegularText, writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
 import { allowed, grant, outsideMessage } from './roots'
@@ -90,17 +91,29 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
  * permissions are kept.
  */
 export function writeText(file: string, content: string, base?: string | null): WriteResult {
+  let existing: Buffer | null = null
+  try {
+    existing = readRegularFile(file, MAX_READ)
+  } catch {
+    /* gone, or not a file this could have written */
+  }
   if (base !== undefined) {
-    let current: string | null = null
-    try {
-      current = readRegularText(file, MAX_READ)
-    } catch {
-      /* gone, or not a file this could have written */
-    }
+    const current = existing ? existing.toString('utf8') : null
     if (current !== base) return { ok: false, reason: 'changed', current }
   }
-  writeResolved(file, content)
+  // An editor holds text, so a file that is not UTF-8 came to it with its odd bytes already replaced;
+  // saving that would replace them on disk too. And a textarea gives back "\n" for every line break,
+  // so a file that uses CRLF would be rewritten line by line: it keeps its own line endings.
+  if (existing && !isUtf8(existing)) throw new Error(`${path.basename(file)} is not UTF-8 text, so it was not saved: writing it from an editor would change bytes the editor cannot show.`)
+  writeResolved(file, existing && usesCrlf(existing) ? content.replace(/\r?\n/g, '\r\n') : content)
   return { ok: true }
+}
+
+/** Every line break in it is CRLF (and there is at least one). */
+function usesCrlf(b: Buffer): boolean {
+  const t = b.toString('latin1')
+  const lf = t.split('\n').length - 1
+  return lf > 0 && t.split('\r\n').length - 1 === lf
 }
 
 /**
