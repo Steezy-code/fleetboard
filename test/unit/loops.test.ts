@@ -232,3 +232,23 @@ test('a loop whose goal cannot be checked stops after three tries, instead of fi
   assert.equal(loop(l.id).enabled, false)
   assert.equal(pastes().length, 3, 'the first run and two unchecked ones; the third check ended it')
 })
+
+test('saving an edited loop keeps what the engine did while the editor was open', () => {
+  const l = loops.newLoop({ name: 'tests', instruction: 'run the tests' })
+  loops.upsertLoop(l)
+  const draft = { ...l, instruction: 'run the tests again' }
+  // meanwhile the engine ran it and retired it
+  loops.updateLoop(l.id, { runs: 3, lastRunAt: 5, enabled: false, ended: { reason: 'runs', at: 6 } })
+  assert.equal(loops.saveEditedLoop(draft), true)
+  const saved = loops.getLoops().find((x) => x.id === l.id)!
+  assert.equal(saved.instruction, 'run the tests again')
+  assert.deepEqual([saved.runs, saved.lastRunAt, saved.enabled, saved.ended?.reason], [3, 5, false, 'runs'])
+})
+
+test('a loop deleted while its editor was open is not brought back by saving', () => {
+  const l = loops.newLoop({ name: 'gone' })
+  loops.upsertLoop(l)
+  loops.removeLoop(l.id)
+  assert.equal(loops.saveEditedLoop({ ...l, name: 'edited' }), false)
+  assert.equal(loops.getLoops().some((x) => x.id === l.id), false)
+})

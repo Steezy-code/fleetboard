@@ -11,6 +11,7 @@ import {
   rateEstimate,
   removeLoop,
   runLoopNow,
+  saveEditedLoop,
   setLoopEnabled,
   upsertLoop,
   DEFAULT_STOP,
@@ -263,7 +264,12 @@ function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft:
   const save = () => {
     if (!valid) return
     const now = Date.now()
-    upsertLoop(isNew ? { ...draft, enabled: true, startedAt: now, createdAt: now } : { ...draft })
+    if (isNew) upsertLoop({ ...draft, enabled: true, startedAt: now, createdAt: now })
+    else if (!saveEditedLoop(draft)) {
+      useApp.getState().toast(`Loop “${draft.name}” was deleted while you edited it, so it was not saved`, 'warn')
+      onDone()
+      return
+    }
     useApp.getState().toast(isNew ? `Loop “${draft.name}” started` : 'Loop saved', 'ok')
     onDone()
   }
