@@ -244,7 +244,11 @@ function registerCore() {
   // Render HTML to a real paginated PDF (document studio, markdown export).
   ipcMain.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
     if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
-    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
+    // The HTML is the renderer's, rendered markdown today: printed as a page, never run as one. No
+    // scripts, a session of its own that keeps nothing, and nowhere to navigate or open a window to.
+    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, partition: 'pdf-print' } })
+    w.webContents.on('will-navigate', (e) => e.preventDefault())
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
     const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
     w.destroy()

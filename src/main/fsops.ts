@@ -6,7 +6,7 @@ import type { MainContext } from './context'
 import { readRegularFile, readRegularText, writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
-import { allowed, grant, outsideMessage } from './roots'
+import { allowed, grant, grantDropped, outsideMessage } from './roots'
 
 /** The most a text read hands the renderer: any source file, note or log; past this it is not a text to edit here. */
 const MAX_READ = 32 * 1024 * 1024
@@ -138,9 +138,9 @@ function writeResolved(file: string, content: string | Uint8Array) {
 export function register(ctx: MainContext) {
   const { ipc } = ctx
   // A file dropped on the board. Sent by the preload at the moment getPathForFile resolves it, which
-  // only happens for a File backed by a real file — so this cannot be used to grant an arbitrary
-  // path. Without it every image or file dragged in from outside the project would be refused.
-  ipc.on('fs:grantDropped', (_e, p: string) => grant(String(p)))
+  // only happens for a File backed by a real file, and the bridge's own send refuses this channel.
+  // Without it every image or file dragged in from outside the project would be refused.
+  ipc.on('fs:grantDropped', (_e, p: string) => grantDropped(String(p)))
 
   // a path the user picks is a path the user may use: the three dialogs are the only place that
   // intent is expressed, so they are the only place the allowed set grows (see roots.ts)
