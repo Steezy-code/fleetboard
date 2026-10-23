@@ -101,10 +101,17 @@ export interface FleetState {
 
 /**
  * Folders a worktree gets as links to the user's checkout, so a worker has the installed dependencies
- * without a copy. They are never the worker's work, and a folder-only gitignore pattern
- * (`node_modules/`) does not match a link, so git add and the live diff exclude them by name.
+ * without a copy. Only node_modules: npm replaces the link rather than writing through it, where pip
+ * would install into the user's own .venv and outlive the team.
  */
-export const LINKED_DIRS = ['node_modules', '.venv', 'venv', 'vendor'] as const
+export const LINKED_DIRS = ['node_modules'] as const
+
+/**
+ * Dependency folders that are never a worker's work, so staging and the live diff leave them out by
+ * name: a folder-only gitignore pattern (`node_modules/`) does not match a link. Left out only while
+ * the repo tracks nothing under them, so a committed Go or PHP vendor/ is still saved.
+ */
+export const HEAVY_DIRS = ['node_modules', '.venv', 'venv', 'vendor'] as const
 
 export const emptyFleet = (projectId: string, projectPath: string): FleetState => ({
   projectId,

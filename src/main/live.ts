@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { LINKED_DIRS, type FleetMember, type FleetState } from '@shared/fleet'
+import { HEAVY_DIRS, type FleetMember, type FleetState } from '@shared/fleet'
 import { type CheckRun, failingCount, liveDiff, mayRun, sameDiff, withRun } from '@shared/live'
 import type { MainContext } from './context'
 import { runGoalCheck } from './goal'
@@ -81,14 +81,27 @@ function linesIn(file: string): number {
   }
 }
 
+/**
+ * Pathspecs that leave the dependency folders out of a worktree's `git add` and untracked list, but
+ * only those the repo tracks nothing under: a committed vendor/ is work like any other file.
+ */
+export async function outsideWork(cwd: string): Promise<string[]> {
+  const tracked = await git(cwd, ['ls-files', '-z', '--', ...HEAVY_DIRS], { timeout: 20_000, maxBuffer: 64 * 1024 * 1024 })
+  // unknown is treated as tracked: committing a dependency folder is cheaper than losing an edit
+  if (tracked.code !== 0) return []
+  const has = new Set(tracked.stdout.split('\0').filter(Boolean).map((f) => f.split('/')[0]))
+  return HEAVY_DIRS.filter((d) => !has.has(d)).map((d) => `:(exclude)${d}`)
+}
+
 async function sampleDiff(s: FleetState, m: FleetMember) {
   if (sampling.has(m.id)) return
   sampling.add(m.id)
   try {
     const opts = { timeout: 20_000, maxBuffer: 4 * 1024 * 1024 }
+    const skip = await outsideWork(m.cwd)
     const [num, others] = await Promise.all([
       git(m.cwd, ['diff', '--numstat', 'HEAD'], opts),
-      git(m.cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ...LINKED_DIRS.map((d) => `:(exclude)${d}`)], opts)
+      git(m.cwd, ['ls-files', '--others', '--exclude-standard', '-z', '--', '.', ...skip], opts)
     ])
     if (num.code !== 0 || others.code !== 0) return
     const untracked = others.stdout

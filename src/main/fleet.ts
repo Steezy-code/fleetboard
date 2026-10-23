@@ -20,7 +20,7 @@ import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
-import { runCheck, startLive, stopCheck, stopLive } from './live'
+import { outsideWork, runCheck, startLive, stopCheck, stopLive } from './live'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -162,7 +162,8 @@ function linkHeavyDirs(projectPath: string, wt: string) {
     }
   }
 }
-const ADD_ALL = ['add', '-A', '--', '.', ...LINKED_DIRS.map((d) => `:(exclude)${d}`)]
+/** Stage everything a member changed, dependency folders aside. */
+const addAll = async (cwd: string) => git(cwd, ['add', '-A', '--', '.', ...(await outsideWork(cwd))])
 
 async function createWorktree(repoCwd: string, projectPath: string, projectId: string, dirName: string, branch: string) {
   const dir = path.join(treesDir, assertProjectId(projectId), dirName)
@@ -195,7 +196,7 @@ export type Kept = 'clean' | 'rescued' | 'failed'
  * 'failed' when there is uncommitted work it could not save — then the worktree stays.
  */
 async function keepUncommitted(s: FleetState, m: FleetMember): Promise<Kept> {
-  const add = await git(m.cwd, ADD_ALL)
+  const add = await addAll(m.cwd)
   if (!add.ok) {
     trouble(s, `${m.name}'s changes could not be staged (${add.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
     return 'failed'
@@ -585,7 +586,8 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
  * lands, unchecked. Nothing downstream takes a branch name again.
  */
 async function commitOf(cwd: string, branch: string): Promise<string | null> {
-  const r = await git(cwd, ['rev-parse', '--verify', `${branch}^{commit}`])
+  // refs/heads/ in full, or a tag of the same name would be what is checked and merged
+  const r = await git(cwd, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`])
   const sha = r.out.trim()
   return r.ok && /^[0-9a-f]{7,64}$/.test(sha) ? sha : null
 }
@@ -951,7 +953,7 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       if (!lead) return fail('You have no lead.')
       let commitNote = ''
       if (m.role === 'worker' && m.branch) {
-        const add = await git(m.cwd, ADD_ALL)
+        const add = await addAll(m.cwd)
         if (!add.ok) trouble(s, `${m.name}'s changes could not be staged: ${add.err.slice(0, 160)}. They are still in ${m.cwd}.`)
         const dirty = !(await git(m.cwd, ['diff', '--cached', '--quiet'])).ok
         if (dirty) {
@@ -1442,7 +1444,7 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
  * undo a merge in the middle of the user's history, so they are told to do it themselves.
  */
 export async function revertMerge(projectId: string, commit: string): Promise<{ ok: boolean; error?: string }> {
-  if (!/^[0-9a-f]{7,40}$/.test(commit)) return { ok: false, error: 'That is not a commit id.' }
+  if (!/^[0-9a-f]{7,64}$/.test(commit)) return { ok: false, error: 'That is not a commit id.' }
   const s = states.get(projectId)
   if (!s) return { ok: false, error: 'That project is not open.' }
   const busy = await unfinishedOperation(s.projectPath)
