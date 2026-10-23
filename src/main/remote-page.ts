@@ -41,6 +41,7 @@ pre { margin: 0 0 10px; padding: 8px 10px; background: #0b0a09; border: 1px soli
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: .5; }
+a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 .row { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
 .row .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
@@ -135,7 +136,18 @@ export const PAGE_JS = `'use strict'
       card.appendChild(el('pre', '', r.summary))
       if (r.branch) card.appendChild(el('div', 'muted', r.branch + ' · ' + r.commits + ' commits · ' + r.files + ' files'))
       var acts = el('div', 'actions')
-      acts.appendChild(button('Merge into my checkout', 'primary', function () {
+      // where the board offers only Done (nothing to merge, or the work went to a PR) the phone offers no
+      // Merge either: it has no Done, and main refuses to merge work that has a PR open
+      if (r.closeOnly) {
+        acts.appendChild(el('span', 'muted', r.prUrl ? 'A pull request is open for this work.' : 'Nothing to merge. Close it from the computer.'))
+        if ((r.prUrl || '').indexOf('https://') === 0) {
+          var pr = el('a', 'btn', 'Open the PR')
+          pr.href = r.prUrl
+          pr.target = '_blank'
+          pr.rel = 'noopener noreferrer'
+          acts.appendChild(pr)
+        }
+      } else acts.appendChild(button('Merge into my checkout', 'primary', function () {
         if (!confirm('Merge ' + (r.branch || 'the work') + ' into your checkout on the computer?')) return
         return api('/api/merge', { projectId: s.project.id, confirm: true }).then(function (x) { x.ok ? toast('Merged' + (x.into ? ' into ' + x.into : '') + '.') : toast('Merge failed: ' + (x.error || ''), true) })
       }))

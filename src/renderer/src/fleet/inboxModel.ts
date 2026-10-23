@@ -14,7 +14,7 @@ import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedbac
 import { charterMessage, coerceCharter, FULL_CARD_BELOW, type Charter } from '@shared/charter'
 import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
-import { reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
+import { closeOnly, reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
 import type { Spent } from '@shared/spend'
 
 // The Inbox, as one ordered list: the charter of work that has not started first, then what
@@ -454,11 +454,10 @@ function build() {
     const workers = Object.values(fleet?.members ?? {}).filter((m) => m.leadId === ready.leadId && m.role === 'worker').length
     const review = fleet ? reviewReady(fleet) : null
     fetchSpend(key, review?.claims.map((c) => c.cwd) ?? [])
-    const closeOnly = !ready.branch || ready.commits === 0 || !!ready.prUrl
     // the diff touches a file the charter ruled out: the card offers no Merge at all, as fleet_merge
     // refuses the same work on the Lead's side. Reading the diff is what is left to do.
     const blocked = !!review?.blocked
-    const actions: InboxAction[] = closeOnly
+    const actions: InboxAction[] = closeOnly(ready)
       ? [{ label: 'Done', primary: true, run: () => invoke('fleet:done', project.id) }]
       : blocked
         ? []
@@ -467,7 +466,7 @@ function build() {
     // other than the user gets to see the file that was ruled out
     if (ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl) actions.push({ label: 'Open draft PR', keeps: true, run: () => openPr(project.id, ready) })
     // primary only where Merge was taken away; with nothing to merge, Done is already the primary
-    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked && !closeOnly, keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
+    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked && !closeOnly(ready), keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
     if (ready.prUrl) actions.push({ label: 'Open PR', keeps: true, run: () => invoke('shell:openExternal', ready.prUrl) })
     actions.push({ label: 'Discard', tone: 'deny', run: () => discardTeam(project.id) })
     items.push({

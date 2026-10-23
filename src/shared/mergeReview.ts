@@ -4,7 +4,7 @@
 // s.members (dismissTeam only runs once the user merges), so each worker's owns/doneWhen/report
 // are all still there to check the lead's Ready card against.
 
-import type { FleetMember, FleetState } from './fleet'
+import type { FleetMember, FleetReady, FleetState } from './fleet'
 
 /** A worker's done_when, and whether its own report backs it up. */
 export interface Claim {
@@ -163,6 +163,12 @@ export function reviewReady(s: FleetState): MergeReview | null {
   const blocked = flags.some((f) => f.excluded)
   return { flags, claims, blocked, clean: !blocked && !flags.some((f) => f.outside) && claims.every((c) => c.proven) }
 }
+
+/**
+ * Nothing to merge into the checkout: no branch, no commits, or the work went to a pull request
+ * instead. The Ready card then offers Done rather than Merge, on the board and on the phone.
+ */
+export const closeOnly = (r: Pick<FleetReady, 'branch' | 'commits' | 'prUrl'>) => !r.branch || r.commits === 0 || !!r.prUrl
 
 export interface Stall {
   who: string
