@@ -2,7 +2,7 @@
 // tracker the app uses, on the recording's own clock.
 import fs from 'node:fs'
 import path from 'node:path'
-import { TermScreen } from '../../src/main/screen'
+import { TermScreen, type ScreenView } from '../../src/main/screen'
 import { StatusTracker, TERMINAL_REPLY, detectPrompt, type Prompt } from '../../src/main/status'
 import type { ConsoleStatus } from '../../src/shared/types'
 
@@ -38,6 +38,8 @@ export interface MarkResult {
   screen: string[]
   /** scrollback and screen as plain text, glyphs kept (TermScreen.text) */
   text: string
+  /** the screen as detectPrompt saw it, cursor included */
+  view: ScreenView
 }
 
 /** Run the status tick (every `tick` ms) across the recording and report the state at each mark. */
@@ -69,7 +71,7 @@ export async function replay(cast: Cast, opts: { hooked?: boolean; tick?: number
     } else if (e.kind === 'm') {
       const view = screen.view()
       const prompt = detectPrompt(view)
-      marks.push({ mark: e.data, at: e.t, status: tracker.evaluate(e.t, prompt), prompt, screen: view.lines, text: screen.text(6000) })
+      marks.push({ mark: e.data, at: e.t, status: tracker.evaluate(e.t, prompt), prompt, screen: view.lines, text: screen.text(6000), view })
     }
   }
   screen.dispose()

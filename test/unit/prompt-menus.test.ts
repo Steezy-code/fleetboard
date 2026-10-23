@@ -2,6 +2,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { loadCast, replay } from '../support/casts'
+import { detectPrompt } from '../../src/main/status'
+import type { ScreenView } from '../../src/main/screen'
 import type { Prompt } from '../../src/shared/prompt'
 
 const prompts = new Map<string, Prompt | null>()
@@ -178,4 +180,31 @@ test('Inbox cards: yes/no, Enter, and prompts only the console can answer', asyn
   assert.deepEqual(buttons(approvalFor(await promptAt('claude-session.cast', 'needs-you: security notes'))), ['Continue [allow]'])
   assert.equal(approvalFor(await promptAt('shell-session.cast', 'needs-you: password')), null)
   assert.equal(approvalFor(null), null)
+})
+
+// Codex draws its composer with no rule round it, so a numbered list the user types, or has sent and
+// sees echoed above the reply, read as a menu: the console showed as needing you, and board messages
+// to it were held for up to half an hour.
+const views = new Map<string, ScreenView>()
+async function viewAt(file: string, mark: string) {
+  if (!views.size) for (const m of (await replay(loadCast('codex-session.cast'))).marks) views.set(`codex-session.cast|${m.mark}`, m.view)
+  const v = views.get(`${file}|${mark}`)
+  assert.ok(v, `no mark "${mark}" in ${file}`)
+  return v
+}
+/** The screen with `row` and the one under it replaced by a numbered list. */
+const withList = (v: ScreenView, row: string): ScreenView => {
+  const lines = [...v.lines]
+  const at = lines.findIndex((l) => l === row)
+  assert.ok(at >= 0, row)
+  lines.splice(at, 2, '› 1. bump the version', '  2. update the changelog')
+  return { ...v, lines }
+}
+
+test('Codex: a numbered list typed in the composer is typing, not a menu', async () => {
+  assert.equal(detectPrompt(withList(await viewAt('codex-session.cast', 'idle: typing in the composer'), '› say hi')), null)
+})
+
+test('Codex: a numbered list the user sent, echoed above the reply, is not a menu', async () => {
+  assert.equal(detectPrompt(withList(await viewAt('codex-session.cast', 'idle: after reply'), '› say hi')), null)
 })
