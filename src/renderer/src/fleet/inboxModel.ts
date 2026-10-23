@@ -454,10 +454,8 @@ function build() {
     const failing = item.pr?.checks.filter((c) => c.state === 'failing').map((c) => c.name) ?? []
     items.push(ciNotice(key, item, failing))
   }
-  // members that have gone quiet: silence, not the estimate, so this works on a fresh repo too.
-  // Counted from no earlier than this window opened (performance.timeOrigin): an output time from
-  // before a restart says nothing about the silence since.
-  for (const x of fleet ? stalled(fleet, Date.now(), undefined, performance.timeOrigin) : []) {
+  // members that have gone quiet: silence, not the estimate, so this works on a fresh repo too
+  for (const x of fleet ? stalled(fleet, Date.now()) : []) {
     const key = `stalled:${x.consoleId}`
     if (dismissed.has(key)) continue
     items.push(stalledNotice(key, x))

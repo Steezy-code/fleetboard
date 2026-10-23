@@ -302,11 +302,3 @@ test('a member an hour old but still printing is not stalled: silence is what co
   assert.deepEqual(stalled(s, 60 * 60000), [])
 })
 
-// Review Focus 4
-test('silence is not counted from before the app was watching', () => {
-  const s = emptyFleet('p', '/repo')
-  s.members = { m: member({ id: 'm', name: 'Ada', status: 'working', createdAt: 0, lastOutputAt: 60000 }) }
-  const restart = 100 * 60000
-  assert.deepEqual(stalled(s, restart + 2 * 60000, 5, restart), [], 'two minutes since the restart')
-  assert.deepEqual(stalled(s, restart + 6 * 60000, 5, restart).map((x) => x.minutes), [6])
-})

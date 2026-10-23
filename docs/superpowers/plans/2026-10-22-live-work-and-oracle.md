@@ -171,13 +171,15 @@ Parsing happens only on the existing 700 ms status tick, only while the console 
   ```ts
   // FleetMember gains: lastOutputAt?: number
   export const QUIET_MINUTES = 5
-  export function stalled(s: FleetState, now: number, quietMinutes = QUIET_MINUTES, since = 0): Stall[]   // Stall.minutes is now minutes silent
-  export function stampOutput(m: FleetMember, at: number | null, now: number): boolean  // in live.ts's pure half
+  export function stalled(s: FleetState, now: number, quietMinutes = QUIET_MINUTES): Stall[]   // Stall.minutes is now minutes silent
+  // in src/main/live.ts, pure and tested:
+  export function stampOutput(m: FleetMember, at: number | null): boolean
+  export function watchFrom(s: FleetState, now: number): boolean
   ```
 
-The tick reads `ptys.lastOutput(id)` every 15 s and writes it to the member only when it moved by 30 s or more, so a chatty console does not rewrite the fleet file every tick. `since` is when this run of the app started: silence is never counted from before it (Review Focus 4).
+The tick reads `ptys.lastOutput(id)` every 15 s and writes it to the member only when it moved by 30 s or more, so a chatty console does not rewrite the fleet file every tick. When the tick starts, `watchFrom` restarts every busy member's clock at now: silence is never counted from before this run of the app was watching (Review Focus 4), and nothing downstream has to know about restarts.
 
-- [ ] **Step 1: Write the failing tests** — a member old but talking is not stalled; one silent past the threshold is, with its silent minutes; reported and merged members never are; a `lastOutputAt` older than `since` counts from `since`; `stampOutput` skips sub-30 s moves.
+- [ ] **Step 1: Write the failing tests** — a member old but talking is not stalled; one silent past the threshold is, with its silent minutes; reported and merged members never are; after `watchFrom` at a restart, two minutes on is not a stall and six is; `stampOutput` skips sub-30 s moves and never goes backwards.
 - [ ] **Step 2: Run them and watch them fail** — and rewrite the existing `stalled` test, which encoded the age reading the ponytail note asked to replace.
 - [ ] **Step 3: Implement**, and change the card's head to "has been silent for 7 min", its Dismiss and Ask for a status unchanged.
 - [ ] **Step 4: Run them and watch them pass.**
@@ -291,7 +293,7 @@ The tick reads `ptys.lastOutput(id)` every 15 s and writes it to the member only
   ```ts
   export interface Drift { key: string; kind: 'check' | 'silent' | 'over'; who?: string; consoleId?: string; text: string }
   /** the one drift worth a line, or null: almost always null */
-  export function driftOf(s: FleetState | null, now: number, o?: { live?: (id: string) => boolean; since?: number; dismissed?: Set<string> }): Drift | null
+  export function driftOf(s: FleetState | null, now: number, o?: { live?: (id: string) => boolean; dismissed?: Set<string> }): Drift | null
   ```
 
 Only while a Lead is working. Three triggers, in this order of weight: the done-when going the wrong way between its last two runs (more failing, or passing to failing); a member silent past `QUIET_MINUTES`; a task (or the job) at twice its estimate and at least five minutes past it. Each sentence is built from the trigger's own fields. A key names the specific occurrence, so a dismissed drift stays dismissed until something new happens — new output then new silence, a new run.

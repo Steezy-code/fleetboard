@@ -42,6 +42,21 @@ export function stampOutput(m: FleetMember, at: number | null): boolean {
 
 const busy = (m: FleetMember) => m.status === 'working' || m.status === 'starting'
 
+/**
+ * Silence is only counted from when this run of the app started watching. An output time saved
+ * before a restart says nothing about the time since — every member would come back "silent" for
+ * the length of the outage — so each busy member's clock starts again from now. True when any changed.
+ */
+export function watchFrom(s: FleetState, now: number): boolean {
+  let moved = false
+  for (const m of Object.values(s.members))
+    if (busy(m) && (m.lastOutputAt ?? m.createdAt) < now) {
+      m.lastOutputAt = now
+      moved = true
+    }
+  return moved
+}
+
 function outputTick() {
   if (!live) return
   for (const s of live.teams()) {
@@ -163,12 +178,16 @@ function checkTick() {
 /** Start sampling. Called by fleet.register once the teams are loaded. */
 export function startLive(l: Live) {
   live = l
-  // a run in flight when the app last quit is not in flight now: left set, nothing would run again
-  for (const s of l.teams())
+  const now = Date.now()
+  for (const s of l.teams()) {
+    let moved = watchFrom(s, now)
+    // a run in flight when the app last quit is not in flight now: left set, nothing would run again
     if (s.check?.running) {
       delete s.check.running
-      l.changed(s)
+      moved = true
     }
+    if (moved) l.changed(s)
+  }
   for (const [fn, ms] of [
     [outputTick, OUTPUT_TICK_MS],
     [diffTick, DIFF_TICK_MS],

@@ -180,15 +180,14 @@ export const QUIET_MINUTES = 5
 
 /**
  * Members still going that have gone quiet, quietest first. Measured from the last output the main
- * process saw (`lastOutputAt`), never from the estimate: this is what works on the first goal in a
- * fresh repo, where nothing estimated anything. `since` is when this run of the app started watching
- * — an output time from before a restart says nothing about the silence since, so silence is never
- * counted from before it.
+ * process saw (`lastOutputAt`, which it restarts when it starts watching: see live.watchFrom), never
+ * from the estimate: this is what works on the first goal in a fresh repo, where nothing estimated
+ * anything.
  */
-export function stalled(s: FleetState, now: number, quietMinutes = QUIET_MINUTES, since = 0): Stall[] {
+export function stalled(s: FleetState, now: number, quietMinutes = QUIET_MINUTES): Stall[] {
   return Object.values(s.members)
     .filter((m) => (m.status === 'working' || m.status === 'starting') && !m.report)
-    .map((m) => ({ who: m.name, consoleId: m.id, minutes: Math.floor((now - Math.max(m.lastOutputAt ?? m.createdAt, since)) / 60000) }))
+    .map((m) => ({ who: m.name, consoleId: m.id, minutes: Math.floor((now - (m.lastOutputAt ?? m.createdAt)) / 60000) }))
     .filter((x) => x.minutes >= quietMinutes)
     .sort((a, b) => b.minutes - a.minutes)
 }

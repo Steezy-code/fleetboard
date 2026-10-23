@@ -177,3 +177,23 @@ test('an output time is written when it has moved enough to matter, and only for
   assert.equal(m.lastOutputAt, 31_000)
   assert.equal(stampOutput(m, 5_000), false)
 })
+
+// Review Focus 4
+test('after a restart, silence is counted from when the app started watching, not from before', async () => {
+  const { watchFrom } = await import('../../src/main/live')
+  const { emptyFleet } = await import('../../src/shared/fleet')
+  const { stalled } = await import('../../src/shared/mergeReview')
+  const s = emptyFleet('p', '/repo')
+  const base = { role: 'worker', agentId: 'claude', projectId: 'p', cwd: '/x', createdAt: 0 } as const
+  s.members = {
+    w: { ...base, id: 'w', name: 'Ada', status: 'working', lastOutputAt: MIN },
+    m: { ...base, id: 'm', name: 'Bo', status: 'merged', lastOutputAt: MIN }
+  }
+  const restart = 100 * MIN
+  assert.equal(watchFrom(s, restart), true)
+  assert.equal(s.members.w!.lastOutputAt, restart)
+  assert.equal(s.members.m!.lastOutputAt, MIN, 'only members still going')
+  assert.deepEqual(stalled(s, restart + 2 * MIN), [], 'two minutes since the restart is not a stall')
+  assert.deepEqual(stalled(s, restart + 6 * MIN).map((x) => x.minutes), [6])
+  assert.equal(watchFrom(s, restart), false, 'nothing older left to move')
+})

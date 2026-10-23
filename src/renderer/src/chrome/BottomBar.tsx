@@ -8,6 +8,7 @@ import { CommandBar } from '../voice/CommandBar'
 import { BranchBadge } from './BranchBadge'
 import { CiBadge } from './CiBadge'
 import { InboxTray } from '../fleet/InboxTray'
+import { AmbientLine } from '../fleet/AmbientLine'
 import { useInbox } from '../fleet/inboxModel'
 
 /** Group the selected consoles into a new team (or open the composer when nothing is selected). */
@@ -81,6 +82,7 @@ export function BottomBar() {
         </button>
       </div>
       <div className="bar-stack">
+        <AmbientLine />
         <InboxTray />
         <CommandBar />
       </div>
