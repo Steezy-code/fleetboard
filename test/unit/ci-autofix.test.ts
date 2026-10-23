@@ -7,7 +7,7 @@ import { test, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
 const { useApp } = await import('@/state/store')
-const { applyCiStatus, useCi } = await import('@/workbench/ciStore')
+const { applyCiStatus, fixCi, useCi } = await import('@/workbench/ciStore')
 const { useUsage, DEFAULT_BUDGETS } = await import('@/continuity/usageStore')
 
 const run = (id: number, state: string) => ({
@@ -154,4 +154,28 @@ test('a CI fixer never auto-approves, whatever the global setting: its prompt ho
   assert.ok(fixer, 'a same-repo PR still gets its fixer')
   assert.equal(fixer!.data.autoApprove, false)
   useApp.setState((s) => ({ settings: { ...s.settings, autoApprove: false } }))
+})
+
+test("Fix it on a fork's PR asks first, says why, and does nothing on a no", async () => {
+  const asked: string[] = []
+  let answer = false
+  useApp.setState({ confirm: async (c: { title: string }) => (asked.push(c.title), answer) } as never)
+  applyCiStatus(prStatus([pr(9, 'failing', true)]) as never)
+  const item = { key: 'pr:9', label: 'PR #9', branch: 'feature', url: 'u', runIds: [90], pr: pr(9, 'failing', true) }
+  assert.equal(await fixCi(item as never), null)
+  assert.deepEqual(asked, ['PR #9 comes from a fork'])
+  assert.equal(spawned(), 0)
+  answer = true
+  assert.ok(await fixCi(item as never), 'on a yes it sends one')
+  assert.equal(spawned(), 1)
+  assert.equal(useApp.getState().project!.extras.prAgents, undefined, "and a fork's branch name never routes comments to it")
+})
+
+test('an agent sent on its own is written in the night log', async () => {
+  const appended: { kind: string }[] = []
+  ipc.handle('journal:append', (e: { kind: string }) => void appended.push(e))
+  applyCiStatus(prStatus([pr(11, 'passing', false)]) as never)
+  applyCiStatus(prStatus([pr(11, 'failing', false)]) as never)
+  await new Promise((r) => setTimeout(r, 30))
+  assert.ok(appended.some((e) => e.kind === 'ci.fix'))
 })

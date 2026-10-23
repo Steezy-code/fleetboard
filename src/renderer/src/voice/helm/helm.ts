@@ -13,7 +13,8 @@ import { setVoice, useThread } from '../thread'
 import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planner'
 import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
-import { autoApproves, routeFeedback, useFeedback } from '../../workbench/prFeedback'
+import { autoApproves, routeFeedback, trustedAuthor, unsent, useFeedback } from '../../workbench/prFeedback'
+import type { PrFeedback } from '../../../../main/ci'
 import { startBrainstorm } from './brainstorm'
 import { CHARTER_FIELDS } from '../../fleet/charter'
 import { readOnlyAgent } from '@shared/agents'
@@ -414,7 +415,14 @@ async function execOption(o: HelmOption, request: string) {
         const t = githubTarget(o.github!.do, o.github!.target)
         if (!t) throw new Error('that is no longer red or waiting')
         if (o.github!.do === 'fix-ci') await fixCi(t as ReturnType<typeof ciItems>[number])
-        else await routeFeedback(t as any)
+        else {
+          // nobody read these first: only what is new, from people who can push (the rest waits in the CI drawer)
+          const pr = t as PrFeedback
+          const result = useFeedback.getState().result
+          const list = unsent(pr).filter((c) => trustedAuthor(c, result?.ok ? result.viewer : undefined))
+          if (!list.length) return reply(`Nothing new on PR #${pr.number} from reviewers who can push. The CI drawer has the rest.`)
+          await routeFeedback(pr, { list })
+        }
         return
       }
       case 'answer':

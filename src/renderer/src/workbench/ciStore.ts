@@ -4,6 +4,8 @@ import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { sendToConsole, spawnConsoles } from '../engine/consoles'
 import { maySpendOn } from '../engine/guards'
+import { journal } from '../lib/journal'
+import { goToItem } from '../orchestration/fleet'
 import { autoApproves, ownerOf, refreshFeedback, setBranchAgent, useFeedback } from './prFeedback'
 import type { CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
@@ -171,16 +173,20 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   const status = useCi.getState().status
   const path = useCi.getState().path
   if (!app.project || !status?.ok || !path) return null
-  // Automatic only: when the user presses Fix it themselves, that is their call to make. Spawning an
-  // agent is the most expensive thing this app does on its own.
-  // never on its own for a fork's PR: anyone can open one, and its title, check names and log are
-  // theirs, written into the fixer's prompt. The user can still send one by pressing Fix it.
-  if (opts.auto && item.pr?.fork) return null
-  // the spend guard asks about the agent a fixer runs: a new console's default agent
-  if (opts.auto && !maySpendOn(app.settings.defaultAgent, 'sending an agent at a CI failure')) return null
+  // Never on its own for a fork's PR: anyone can open one, and its title, check names and log are
+  // theirs, written into the fixer's prompt. Pressing Fix it on one asks first, saying so.
+  if (item.pr?.fork) {
+    if (opts.auto) return null
+    const ok = await app.confirm({
+      title: `PR #${item.pr.number} comes from a fork`,
+      body: "Its title, check names and CI log are its author's words, and its code is theirs. A fixer reads all of it and runs the checks on this computer.",
+      confirm: 'Send a fixer anyway'
+    })
+    if (!ok) return null
+  }
   const busy = fixerFor(item.key)
   if (busy) {
-    if (!opts.auto) app.focusItem(busy)
+    if (!opts.auto) goToItem(busy, allConsoles().find((c) => c.id === busy)?.workspaceId)
     return busy
   }
   const logs: string[] = []
@@ -204,10 +210,18 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   ].join('\n\n')
   // a PR that an agent is already working on goes back to that agent
   const owner = item.pr ? ownerOf(item.pr) : null
-  if (owner && opts.auto && autoApproves(owner.id)) {
-    // it would act on a CI log without asking: tell the user instead, who can still send it by hand
-    app.toast(`CI failed on PR #${item.pr!.number}: ${owner.name} approves everything, so the failure was not sent to it automatically`, 'warn')
-    return null
+  // Spending on its own is the most expensive thing this does: checked against the agent that would
+  // do the work, the owner's or a new console's. When the user presses Fix it, that is their call.
+  const agent = owner ? String(allConsoles().find((c) => c.id === owner.id)?.data.agentId ?? '') : app.settings.defaultAgent
+  if (opts.auto && !maySpendOn(agent, 'sending an agent at a CI failure')) return null
+  if (owner && autoApproves(owner.id)) {
+    // it would act on a CI log without asking: never on its own, and only once the user has said so
+    if (opts.auto) {
+      app.toast(`CI failed on PR #${item.pr!.number}: ${owner.name} approves everything, so the failure was not sent to it automatically`, 'warn')
+      return null
+    }
+    const ok = await app.confirm({ title: `${owner.name} approves everything`, body: 'It would act on this CI log, which is other people\'s text, without asking you first.', confirm: 'Send it anyway' })
+    if (!ok) return null
   }
   if (owner) {
     const note = `${prompt.replace(/\n\nDon't touch my current checkout[^\n]*|\n\nThen commit and push to [^\n]*/, '')}\n\nFix it on ${item.branch} and push.`
@@ -216,6 +230,7 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
     else sendToConsole(owner.id, note)
     fixers.set(item.key, owner.id)
     app.toast(`Sent the CI failure on PR #${item.pr!.number} to ${owner.name}`, 'info')
+    if (opts.auto) journal('ci.fix', `CI failed on PR #${item.pr!.number}, so the failure was sent to ${owner.name}`, { pr: item.pr!.number, consoleId: owner.id })
     return owner.id
   }
   const taken = allConsoles().map((c) => c.data.name as string)
@@ -226,8 +241,10 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   const [id] = spawnConsoles({ names: [name], initialPrompt: prompt, autoApprove: false })
   if (!id) return null
   fixers.set(item.key, id)
-  if (item.pr) setBranchAgent(item.branch, id)
+  // a fork's branch name is the outsider's: never what routes later comments to this agent
+  if (item.pr && !item.pr.fork) setBranchAgent(item.branch, id)
   app.toast(opts.auto ? `CI failed, so ${name} is on it: ${item.label}` : `${name} is on it`, 'info')
+  if (opts.auto) journal('ci.fix', `CI failed on ${item.label}, so ${name} was started to fix it`, { consoleId: id, branch: item.branch })
   if (!opts.auto) window.setTimeout(() => useApp.getState().focusItem(id), 120)
   return id
 }
