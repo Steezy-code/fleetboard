@@ -5,6 +5,9 @@ import crypto from 'node:crypto'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
 import { emptyFleet } from '@shared/fleet'
+import type { Charter } from '@shared/charter'
+import { charterMessage, coerceCharter } from '@shared/charter'
+import { excludedBy } from '@shared/mergeReview'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -279,7 +282,7 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
 
 // ---------------------------------------------------------------- prompts
 
-function leadPrompt(m: FleetMember) {
+export function leadPrompt(m: FleetMember) {
   return [
     `You are ${m.name}, the Lead of a Fleetboard team. The user gives you goals; you get them done through workers.`,
     'You have fleet tools (mcp__fleet__*). Rules:',
@@ -290,7 +293,8 @@ function leadPrompt(m: FleetMember) {
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
     '6. Once everything is merged, start one reviewer with fleet_spawn_reviewer to check the combined work against the goal and run the checks. Send any findings to the worker that owns the code (fleet_send), wait, merge again.',
     '7. Ask the user only for real decisions, with fleet_ask_user and 2-4 short options, each with a one-line trade-off in notes and the one you recommend. Make reasonable choices yourself otherwise.',
-    '8. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
+    '8. Your goal as given, and any assumptions, "Do not touch" or "Done when" that come with it, are what the user confirmed: not yours to reinterpret or widen. If the job looks wrong, ask with fleet_ask_user rather than deciding.',
+    '9. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
     'Keep your own messages short: one-line progress updates.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
   ].join('\n')
@@ -311,9 +315,11 @@ function workerPrompt(m: FleetMember, lead?: FleetMember) {
   ].join('\n')
 }
 
-function briefFor(m: FleetMember, lead?: FleetMember) {
+/** `wontTouch` is what the user ruled out when they confirmed the charter; a worker cannot read the lead's brief to learn it. */
+export function briefFor(m: FleetMember, lead?: FleetMember, wontTouch: string[] = []) {
   const parts = [`Task from ${lead?.name ?? 'the lead'}: ${m.task}`]
   if (m.owns?.length) parts.push(`You own: ${m.owns.join(', ')}.`)
+  if (wontTouch.length) parts.push(`Do not touch: ${wontTouch.join(', ')}.`)
   if (m.doneWhen) parts.push(`Done when: ${m.doneWhen}.`)
   parts.push(m.role === 'reviewer' ? 'When finished, call fleet_report with your verdict.' : 'When done, call fleet_report.')
   // CLIs without a system-prompt flag get the role rules inline
@@ -500,10 +506,34 @@ function pickName(s: FleetState, wanted?: string) {
   return `Worker ${used.size + 1}`
 }
 
-export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string }): Promise<FleetMember> {
+/** What the Lead is first told: the agreed charter, with the goal after it where that is more than the request (see charterMessage), otherwise the goal as given. */
+export const goalMessageFor = (charter: Charter | undefined, goal: string) => (charter ? charterMessage(charter, goal) : goal)
+
+/**
+ * A charter off the wire, through coercion again. It arrives from the renderer like every other
+ * `fleet:startLead` argument and is trusted no further than `projectId` is (see assertProjectId): an
+ * `understood` that is not a string would otherwise throw where the goal is composed, after the
+ * worktree and the console already exist, and a `wontTouch` that is a string has a length and would
+ * throw inside the merge gate it is supposed to be guarding. The charter's own `request` is kept —
+ * it is what tells charterMessage whether `goal` says anything the brief does not.
+ */
+export const trustedCharter = (charter: Charter | undefined, goal: string): Charter | undefined => {
+  if (!charter) return undefined
+  const request = typeof charter.request === 'string' && charter.request.trim() ? charter.request : goal
+  return coerceCharter(charter, request)
+}
+
+/** What a Lead is told when its console comes back. A restored conversation still has its goal, so it is not repeated. */
+export function leadRestartNote(o: { how: string; team: string; task: string; charter: Charter | undefined; resume: boolean }) {
+  const goal = o.resume ? '' : ` Your goal: ${goalMessageFor(o.charter, o.task)}`
+  return `[Fleet] ${o.how}${goal} Team: ${o.team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.`
+}
+
+export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
   const s = state(opts.projectId, opts.projectPath)
   const id = uid('con')
   const agentId = opts.agentId ?? 'claude'
+  const charter = trustedCharter(opts.charter, opts.goal)
   const title = (opts.title ?? opts.goal).trim()
   const slug = `${slugify(title)}-${id.slice(-4)}`
   let cwd = opts.projectPath
@@ -533,9 +563,10 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   memberProject.set(id, s.projectId)
   s.ready = null
   s.tasks = []
+  s.charter = charter
   changed(s)
   await startConsole(s, m)
-  post(s, { from: 'user', to: id, kind: 'goal', text: opts.goal })
+  post(s, { from: 'user', to: id, kind: 'goal', text: goalMessageFor(charter, opts.goal) })
   return m
 }
 
@@ -549,6 +580,59 @@ export function numstat(out: string): { path: string; add: number; del: number }
     .map((l) => l.split('\t'))
     .filter((p) => p.length >= 3)
     .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
+}
+
+/**
+ * The commit a branch points at now. Both gates resolve the branch once and then check and merge
+ * that commit: a worker is a real CLI that stays alive for follow-ups and knows a merge comes after
+ * its report, so a branch name read twice can be two commits — and the second one is the one that
+ * lands, unchecked. Nothing downstream takes a branch name again.
+ */
+async function commitOf(cwd: string, branch: string): Promise<string | null> {
+  const r = await git(cwd, ['rev-parse', '--verify', `${branch}^{commit}`])
+  const sha = r.out.trim()
+  return r.ok && /^[0-9a-f]{7,64}$/.test(sha) ? sha : null
+}
+
+/**
+ * The files merging `commit` into the checkout at `cwd` would bring in — what the exclusions are
+ * matched against, at both gates (the Lead's fleet_merge and the user's mergeReady).
+ *
+ * `-z`: git quotes a non-ASCII name otherwise, and a quoted name matches no exclusion.
+ * `--no-renames`: a move touches the file it left.
+ */
+async function wouldTouch(cwd: string, commit: string): Promise<{ ok: true; files: string[] } | { ok: false; error: string }> {
+  const d = await git(cwd, ['diff', '--name-only', '-z', '--no-renames', `HEAD...${commit}`])
+  if (!d.ok) return { ok: false, error: (d.err || d.out).slice(0, 300) }
+  return { ok: true, files: d.out.split('\0').filter(Boolean) }
+}
+
+/** The files among `touched` an exclusion covers, each named with the rule it hit. */
+const excludedHits = (touched: string[], wontTouch: string[] | undefined, how: string) =>
+  touched.flatMap((f) => {
+    const rule = excludedBy(f, wontTouch)
+    return rule ? [`${f} (${how} "${rule}")`] : []
+  })
+
+const andMore = (hits: string[]) => (hits.length > 5 ? `, and ${hits.length - 5} more` : '')
+
+/** Why a worker's branch cannot be merged: it changed files the charter's won't-touch list rules out. Null when it can. */
+export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined): string | null {
+  const hits = excludedHits(touched, wontTouch, 'excluded by')
+  if (!hits.length) return null
+  return `Not merged: ${worker} changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}, which the user ruled out. Ask ${worker} to revert ${hits.length === 1 ? 'it' : 'them'} with fleet_send, then merge again.`
+}
+
+/**
+ * The same refusal for the user's own merge, in their words rather than the Lead's. Said by
+ * mergeReady, which is the one place every client reaches — the Ready card, and the phone's
+ * /api/merge (remote.ts) — so the card hiding its Merge button is the courtesy and this is the rule.
+ * Both clients show it after "Merge failed:", so it does not say that itself.
+ */
+export function excludedMergeRefusal(touched: string[], wontTouch: string[] | undefined): string | null {
+  const hits = excludedHits(touched, wontTouch, 'ruled out by')
+  if (!hits.length) return null
+  return `this work changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}. Tell the Lead to put ${hits.length === 1 ? 'it' : 'them'} back, or discard the team's work.`
 }
 
 const str = (description: string) => ({ type: 'string', description })
@@ -754,7 +838,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
       await startConsole(s, w, { acceptEdits: !reviewer })
-      post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m) })
+      post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m, s.charter?.wontTouch) })
       return text(
         `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
           (ref ? ` On the plan: "${ref.title}".` : '') +
@@ -831,7 +915,19 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
     case 'fleet_merge': {
       const w = findMember(s, a.worker)
       if (!w?.branch) return fail('That worker has no branch to merge.')
-      const r = await git(m.cwd, ['merge', '--no-ff', '--no-edit', w.branch])
+      // the commit that is checked is the commit that is merged, whatever the worker commits meanwhile
+      const at = await commitOf(m.cwd, w.branch)
+      if (!at) return fail(`Not merged: ${w.name}'s branch ${w.branch} is not a commit git can find.`)
+      // before the merge, so a refusal leaves the lead's worktree as it was
+      const wontTouch = s.charter?.wontTouch
+      if (wontTouch?.length) {
+        const d = await wouldTouch(m.cwd, at)
+        if (!d.ok) return fail(`Not merged: ${w.name}'s changes could not be checked against what the user ruled out: ${d.error}`)
+        const refusal = excludedRefusal(w.name, d.files, wontTouch)
+        if (refusal) return fail(refusal)
+      }
+      // -m, or the merge commit would be named after the sha rather than the branch it came from
+      const r = await git(m.cwd, ['merge', '--no-ff', '--no-edit', '-m', `Merge ${w.branch}`, at])
       if (!r.ok) {
         const conflicts = (await git(m.cwd, ['diff', '--name-only', '--diff-filter=U'])).out
         await git(m.cwd, ['merge', '--abort'])
@@ -1039,10 +1135,9 @@ function memberStarted(req: PtySpawnRequest) {
   if (m.role === 'lead') {
     const crew = Object.values(s.members).filter((x) => x.leadId === m.id && x.status !== 'closed')
     const team = crew.length ? crew.map((x) => `${x.name} (${x.role}): ${x.status === 'working' ? 'still working' : x.status}`).join('; ') : 'nobody started yet'
-    const goal = req.resume ? '' : ` Your goal: ${m.task}`
-    post(s, { from: 'user', to: m.id, kind: 'system', text: `[Fleet] ${how}${goal} Team: ${team}. Merge any finished work that is not merged yet, call fleet_wait for reports, then carry on.` })
+    post(s, { from: 'user', to: m.id, kind: 'system', text: leadRestartNote({ how, team, task: m.task ?? '', charter: s.charter, resume: !!req.resume }) })
   } else {
-    post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead)}` })
+    post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead, s.charter?.wontTouch)}` })
   }
 }
 
@@ -1208,12 +1303,27 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
     const lead = s.members[s.ready.leadId]
     if (!lead) return { ok: false, error: 'The team has no lead to merge from.' }
     if (lead.branch) {
+      // the commit that is checked is the commit that is merged: the Lead is still running and may
+      // commit again between the two
+      const at = await commitOf(s.projectPath, lead.branch)
+      if (!at) return { ok: false, error: `The team's branch ${lead.branch} is not a commit git can find, so there is nothing to merge.` }
+      // What the user ruled out is enforced here rather than only on the card, because this is the
+      // function every client reaches: the Ready card, and the phone's /api/merge. Checked against
+      // what the merge would actually bring in, not the file list the card was drawn from, which the
+      // Lead may have added to since.
+      const wontTouch = s.charter?.wontTouch
+      if (wontTouch?.length) {
+        const d = await wouldTouch(s.projectPath, at)
+        if (!d.ok) return { ok: false, error: `The team's changes could not be checked against what you ruled out: ${d.error}` }
+        const refusal = excludedMergeRefusal(d.files, wontTouch)
+        if (refusal) return { ok: false, error: refusal }
+      }
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
       const busy = await unfinishedOperation(s.projectPath)
       if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then merge again; the work stays on ${lead.branch}.` }
-      const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, lead.branch])
+      const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, at])
       if (!r.ok) {
         // undo only a merge this started (a conflict); a merge git refused to start left nothing to undo
         if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['merge', '--abort'])

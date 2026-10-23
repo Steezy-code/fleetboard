@@ -440,6 +440,12 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* a sentence in a card body that has to wrap; .it-meta is one clipped line */
+.it-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
 .it-files > div {
   display: flex;
   gap: 8px;
@@ -496,6 +502,11 @@
    position: absolute and tears the row out of the card */
 .it-claim.risk svg {
   color: var(--text-3, var(--text-2));
+}
+/* a file the charter ruled out: the one flag that stops the merge rather than annotating it */
+.it-claim.danger svg,
+.it-claim.danger .it-claim-ev {
+  color: var(--danger-text);
 }
 .it-claim-what {
   flex: 1;
@@ -571,6 +582,151 @@
 }
 .it-opt-top .it-rec {
   order: 2;
+}
+
+/* The charter (CharterCard.tsx): the full card's rows, and the one-line glance. In both, the
+   done-when command keeps its width and the prose gives way — the command is the half that runs. */
+.ch-one {
+  display: flex;
+  /* not centred: a command long enough to wrap would otherwise leave the line it belongs to floating beside it */
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+/* basis 0: it asks for no width of its own and takes what the command leaves, which is the rule this
+   rendering exists for — the prose gives way, the command does not */
+.ch-understood {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the command keeps its width and wraps rather than ellipsizing anywhere: a later phase runs it on a
+   loop, so a card that cut it in half would be agreeing to something nobody read */
+.ch-done {
+  /* shrinkable: in the full card it shares a row with the "Done when" label, and a chip that cannot
+     give way pushes its own right edge past the tray, which then scrolls sideways and cuts the text */
+  flex: 0 1 auto;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.ch-done svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+}
+.ch-done > span {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* on the glance it is the prose that gives way instead (it asks for no width at all), and a long
+   command takes a second line rather than ending in an ellipsis */
+.ch-one .ch-done {
+  max-width: 55%;
+}
+.ch-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+/* with the row's own text, not centred against it: a row of six exclusions is tall, and a centred
+   icon floats away from the label it belongs to */
+.ch-row > svg {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 3px;
+  color: var(--muted);
+}
+.ch-badge {
+  flex: none;
+  padding: 1px 5px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ch-badge.known {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+}
+.ch-badge.guess {
+  color: var(--muted);
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+/* an assumption runs to 300 characters, and it is one of the things the card exists to show: it wraps */
+.ch-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.ch-from {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.ch-label {
+  flex: none;
+  color: var(--muted);
+}
+/* one exclusion per line, each wrapping: a merge is refused for these, so none of them is hidden */
+.ch-paths {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+/* the one question, set apart from what was understood: its answers are the card's own buttons */
+.ch-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-soft);
+}
+.ch-gap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--accent-text);
 }
 .cb-reply {
   display: inline-flex;

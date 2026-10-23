@@ -275,8 +275,8 @@ function markIdea(id: string, ideaIdx: string, patch: Partial<Idea> | null) {
 
 export async function ideaToTeam(nodeId: string, idea: Idea) {
   const d = dataOf(nodeId)
-  await sendGoal(`${idea.title}: ${idea.pitch}${idea.why ? ` (Why: ${idea.why})` : ''}${d ? ` This came out of a brainstorm on "${d.topic}".` : ''}`)
-  markIdea(nodeId, idea.id, { done: 'team' })
+  const lead = await sendGoal(`${idea.title}: ${idea.pitch}${idea.why ? ` (Why: ${idea.why})` : ''}${d ? ` This came out of a brainstorm on "${d.topic}".` : ''}`)
+  if (lead) markIdea(nodeId, idea.id, { done: 'team' }) // not when it was dismissed at the gate
 }
 
 /** Append it to PLAN.md (made if missing) under an "Ideas" heading. */

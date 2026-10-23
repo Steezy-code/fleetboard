@@ -1,5 +1,7 @@
 // Lead/worker teams: shared shapes between the fleet core (main) and the board (renderer).
 
+import type { Charter } from './charter'
+
 export type FleetRole = 'lead' | 'worker' | 'reviewer'
 
 export interface FleetMember {
@@ -78,6 +80,8 @@ export interface FleetState {
   messages: FleetMessage[]
   asks: FleetAsk[]
   ready: FleetReady | null
+  /** what the current job was agreed to be; absent on a board saved before charters, or one started without */
+  charter?: Charter
 }
 
 export const emptyFleet = (projectId: string, projectPath: string): FleetState => ({

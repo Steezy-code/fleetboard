@@ -1,23 +1,35 @@
-import { ArrowUpRight, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
 import type { MergeReview } from '@shared/mergeReview'
 import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
-import { ago, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
+import { CharterCard } from './CharterCard'
+import { ago, charterHead, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
 
 // The Inbox, docked on top of the command bar: the front item in full, the rest a click (or Ctrl+I)
 // away. Number keys, Tab and Enter in the bar answer it (CommandBar.tsx); voice too (planner.ts).
 
-const KIND_ICON = { approval: ShieldQuestion, ask: MessageCircleQuestion, ready: CircleCheck, stopped: OctagonAlert, notice: CircleX } as const
+const KIND_ICON = { charter: ClipboardCheck, approval: ShieldQuestion, ask: MessageCircleQuestion, ready: CircleCheck, stopped: OctagonAlert, notice: CircleX } as const
+
+/** Finished work that cannot be merged is not a finished job: the whole card says so, not only its body. */
+const readyBlocked = (i: InboxItem) => i.kind === 'ready' && !!i.review?.blocked
 
 function iconOf(i: InboxItem) {
   if (i.kind === 'notice' && i.tone === 'info') return MessageSquareText
+  if (readyBlocked(i)) return TriangleAlert
   return KIND_ICON[i.kind]
 }
-const toneOf = (i: InboxItem) => (i.kind === 'approval' || i.kind === 'stopped' ? 'warn' : i.kind === 'ask' ? 'accent' : i.kind === 'ready' ? 'ok' : i.tone === 'danger' ? 'danger' : 'info')
-const headOf = (i: InboxItem) =>
-  i.kind === 'approval' ? (i.approval ? 'asks' : 'is waiting for you') : i.kind === 'ask' ? 'asks' : i.kind === 'ready' ? 'finished the goal' : i.kind === 'stopped' ? 'stopped before finishing' : i.head
-const blocks = (i: InboxItem) => i.kind === 'approval' || i.kind === 'ask' || i.kind === 'stopped'
+const toneOf = (i: InboxItem) =>
+  readyBlocked(i) || i.kind === 'approval' || i.kind === 'stopped' ? 'warn' : i.kind === 'ask' || i.kind === 'charter' ? 'accent' : i.kind === 'ready' ? 'ok' : i.tone === 'danger' ? 'danger' : 'info'
+function headOf(i: InboxItem): string {
+  if (i.kind === 'charter') return charterHead(i.charter)
+  if (i.kind === 'approval') return i.approval ? 'asks' : 'is waiting for you'
+  if (i.kind === 'ask') return 'asks'
+  if (i.kind === 'ready') return readyBlocked(i) ? 'finished, but touched what you ruled out' : 'finished the goal'
+  if (i.kind === 'stopped') return 'stopped before finishing'
+  return i.head
+}
+const blocks = (i: InboxItem) => i.kind === 'charter' || i.kind === 'approval' || i.kind === 'ask' || i.kind === 'stopped'
 
 export function InboxTray({ floating }: { floating?: boolean }) {
   const items = useInbox((s) => s.items)
@@ -132,9 +144,11 @@ function readyMeta(i: Extract<InboxItem, { kind: 'ready' }>) {
   return [mins ? `${mins < 60 ? `${mins} min` : `${Math.round(mins / 6) / 10} h`}` : '', i.workers ? `${i.workers} worker${i.workers === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')
 }
 
-// What the team was told to do, next to what it actually did. It only ever annotates: a legitimate
-// out-of-scope change is common enough that a gate here would teach you to click through it, and
-// then it would be guarding nothing. Merge stays enabled; the flags are for reading first.
+// What the team was told to do, next to what it actually did. Reaching outside the granted scope
+// only ever annotates: a legitimate out-of-scope change is common enough that a gate here would
+// teach you to click through it, and then it would be guarding nothing — so Merge stays, and the
+// flags are for reading first. A file the user ruled out is the exception: that review is blocked,
+// the card drops Merge (inboxModel) and mergeReady refuses it whoever pressed it.
 /** 1.2M, 48k, 900 — a size, not an exact count; the point is which member was expensive. */
 const tokens = (n: number) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : `${n}`)
 
@@ -163,10 +177,11 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
         )
       })}
       {shown.map((f) => (
-        <div key={f.path} className={`it-claim ${f.outside ? 'warn' : 'risk'}`}>
-          {f.outside ? <ArrowUpRight size={12} /> : <ShieldAlert size={12} />}
+        <div key={f.path} className={`it-claim ${f.excluded ? 'danger' : f.outside ? 'warn' : 'risk'}`}>
+          {f.excluded ? <Ban size={12} /> : f.outside ? <ArrowUpRight size={12} /> : <ShieldAlert size={12} />}
           <span className="it-claim-what mono">{f.path}</span>
-          <span className="it-claim-ev it-claim-why">{[f.outside ? `outside ${claims.length === 1 ? 'its' : 'the team’s'} scope` : '', f.why].filter(Boolean).join(' · ')}</span>
+          {/* the exclusion first: the user ruled this file out themselves, and that is why Merge is not on offer */}
+          <span className="it-claim-ev it-claim-why">{[f.excluded ? `you ruled out ${f.excluded}` : '', f.outside ? `outside ${claims.length === 1 ? 'its' : 'the team’s'} scope` : '', f.why].filter(Boolean).join(' · ')}</span>
         </div>
       ))}
       {rest > 0 && (
@@ -183,6 +198,8 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
 
 function Body({ item }: { item: InboxItem }) {
   switch (item.kind) {
+    case 'charter':
+      return <CharterCard charter={item.charter} />
     case 'approval': {
       const ap = item.approval
       return (
@@ -267,6 +284,7 @@ function Body({ item }: { item: InboxItem }) {
             </div>
           )}
           <Review review={item.review} spend={item.spend} />
+          {item.review?.blocked && <div className="it-note">A file you ruled out is in this diff, so it cannot be merged from here. Read it, tell {item.who} to put the file back, or discard the work.</div>}
           <div className="it-foot">
             {r.verified && (
               <span className="it-verified">
