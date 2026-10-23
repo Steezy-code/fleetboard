@@ -392,7 +392,13 @@ export const useApp = create<AppState>((set, get) => {
       project = { ...project, path, lastOpened: Date.now() }
       // quit while focused: come back at the view from before focusing
       project = { ...project, workspaces: mapWorkspaces(project, clearFocusReturn) }
-      set({ project, selection: [], panel: null, focusedNode: null })
+      // the board being replaced is saved now: its pending save would be cancelled by the new one's
+      const previous = get().project
+      if (previous && previous.id !== project.id) {
+        cancelScheduledSave()
+        void invoke('store:saveProject', previous)
+      }
+      set({ project, selection: [], panel: null, drawer: null, focusedNode: null })
       scheduleSave(project)
       windowSession.set(OPEN_PROJECT, path)
     },
