@@ -1134,3 +1134,19 @@
 .kn-now {
   color: var(--text);
 }
+/* A repeated correction offered as a fact: the one card in the list that asks for an answer. */
+.kn-suggest {
+  border-color: color-mix(in srgb, #c084fc 40%, transparent);
+  background: color-mix(in srgb, #c084fc 7%, var(--panel-2));
+}
+.kn-suggest .mem-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.kn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c084fc;
+}

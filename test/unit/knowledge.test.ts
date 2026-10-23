@@ -5,6 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { coerceCharter } from '@shared/charter'
 import {
+  type CharterDelta,
   type KnowledgeFact,
   type RepoKnowledge,
   addFact,
@@ -17,6 +18,8 @@ import {
   forgetFact,
   knowledgeBlock,
   mergeFacts,
+  rememberCorrection,
+  repeatedCorrections,
   withDeltas
 } from '@shared/knowledge'
 
@@ -233,4 +236,87 @@ test('deltas are kept newest last and capped', () => {
   assert.equal(k.deltas.length, 200)
   assert.equal(k.deltas.at(-1)?.at, 259)
   assert.equal(withDeltas(k, []), k, 'nothing to keep changes nothing')
+})
+
+// ------------------------------------------------- a correction made more than once
+
+const edit = (request: string, field: 'wontTouch' | 'doneWhen', value: string, at = 1): CharterDelta =>
+  field === 'wontTouch' ? { at, request, field, added: [value], removed: [] } : { at, request, field, before: '', after: value }
+
+test('a correction on one goal only is not a rule yet', () => {
+  const k = withDeltas(empty(), [edit('add a split command', 'wontTouch', 'release/')])
+  assert.deepEqual(repeatedCorrections(k), [])
+})
+
+test('the same exclusion on two goals is offered as a fact to keep', () => {
+  const k = withDeltas(empty(), [edit('add a split command', 'wontTouch', 'release/', 1), edit('fix the merge gate', 'wontTouch', 'release/', 2)])
+  const s = repeatedCorrections(k)
+  assert.equal(s.length, 1)
+  assert.equal(s[0]?.key, 'ownership.wont-touch-release')
+  assert.equal(s[0]?.topic, 'ownership')
+  assert.equal(s[0]?.times, 2)
+  assert.equal(s[0]?.at, 2, 'dated from the last time it was corrected')
+  assert.match(s[0]?.text ?? '', /release\//)
+})
+
+test('the same correction on one goal twice is still one goal', () => {
+  const k = withDeltas(empty(), [edit('add a split command', 'wontTouch', 'release/', 1), edit('Add a split command ', 'wontTouch', 'release/', 2)])
+  assert.deepEqual(repeatedCorrections(k), [])
+})
+
+test('a done-when set the same way twice becomes a check, with its command', () => {
+  const k = withDeltas(empty(), [edit('one', 'doneWhen', 'npm test && npm run lint', 1), edit('two', 'doneWhen', 'npm test && npm run lint', 2)])
+  const s = repeatedCorrections(k)
+  assert.equal(s.length, 1)
+  assert.equal(s[0]?.topic, 'checks')
+  assert.equal(s[0]?.command, 'npm test && npm run lint')
+})
+
+test('a cleared field and an exclusion taken off are corrections of nothing', () => {
+  const k = withDeltas(empty(), [
+    { at: 1, request: 'one', field: 'doneWhen', before: 'npm test', after: '' },
+    { at: 2, request: 'two', field: 'doneWhen', before: 'npm test', after: '' },
+    { at: 3, request: 'one', field: 'wontTouch', added: [], removed: ['src/main'] },
+    { at: 4, request: 'two', field: 'wontTouch', added: [], removed: ['src/main'] },
+    { at: 5, request: 'one', field: 'understood', before: 'a', after: 'b' },
+    { at: 6, request: 'two', field: 'understood', before: 'a', after: 'b' }
+  ])
+  assert.deepEqual(repeatedCorrections(k), [])
+})
+
+test('keeping a correction makes it a fact of yours, which a charter can cite', () => {
+  const k = withDeltas(empty(), [edit('one', 'doneWhen', 'npm test', 1), edit('two', 'doneWhen', 'npm test', 2)])
+  const s = repeatedCorrections(k)[0]
+  assert.ok(s)
+  const kept = rememberCorrection(k, s, 9)
+  const f = kept.facts.find((x) => x.key === s.key)
+  assert.equal(f?.provenance, 'you')
+  assert.equal(f?.command, 'npm test')
+  assert.equal(f?.at, 9)
+  assert.ok(citable(kept, s.key), 'a kept correction is evidence')
+  assert.deepEqual(repeatedCorrections(kept), [], 'and is not offered again')
+})
+
+test('a correction dismissed stays dismissed, and a rebuild cannot bring it back', () => {
+  const k = withDeltas(empty(), [edit('one', 'wontTouch', 'release/', 1), edit('two', 'wontTouch', 'release/', 2)])
+  const s = repeatedCorrections(k)[0]
+  assert.ok(s)
+  const no = forgetFact(k, s.key)
+  assert.deepEqual(repeatedCorrections(no), [])
+  const rebuilt = mergeFacts(no, [fact(s.key, 'inferred', 'the model says so')], ['inferred'])
+  assert.equal(rebuilt.facts.find((x) => x.key === s.key), undefined)
+})
+
+test('the correction made most often comes first', () => {
+  const k = withDeltas(empty(), [
+    edit('one', 'wontTouch', 'docs/', 1),
+    edit('two', 'wontTouch', 'docs/', 2),
+    edit('one', 'wontTouch', 'release/', 3),
+    edit('two', 'wontTouch', 'release/', 4),
+    edit('three', 'wontTouch', 'release/', 5)
+  ])
+  assert.deepEqual(
+    repeatedCorrections(k).map((s) => s.times),
+    [3, 2]
+  )
 })
