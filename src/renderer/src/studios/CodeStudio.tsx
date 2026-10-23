@@ -10,6 +10,7 @@ import { isImagePath, langFromPath, langLabel } from '../workbench/markdown'
 import { baseName, dirname, joinPath, relativeTo, isInside } from '../workbench/paths'
 import { MAX_TEXT_BYTES, type FileStat } from '../workbench/useFileText'
 import type { WriteResult } from '@shared/types'
+import { setUnsaved } from '../lib/unsaved'
 
 interface Doc {
   path: string
@@ -39,6 +40,11 @@ export default function CodeStudio(props: { path?: string }) {
   const docRef = useRef<Doc | null>(null)
   docRef.current = doc
   const dirty = !!doc && doc.text != null && doc.text !== doc.saved
+  // so quitting asks before these edits go (lib/unsaved.ts)
+  useEffect(() => {
+    setUnsaved('code', dirty && doc ? baseName(doc.path) : null)
+    return () => setUnsaved('code', null)
+  }, [dirty, doc?.path])
 
   const loadTree = useCallback(async () => {
     if (!root) return

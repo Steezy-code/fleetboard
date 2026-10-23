@@ -3,6 +3,7 @@ import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
 import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM, focusRect } from '../state/store'
 import { NodeFrame } from './NodeFrame'
 import { deleteSelection } from './deleteSelection'
+import { mayDropUnsaved } from '../lib/unsaved'
 import { GroupFrame } from './GroupFrame'
 import { Wires } from './Wires'
 import { InkLayer } from './InkLayer'
@@ -190,7 +191,8 @@ export function Board() {
         void deleteSelection()
       } else if (e.key === 'Escape') {
         if (app.focusedNode) app.setFocusedNode(null)
-        else if (app.panel) app.closePanel()
+        // through the same question as the panel's own close: an editor in it may have unsaved edits
+        else if (app.panel) void mayDropUnsaved('Close').then((ok) => ok && useApp.getState().closePanel())
         else {
           app.setSelection([])
           app.setTool('select')
