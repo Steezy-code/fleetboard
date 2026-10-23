@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, Palette, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
+import type { UpdateCheck } from '../../../main/update'
 import { AGENTS, readsOnly } from '@shared/agents'
 import { invoke, on } from '../lib/api'
 import { useApp } from '../state/store'
@@ -333,6 +334,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
           <section data-section="data">
             <h3 className="settings-h">Data</h3>
             <div className="settings-rows">
+              <VersionRow />
               <div className="settings-row">
                 <div className="grow">
                   <div>Fleetboard folder</div>
@@ -580,6 +582,56 @@ function PhoneInbox() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Which Fleetboard this is, and whether a newer one has been released. Nothing downloads or installs:
+ * the installer is unsigned and the repo is private, so the release page in the user's own signed-in
+ * browser is where this honestly ends.
+ */
+function VersionRow() {
+  const [out, setOut] = useState<UpdateCheck | null>(null)
+  const [busy, setBusy] = useState(false)
+  const check = (force = false) => {
+    setBusy(force)
+    invoke<UpdateCheck>('update:check', force).then(
+      (r) => {
+        setOut(r)
+        setBusy(false)
+      },
+      () => setBusy(false)
+    )
+  }
+  useEffect(() => check(), [])
+  const newer = out?.newer
+  return (
+    <div className="settings-row">
+      <div className="grow">
+        <div>Fleetboard {out?.current ?? ''}</div>
+        <div className="muted small">
+          {busy
+            ? 'Asking GitHub…'
+            : newer
+              ? `${newer.tag} is out.`
+              : out?.error
+                ? out.error
+                : out?.latest
+                  ? `Up to date — ${out.latest.tag} is the latest release.`
+                  : out
+                    ? 'No releases yet.'
+                    : 'Checking for a newer release…'}
+        </div>
+      </div>
+      {newer?.url && (
+        <button className="btn sm primary" onClick={() => void invoke('shell:openExternal', newer.url)}>
+          Open release
+        </button>
+      )}
+      <button className="btn sm" disabled={busy} onClick={() => check(true)}>
+        <RefreshCw size={12} className={busy ? 'spin' : ''} /> Check
+      </button>
     </div>
   )
 }
