@@ -128,3 +128,18 @@ test('a parked "close" plan: only a plain yes runs it, a "no" anywhere cancels i
   await runCommand('confirm please', 'typed')
   assert.equal(kills(), 1, 'a plain yes runs it')
 })
+
+test('spoken answers: a plain yes or no answers a permission card, but never merges or discards a team', async () => {
+  const { inboxPick } = await import('@/voice/planner')
+  const { useInbox } = await import('@/fleet/inboxModel')
+  const card = (kind: string, actions: { label: string; primary?: boolean; tone?: string }[]) =>
+    useInbox.setState({ items: [{ key: 'k', kind, who: 'x', sub: '', since: 0, actions } as never], front: 'k' })
+  card('approval', [{ label: 'Allow once', primary: true }, { label: 'Deny', tone: 'deny' }])
+  assert.equal(inboxPick('okay'), 0)
+  assert.equal(inboxPick('no'), 1)
+  card('ready', [{ label: 'Merge', primary: true }, { label: 'View diff' }, { label: 'Discard', tone: 'deny' }])
+  assert.equal(inboxPick('okay'), null, '"okay" is not "merge"')
+  assert.equal(inboxPick('no'), null, '"no" is not "discard"')
+  assert.equal(inboxPick('merge'), 0, 'saying the button does it')
+  useInbox.setState({ items: [], front: null })
+})

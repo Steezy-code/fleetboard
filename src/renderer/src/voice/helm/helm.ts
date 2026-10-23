@@ -71,7 +71,9 @@ export const dismissHelm = () => useHelm.setState({ card: null })
 export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
 
 /** Read-only playbooks Helm may start without a click. */
-const AUTO_PLAYBOOKS = ['morning-sweep', 'pr-review', 'db-safety']
+// only what starts no agents: the PR review and database playbooks are review-only in what they ask
+// for, but each starts a Lead and reviewers, which spends and puts a charter in front of the user
+const AUTO_PLAYBOOKS = ['morning-sweep']
 
 // ---------------------------------------------------------------- prompt
 
@@ -106,7 +108,7 @@ Rules:
 - Prefer a playbook when one fits. Prefer "send" to an existing console when an agent on the board is already working on that thing or owns that area. Use "team" for custom multi-step work no playbook fits.
 - Only use console names, playbook ids and panels that exist. Never add kill/close/delete steps the user did not ask for.
 - At most 3 options, best first, each meaningfully different. Leave options empty when the reply fully answers.
-- "auto": the index of the option to run right away, ONLY when the request is unambiguous AND that option only shows something (a panel) or is a read-only playbook: morning-sweep, pr-review, db-safety. Never auto for a send. Never auto for kill/close/merge, team or feature work. Otherwise null.
+- "auto": the index of the option to run right away, ONLY when the request is unambiguous AND that option only shows something (a panel) or is the morning-sweep playbook (it starts no agents). Never auto for a send or any other playbook. Never auto for kill/close/merge, team or feature work. Otherwise null.
 
 Playbooks (id · name · when to use · inputs; "?" = optional):
 ${playbookCatalog()}
