@@ -434,6 +434,13 @@ test("a team console's token is good for that console only: a worker cannot call
   const big = await call(leadUrl, leadHeaders, JSON.stringify({ ...list, pad: 'x'.repeat(5 * 1024 * 1024) })).then((r) => r.status, () => 'closed')
   assert.ok(big === 413 || big === 'closed', String(big))
   assert.equal((await call(leadUrl, leadHeaders)).status, 200)
+
+  // once the team is closed, its tokens act for nobody, and their config files are gone
+  await app!.invoke('fleet:discard', projectId)
+  const status = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'fleet_status', arguments: {} } }
+  const after = await (await call(leadUrl, leadHeaders, status)).json()
+  assert.match(JSON.stringify(after), /left its team/)
+  assert.ok(!fs.existsSync(path.join(sb.fbHome, 'hooks', `mcp-${lead.id}.json`)))
 })
 
 test('the Inbox tray on the command bar: a question shows its trade-offs and is answered with a number key; finished work shows files and checks', async () => {
