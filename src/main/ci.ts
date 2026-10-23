@@ -38,6 +38,12 @@ export interface CiPr {
   title: string
   branch: string
   url: string
+  /**
+   * From a fork: anyone can open one, and its title, check names and logs are theirs. A PR whose
+   * branch is in this repo was pushed by someone with write access. Only those are fixed without
+   * asking or handed to an agent that works on a branch of the same name.
+   */
+  fork: boolean
   isDraft: boolean
   state: CiState
   checks: CiCheck[]
@@ -118,7 +124,7 @@ async function status(cwd: string): Promise<CiStatus> {
     branch === 'HEAD'
       ? Promise.resolve({ code: 0, stdout: '[]', stderr: '' })
       : exec(gh, ['run', 'list', '--branch', branch, '--limit', '20', '--json', 'databaseId,status,conclusion,workflowName,displayTitle,headBranch,headSha,event,createdAt,url'], cwd, env),
-    exec(gh, ['pr', 'list', '--state', 'open', '--limit', '20', '--json', 'number,title,headRefName,url,isDraft,statusCheckRollup'], cwd, env)
+    exec(gh, ['pr', 'list', '--state', 'open', '--limit', '20', '--json', 'number,title,headRefName,url,isDraft,isCrossRepository,statusCheckRollup'], cwd, env)
   ])
   if (runsOut.code !== 0) return { ok: false, at, error: firstLine(runsOut.stderr) || 'gh run list failed', reason: 'error' }
   if (prsOut.code !== 0) return { ok: false, at, error: firstLine(prsOut.stderr) || 'gh pr list failed', reason: 'error' }
@@ -133,6 +139,9 @@ async function status(cwd: string): Promise<CiStatus> {
   // the latest run of each workflow on this branch
   const byWorkflow = new Map<string, CiRun>()
   for (const r of rawRuns.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))) {
+    // a pull request's runs are its checks, listed with the PR below; and `run list --branch` also
+    // matches a fork's PR whose branch happens to have this name, which is not this branch's CI
+    if (r.event === 'pull_request' || r.event === 'pull_request_target') continue
     if (byWorkflow.has(r.workflowName)) continue
     byWorkflow.set(r.workflowName, {
       id: r.databaseId,
@@ -149,7 +158,7 @@ async function status(cwd: string): Promise<CiStatus> {
   }
   const prs: CiPr[] = rawPrs.map((p) => {
     const checks = summarizeChecks(p.statusCheckRollup)
-    return { number: p.number, title: p.title, branch: p.headRefName, url: p.url, isDraft: !!p.isDraft, checks, state: overall(checks.map((c) => c.state)) }
+    return { number: p.number, title: p.title, branch: p.headRefName, url: p.url, fork: p.isCrossRepository !== false, isDraft: !!p.isDraft, checks, state: overall(checks.map((c) => c.state)) }
   })
   return { ok: true, at, branch, slug, runs: [...byWorkflow.values()], prs }
 }
@@ -184,13 +193,15 @@ export interface PrFeedback {
   branch: string
   url: string
   author: string
+  /** from a fork (see CiPr.fork): never "made by an agent of ours", whatever its branch is called */
+  fork: boolean
   comments: PrComment[]
 }
 
 export type PrFeedbackResult = { ok: true; at: number; viewer: string; prs: PrFeedback[] } | { ok: false; at: number; error: string }
 
 const FEEDBACK_QUERY = `query($owner:String!,$name:String!){ viewer{login} repository(owner:$owner,name:$name){ pullRequests(states:OPEN, first:20, orderBy:{field:UPDATED_AT,direction:DESC}){ nodes{
-  number title headRefName url author{login}
+  number title headRefName url author{login} isCrossRepository
   comments(last:30){nodes{databaseId author{login __typename} authorAssociation body createdAt url}}
   reviews(last:30){nodes{databaseId author{login __typename} authorAssociation body state submittedAt url}}
   reviewThreads(last:50){nodes{isResolved isOutdated path line comments(first:20){nodes{databaseId author{login __typename} authorAssociation body createdAt url}}}}
@@ -241,6 +252,7 @@ async function prFeedback(cwd: string): Promise<PrFeedbackResult> {
       branch: p.headRefName,
       url: p.url,
       author: p.author?.login ?? '',
+      fork: p.isCrossRepository !== false,
       comments: feedbackOf(p)
     }))
     return { ok: true, at, viewer: d.viewer?.login ?? '', prs }
@@ -251,7 +263,8 @@ async function prFeedback(cwd: string): Promise<PrFeedbackResult> {
 
 /** The failed steps' log, cleaned up and cut to where it failed (the cleanup steps after it are noise). */
 export function cleanLog(raw: string, maxLines = 160): string {
-  let lines = stripAnsi(raw)
+  // the failure is at the end, and the whole log can be tens of megabytes: read its last megabyte
+  let lines = stripAnsi(raw.length > 1_000_000 ? raw.slice(-1_000_000) : raw)
     .split('\n')
     .map((l) => {
       // "job<TAB>step<TAB>2026-10-19T22:01:01.1234567Z text"

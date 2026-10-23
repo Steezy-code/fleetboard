@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { type KnowledgeFact, type RepoReading, slug } from '@shared/knowledge'
+import { readRegularText } from './paths'
 import { allowed } from './roots'
 
 // The free half of repo knowledge: what a repo's own files say about how it is checked, who owns what
@@ -39,9 +40,7 @@ const GUIDES: [string, string][] = [
 /** A small text file's contents, or null: missing, a folder, too big, or unreadable all mean the same here. */
 function readText(file: string): string | null {
   try {
-    const st = fs.statSync(file)
-    if (!st.isFile() || st.size > MAX_FILE) return null
-    return fs.readFileSync(file, 'utf8')
+    return readRegularText(file, MAX_FILE)
   } catch {
     return null
   }
@@ -157,10 +156,12 @@ export function readRepo(root: string, at: number = Date.now()): RepoReading {
     const all: Record<string, string> = {}
     let section = ''
     for (const l of text.split(/\r?\n/)) {
-      const head = /^\s*\[(.*)\]\s*$/.exec(l)
-      if (head) section = head[1]!.trim()
-      const kv = /^\s*([\w-]+)\s*=\s*(.*?)\s*$/.exec(l)
-      if (kv && section === '*') all[kv[1]!.toLowerCase()] = kv[2]!.toLowerCase()
+      // trim, then match: a pattern with \s* on both sides of a lazy middle backtracks over every
+      // space in a long value, and a repo's .editorconfig is read on the main process as a board opens
+      const t = l.trim()
+      if (t.startsWith('[') && t.endsWith(']')) section = t.slice(1, -1).trim()
+      const kv = /^([\w-]+)\s*=(.*)$/.exec(t)
+      if (kv && section === '*') all[kv[1]!.toLowerCase()] = kv[2]!.trim().toLowerCase()
     }
     const style = all.indent_style
     const size = /^\d+$/.test(all.indent_size ?? '') ? all.indent_size : undefined

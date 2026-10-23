@@ -11,7 +11,7 @@ import { TermScreen, type ScreenView } from './screen'
 import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
 import { activityOf } from './activity'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
-import { commandOf } from '@shared/approvals'
+import { approvalFor, commandOf, seenOf } from '@shared/approvals'
 import { RunRecord } from './orphans'
 import { CAN_PAUSE, IS_WIN, killTree, killTreeSync, launch, shellArgs, shellCommandArgs } from './platform'
 
@@ -55,6 +55,9 @@ const killGroup = (pid: number) => killTree(pid, 'SIGKILL')
 
 type ExitListener = (id: string, code: number | undefined, appClosing: boolean) => void
 type SpawnListener = (req: PtySpawnRequest) => void
+
+/** Text the board types, and only text: a carriage return, Ctrl-C or an escape inside it would act as a key. */
+export const pasteText = (text: string) => text.replace(/\r?\n|\t/g, ' ').replace(/[\x00-\x1f\x7f]/g, '')
 
 export class PtyManager {
   private sessions = new Map<string, Session>()
@@ -310,9 +313,23 @@ export class PtyManager {
   paste(id: string, text: string, submit = true) {
     const s = this.sessions.get(id)
     if (!s) return
-    const clean = text.replace(/\r?\n/g, ' ').replace(/\x1b/g, '')
+    const clean = pasteText(text)
     this.write(id, s.bracketed ? `\x1b[200~${clean}\x1b[201~` : clean)
-    if (submit) setTimeout(() => this.write(id, '\r'), s.bracketed ? 150 : 350)
+    if (submit) setTimeout(() => void this.enter(id), s.bracketed ? 150 : 350)
+  }
+
+  /**
+   * Enter after text the board typed, pressed only while no question is on screen. A permission dialog
+   * that appeared between the paste and this Enter would take it as its answer (Enter picks the
+   * highlighted option, usually "Yes"); then the text stays typed and is submitted once the question
+   * has been answered.
+   */
+  private async enter(id: string) {
+    const s = this.sessions.get(id)
+    if (!s) return
+    await s.screen.flush()
+    if ((detectPrompt(s.screen.view()) || s.tracker.status === 'needs-you') && !(await this.whenNoQuestion(id))) return
+    if (this.sessions.has(id)) this.write(id, '\r')
   }
 
   /**
@@ -355,7 +372,7 @@ export class PtyManager {
         if (!this.sessions.has(id)) return
         // on a retry, report focus first: that unsticks an input box that ignored the first Enter
         if (attempt) this.write(id, '\x1b[I')
-        this.write(id, '\r')
+        void this.enter(id)
         setTimeout(() => {
           if (attempt >= 2 || this.status(id) !== 'idle') return
           const probe = text.slice(0, 40).replace(/\s+/g, ' ')
@@ -425,6 +442,14 @@ export class PtyManager {
     await s.screen.flush()
     const prompt = detectPrompt(s.screen.view())
     if (command !== undefined && commandOf(prompt) !== command) return { ok: false, reason: prompt ? 'changed' : 'gone' }
+    if (answer.seen !== undefined) {
+      // given on a card: the screen must still make that card, and the option must be one it offered
+      // (a card leaves out options such as "switch to auto mode"; the CLI's menu still has them)
+      const card = approvalFor(prompt)
+      if (!card) return { ok: false, reason: prompt ? 'changed' : 'gone' }
+      if (seenOf(card) !== answer.seen) return { ok: false, reason: 'changed' }
+      if ('option' in answer && !card.options.some((o) => 'option' in o.answer && o.answer.option === answer.option)) return { ok: false, reason: 'changed' }
+    }
     const keys = answerKeys(prompt, answer, s.screen.appCursorKeys)
     if (!Array.isArray(keys)) return keys
     for (const [i, k] of keys.entries()) {

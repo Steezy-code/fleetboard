@@ -4,6 +4,7 @@ import { allConsoles, useApp } from '../state/store'
 import { isLive, sendToConsole, spawnConsoles } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
 import { useCi } from './ciStore'
+import { maySpendOn } from '../engine/guards'
 import type { PrComment, PrFeedback, PrFeedbackResult } from '../../../main/ci'
 
 export type { PrComment, PrFeedback, PrFeedbackResult } from '../../../main/ci'
@@ -17,10 +18,22 @@ export type { PrComment, PrFeedback, PrFeedbackResult } from '../../../main/ci'
 
 export const useFeedback = create<{ result: PrFeedbackResult | null }>(() => ({ result: null }))
 
-const KEEP = 1000
 const extras = () => useApp.getState().project?.extras ?? {}
 const ids = (key: string): string[] => (Array.isArray(extras()[key]) ? extras()[key] : [])
-const remember = (key: string, add: string[]) => useApp.getState().setProjectExtra(key, [...new Set([...ids(key), ...add])].slice(-KEEP))
+const remember = (key: string, add: string[]) => useApp.getState().setProjectExtra(key, [...new Set([...ids(key), ...add])])
+
+/**
+ * Keep only the ids still on the open PRs, plus `add`. This used to keep the last 1000 ids instead,
+ * and on a busy repo the ids of comments still on screen fell out of that window and came back as new
+ * on the next poll: old comments re-announced and re-sent, a fixer spawned for them, every two
+ * minutes. An id no longer on an open PR is never coming back; one that is must never be forgotten.
+ * The query's own limits bound what is left.
+ */
+function keepOnly(key: string, current: Set<string>, add: string[] = []) {
+  const before = ids(key)
+  const next = [...new Set([...before.filter((id) => current.has(id)), ...add])]
+  if (next.length !== before.length || next.some((id, i) => id !== before[i])) useApp.getState().setProjectExtra(key, next)
+}
 
 export const autoRouteOn = () => extras().prAutoRoute !== false
 export const setAutoRoute = (on: boolean) => useApp.getState().setProjectExtra('prAutoRoute', on ? undefined : false)
@@ -62,8 +75,16 @@ export function markSent(pr: PrFeedback, list: PrComment[] = pr.comments) {
   remember('prSent', list.map((c) => c.id))
 }
 
-/** Who works on this branch now: a console we gave it to, or the live Lead whose branch it is. */
-export function ownerOf(branch: string): { id: string; name: string; lead: boolean } | null {
+/** A pull request as far as who works on it goes: its branch, and whether it comes from a fork. */
+type PrRef = { branch: string; fork: boolean }
+
+/**
+ * Who works on this PR's branch now: a console we gave it to, or the live Lead whose branch it is.
+ * Never for a fork's PR: anyone can name a branch like one of ours, and what they write would reach
+ * our agent as if it were about its own work.
+ */
+export function ownerOf({ branch, fork }: PrRef): { id: string; name: string; lead: boolean } | null {
+  if (fork) return null
   const mine = (extras().prAgents ?? {})[branch] as string | undefined
   const nameOf = (id: string) => (allConsoles().find((c) => c.id === id)?.data.name as string) ?? 'its agent'
   if (mine && isLive(mine)) return { id: mine, name: nameOf(mine), lead: false }
@@ -72,8 +93,9 @@ export function ownerOf(branch: string): { id: string; name: string; lead: boole
   return null
 }
 
-/** Did an agent of ours make this PR? (a team branch, or one we already sent an agent to) */
-export function agentMade(branch: string): boolean {
+/** Did an agent of ours make this PR? (a team branch, or one we already sent an agent to; never a fork's) */
+export function agentMade({ branch, fork }: PrRef): boolean {
+  if (fork) return false
   if (branch.startsWith('fleet/')) return true
   if ((extras().prAgents ?? {})[branch]) return true
   return Object.values(useFleet.getState().state?.members ?? {}).some((m) => m.branch === branch)
@@ -121,7 +143,7 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   const list = opts.list ?? (unsent(pr).length ? unsent(pr) : pr.comments)
   if (!list.length) return null
   const msg = feedbackMessage(pr, list)
-  const owner = ownerOf(pr.branch)
+  const owner = ownerOf(pr)
   if (owner && opts.auto && autoApproves(owner.id)) {
     // it would act on these words without asking: tell the user instead, who can still send it by hand
     app.toast(`${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}: ${owner.name} approves everything, so they were not sent automatically`, 'warn')
@@ -142,6 +164,8 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
     (here
       ? 'You are in my checkout, already on that branch.'
       : `Don't touch my current checkout${current?.ok ? ` (it is on ${current.branch})` : ''}: add a git worktree for ${pr.branch} in a temporary folder, work and push from there, then remove the worktree.`)
+  // a new agent is the most expensive thing this does on its own, as for a CI fixer
+  if (opts.auto && !maySpendOn(app.settings.defaultAgent, 'sending an agent at review comments')) return null
   const taken = allConsoles().map((c) => c.data.name as string)
   let name = `PR #${pr.number} fixer`
   for (let n = 2; taken.includes(name); n++) name = `PR #${pr.number} fixer ${n}`
@@ -161,21 +185,23 @@ export function applyFeedback(result: PrFeedbackResult) {
   useFeedback.setState({ result })
   if (!result.ok) return
   const all = result.prs.flatMap((p) => p.comments.map((c) => c.id))
+  const current = new Set(all)
   if (!Array.isArray(extras().prSeen)) {
-    remember('prSeen', all)
-    remember('prSent', all)
+    keepOnly('prSeen', current, all)
+    keepOnly('prSent', current, all)
     return
   }
   const seen = new Set(ids('prSeen'))
   const fresh = result.prs.map((pr) => ({ pr, list: pr.comments.filter((c) => !seen.has(c.id)) })).filter((x) => x.list.length)
+  keepOnly('prSeen', current, fresh.flatMap((x) => x.list.map((c) => c.id)))
+  keepOnly('prSent', current)
   if (!fresh.length) return
-  remember('prSeen', fresh.flatMap((x) => x.list.map((c) => c.id)))
   for (const { pr, list } of fresh) {
     const who = [...new Set(list.map((c) => '@' + c.author))].join(', ')
     // only people with write access get to instruct an agent without a person reading first
     const trusted = list.filter((c) => trustedAuthor(c, result.viewer))
     const outside = list.filter((c) => !trustedAuthor(c, result.viewer))
-    if (autoRouteOn() && agentMade(pr.branch) && trusted.length) {
+    if (autoRouteOn() && agentMade(pr) && trusted.length) {
       const from = [...new Set(trusted.map((c) => '@' + c.author))].join(', ')
       void routeFeedback(pr, { list: trusted, auto: true }).then((id) => id && notifyFeedback(`Review comments on PR #${pr.number}`, `${trusted.length} from ${from}, sent to its agent`, false))
     }
@@ -187,7 +213,7 @@ export function applyFeedback(result: PrFeedbackResult) {
           ? `${outside.length} more from ${from}, not sent on: no write access to this repo`
           : `${outside.length} from ${from}: ${clip((outside[0]?.body ?? '').replace(/\s+/g, ' '), 90)}`
       )
-    } else if (!(autoRouteOn() && agentMade(pr.branch) && trusted.length)) {
+    } else if (!(autoRouteOn() && agentMade(pr) && trusted.length)) {
       notifyFeedback(`New review comments on PR #${pr.number}`, `${list.length} from ${who}: ${clip((list[0]?.body ?? '').replace(/\s+/g, ' '), 90)}`)
     }
   }

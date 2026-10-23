@@ -65,3 +65,25 @@ test('with no question on screen a message is typed right away', async () => {
   await until(() => events('prompt').length > before, 5000)
   assert.equal(events('prompt').at(-1).prompt, 'second message')
 })
+
+test('an answer given on a card types nothing unless the screen still makes that card', async () => {
+  const { approvalFor } = await import('../../src/shared/approvals')
+  await ptys.spawn({ id: 'c2', agentId: 'claude', cwd: dir, cols: 100, rows: 30 })
+  await until(() => ptys.status('c2') === 'needs-you')
+  const card = approvalFor(ptys.screen('c2')!.prompt)!
+  const no = card.options.find((o) => o.label.startsWith('No'))!
+  const answered = events('startup-answer').length
+  // a card from a moment ago, about something else, offering the same button
+  assert.deepEqual(await ptys.answer('c2', { ...no.answer, seen: '["Another question",null,null]' }), { ok: false, reason: 'changed' })
+  // an option the card does not offer, with the right mark
+  assert.deepEqual(await ptys.answer('c2', { option: 'Some option the card left out', seen: no.answer.seen }), { ok: false, reason: 'changed' })
+  await new Promise((r) => setTimeout(r, 500))
+  assert.equal(events('startup-answer').length, answered, 'nothing was typed')
+  assert.deepEqual(await ptys.answer('c2', no.answer), { ok: true })
+  await until(() => events('startup-answer').length > answered)
+})
+
+test('what the board pastes is text only: no Enter, Ctrl-C or escape rides inside it', async () => {
+  const { pasteText } = await import('../../src/main/pty')
+  assert.equal(pasteText('a\rb\x03c\x1b[201~d\ne\tf'), 'abc[201~d e f')
+})

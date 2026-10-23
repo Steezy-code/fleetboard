@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { loginEnv } from './env'
+import { dirs } from './paths'
 
 // One way to run a child process, and one answer to what git's environment and arguments must be.
 //
@@ -97,7 +98,46 @@ export async function ghEnv(): Promise<Record<string, string>> {
  * not run commands can write .git/config. This is not the user's own shell, where their config is
  * their business; here it is input.
  */
-export const GIT_OPTS = ['-c', 'core.fsmonitor=false']
+export const GIT_OPTS = ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false']
+
+/**
+ * Config keys a repository can set to name a program that the sweep's own git calls (status, log,
+ * an opt-in fetch) could run. core.fsmonitor and log.showSignature are switched off for every call
+ * above, the pager is cat (gitEnv), and the sweep points hooks at an empty folder; these are the rest.
+ */
+const NAMES_A_PROGRAM = /^(filter\..+\.(clean|smudge|process)|credential\.(.+\.)?helper|core\.(sshcommand|gitproxy|askpass)|remote\..+\.(uploadpack|receivepack|vcs)|protocol\..+\.allow|uploadpack\.packobjectshook)$/i
+
+/** Filters a repository may name without being suspect: tools the user installed for exactly this. */
+const KNOWN_FILTER = /^"?git[- ](lfs|crypt)"?(\s|$)/i
+
+/**
+ * The keys in a repository's own config (with what it includes) that would have git run a program
+ * the repository chose. Reading config runs nothing, so a repo the user never opened is read before
+ * anything else is done in it.
+ */
+export async function programsInRepoConfig(cwd: string): Promise<string[]> {
+  const env = await gitEnv()
+  const r = await run('git', [...GIT_OPTS, 'config', '--local', '--includes', '--list', '-z'], { cwd, env, timeout: 5000 })
+  if (r.code !== 0) return []
+  const found: string[] = []
+  for (const entry of r.stdout.split('\0')) {
+    const nl = entry.indexOf('\n')
+    const key = nl < 0 ? entry : entry.slice(0, nl)
+    const value = nl < 0 ? '' : entry.slice(nl + 1)
+    if (!key || !value.trim() || !NAMES_A_PROGRAM.test(key)) continue
+    if (/^filter\./i.test(key) && KNOWN_FILTER.test(value.trim())) continue
+    found.push(key)
+  }
+  return found
+}
+
+/**
+ * For git calls the app makes on its own behalf, where a repository's hooks must not run: hooks are
+ * programs, and with husky or lefthook they live in tracked files that an agent allowed to edit files
+ * (but not to run commands) can change. An empty folder as the hooks path, since `--no-verify` covers
+ * only the commit hooks and not post-checkout, post-merge or reference-transaction.
+ */
+export const NO_HOOKS = ['-c', `core.hooksPath=${dirs.noHooks}`]
 
 /** Options for a git call. `gitOpts` go before the subcommand, where git wants them. */
 export interface GitOpts {

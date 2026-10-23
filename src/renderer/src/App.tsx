@@ -21,6 +21,7 @@ import { Boundary } from './ui/Boundary'
 import { useThemeSync } from './ui/theme'
 import { InboxTray } from './fleet/InboxTray'
 import { useInboxWatcher } from './fleet/inboxModel'
+import { mayDropUnsaved } from './lib/unsaved'
 
 export function App() {
   const project = useApp((s) => s.project)
@@ -57,6 +58,7 @@ export function App() {
       invoke('app:quit')
     }
     const offConfirm = on('app:confirmQuit', async (n: number) => {
+      if (!(await mayDropUnsaved('Quit'))) return
       const ok = await useApp.getState().confirm({
         title: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
         body: 'Their processes stop. When you reopen, each console comes back in place and offers to resume its conversation.',
@@ -68,8 +70,11 @@ export function App() {
     // Closing with nothing running asks nothing, but the board still has to be written: the debounced
     // save may be mid-wait. The ack goes first, so the main process knows this page is alive and does
     // not close the window out from under the save.
-    const offSaveAndQuit = on('app:saveAndQuit', () => {
+    const offSaveAndQuit = on('app:saveAndQuit', async () => {
       fb.send('app:quitAck')
+      // unsaved edits in an editor: asked first, and "no" leaves the window open (nothing quits
+      // until this page says app:quit)
+      if (!(await mayDropUnsaved('Quit'))) return
       void saveThenQuit()
     })
     return () => {

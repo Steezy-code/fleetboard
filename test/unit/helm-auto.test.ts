@@ -17,17 +17,19 @@ test('opening a panel is safe on its own; anything that spawns, types or runs is
   }
 })
 
-test('a message may be typed for you only if it is left unsent, and into few enough consoles', () => {
-  // typed but not submitted: the user still presses Enter, so it is a draft and not an instruction
-  assert.equal(autoSafe(option({ kind: 'send', submit: false, targets: [] })), true)
-  assert.equal(autoSafe(option({ kind: 'send', submit: true, targets: [] })), false, 'submitting is never automatic')
-  assert.equal(autoSafe(option({ kind: 'send', targets: [] })), false, 'and neither is leaving it unsaid')
+test('a message is never typed for you, sent or not', () => {
+  // Oracle reads other people's text in the snapshot, and a draft left in a console is submitted by
+  // the next Enter anything presses there (a loop, a worker's report to its Lead)
+  assert.equal(autoSafe(option({ kind: 'send', submit: false, targets: [] })), false)
+  assert.equal(autoSafe(option({ kind: 'send', submit: true, targets: [] })), false)
+  assert.equal(autoSafe(option({ kind: 'send', targets: [] })), false)
 })
 
-test('only the read-only playbooks run themselves, and only with every input filled', () => {
+test('only a playbook that starts no agents runs itself, and only with every input filled', () => {
   assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'morning-sweep', inputs: {} } })), true)
-  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'pr-review', inputs: {} } })), true)
-  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'db-safety', inputs: {} } })), true)
+  // review-only in what they ask, but each starts a Lead and reviewers
+  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'pr-review', inputs: {} } })), false)
+  assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'db-safety', inputs: {} } })), false)
   // anything not on that list — including one that does not exist — waits for a click
   assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: 'ship-it', inputs: {} } })), false)
   assert.equal(autoSafe(option({ kind: 'playbook', playbook: { id: '', inputs: {} } })), false)

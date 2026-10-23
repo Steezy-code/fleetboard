@@ -176,6 +176,9 @@ export function safeUrl(v: string, kind: 'href' | 'src'): string | null {
   } catch {
     return null
   }
+  // "//host/x" and "\\host\x" name another machine, not a file here: in the packaged app, whose page is
+  // a file:// URL, one in an <img> is a UNC path, and Windows sends the user's credentials to fetch it
+  if (/^[\s\u0000-\u001f]*[\\/][\s\u0000-\u001f]*[\\/]/.test(s)) return null
   // a path in the document's folder (images, links to other files)
   if (u.origin === new URL(RELATIVE_BASE).origin && !/^[\s\u0000-\u001f]*[a-z][a-z0-9+.\-\s\u0000-\u001f]*:/i.test(s)) return s
   if (u.protocol === 'https:' || u.protocol === 'http:' || (kind === 'href' && u.protocol === 'mailto:')) return s
@@ -281,7 +284,8 @@ export function extractLinks(src: string): { wiki: string[]; files: string[] } {
   const wiki: string[] = []
   const files: string[] = []
   for (const m of text.matchAll(/\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g)) wiki.push((m[1] ?? '').trim())
-  for (const m of text.matchAll(/\]\(\s*<?([^)\s>]+?\.(?:md|mdx|markdown))(?:#[^)\s>]*)?>?(?:\s+"[^"]*")?\s*\)/gi)) {
+  // a target cannot contain brackets or parentheses: allowing them let every "](" rescan the rest of the note
+  for (const m of text.matchAll(/\]\(\s*<?([^()[\]\s>]+?\.(?:md|mdx|markdown))(?:#[^)\s>]*)?>?(?:\s+"[^"]*")?\s*\)/gi)) {
     const link = m[1] ?? ''
     if (!isExternal(link)) {
       try {
@@ -296,8 +300,12 @@ export function extractLinks(src: string): { wiki: string[]; files: string[] } {
 
 /** First "# Heading" of a markdown string. */
 export function firstHeading(src: string): string | null {
-  const m = /^\s{0,3}#\s+(.+?)\s*#*\s*$/m.exec(src.replace(/```[\s\S]*?```/g, ''))
-  return m?.[1] ? m[1].replace(/[*_`]/g, '').trim() : null
+  // Linear on purpose: the old single pattern (lazy text between \s* runs) took seconds on a heading
+  // line padded with spaces, on every render. The closing #s go only when a space precedes them, as
+  // CommonMark has it ("# C#" is the heading "C#").
+  const m = /^ {0,3}#[ \t]+(.*)$/m.exec(src.replace(/```[\s\S]*?```/g, ''))
+  const h = m?.[1]?.trimEnd().replace(/(?:^|[ \t])#+$/, '').trimEnd()
+  return h ? h.replace(/[*_`]/g, '').trim() || null : null
 }
 
 export { dirname }

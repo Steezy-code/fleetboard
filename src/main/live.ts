@@ -4,6 +4,7 @@ import type { FleetMember, FleetState } from '@shared/fleet'
 import { type CheckRun, failingCount, liveDiff, mayRun, sameDiff, withRun } from '@shared/live'
 import type { MainContext } from './context'
 import { runGoalCheck } from './goal'
+import { readRegularText } from './paths'
 import { git } from './run'
 
 // Live work, sampled without a model: when each member last printed (a stall is silence), what each
@@ -73,8 +74,9 @@ const sampling = new Set<string>()
 /** Lines in a new file, for the diff's count; 0 for one too big to read on a tick, or binary. */
 function linesIn(file: string): number {
   try {
-    if (fs.statSync(file).size > 1_000_000) return 0
-    const text = fs.readFileSync(file, 'utf8')
+    // a worker's untracked file can be anything it made: a FIFO or a link to a device would hang or
+    // exhaust the main process on a plain read
+    const text = readRegularText(file, 1_000_000)
     if (text.includes('\0')) return 0
     return text ? text.split('\n').length - (text.endsWith('\n') ? 1 : 0) : 0
   } catch {

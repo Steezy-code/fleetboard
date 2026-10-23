@@ -235,13 +235,13 @@ function ciSection(): string {
   const fb = useFeedback.getState().result
   for (const pr of s.prs) {
     const f = fb?.ok ? fb.prs.find((p) => p.number === pr.number) : undefined
-    const owner = ownerOf(pr.branch)
+    const owner = ownerOf(pr)
     const failing = pr.checks.filter((c) => c.state === 'failing').map((c) => c.name)
     const fresh = f ? unsent(f) : []
     const bits = [
       pr.branch,
       pr.isDraft ? 'draft' : '',
-      owner ? `agent on it: ${owner.name}` : agentMade(pr.branch) ? 'made by an agent' : '',
+      owner ? `agent on it: ${owner.name}` : agentMade(pr) ? 'made by an agent' : '',
       pr.checks.length ? `checks ${pr.state}${failing.length ? ` (${failing.join(', ')})` : ''}` : 'no checks',
       f?.comments.length ? `${f.comments.length} review comment(s), ${fresh.length} not yet sent to an agent` : ''
     ].filter(Boolean)

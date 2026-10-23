@@ -24,3 +24,20 @@ test('documents and folders open; programs and launchers are only revealed', () 
   else assert.equal(opensSafely(f('installer.scr')), false)
   assert.equal(opensSafely(path.join(dir, 'missing.md')), false)
 })
+
+test('on Windows only what opens in a viewer is opened: the shell runs more types than any list of them', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-open-win-'))
+  const f = (name: string) => {
+    const p = path.join(dir, name)
+    fs.writeFileSync(p, 'x')
+    return p
+  }
+  for (const doc of ['notes.md', 'report.pdf', 'shot.png', 'data.csv', 'sheet.xlsx']) assert.equal(opensSafely(f(doc), 'win32'), true, doc)
+  // .js and .jse run under Windows Script Host; the rest are launchers or containers that run code
+  for (const run of ['setup.js', 'a.jse', 'a.vbe', 'a.wsc', 'a.pif', 'help.chm', 'x.settingcontent-ms', 'page.html', 'pic.svg', 'unknown.zzz']) {
+    assert.equal(opensSafely(f(run), 'win32'), false, run)
+  }
+  // elsewhere a script is not opened either, executable bit or not
+  assert.equal(opensSafely(f('tool.js'), 'linux'), false)
+  assert.equal(opensSafely(f('notes.txt'), 'linux'), true)
+})

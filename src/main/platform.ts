@@ -104,7 +104,11 @@ export function shimScript(cmdFile: string): string | null {
  */
 export function cmdQuote(arg: string): string {
   if (arg && !/[\s"&|<>^%(),;=!]/.test(arg)) return arg
-  return `"${arg.replace(/"/g, '""').replace(/(\\+)$/, '$1$1')}"`
+  // backslashes mean something to the C runtime only right before a quote: a run of them there is
+  // doubled (it reads 2n as n, then the quote), as is a run before the closing quote. Left single, a
+  // \" in a prompt read as an escaped quote, the next one closed the argument early, and the rest of
+  // the prompt arrived as arguments of its own: flags included.
+  return `"${arg.replace(/(\\*)"/g, '$1$1""').replace(/(\\+)$/, '$1$1')}"`
 }
 
 /**
