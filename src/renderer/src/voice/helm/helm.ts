@@ -106,7 +106,7 @@ Rules:
 - Prefer a playbook when one fits. Prefer "send" to an existing console when an agent on the board is already working on that thing or owns that area. Use "team" for custom multi-step work no playbook fits.
 - Only use console names, playbook ids and panels that exist. Never add kill/close/delete steps the user did not ask for.
 - At most 3 options, best first, each meaningfully different. Leave options empty when the reply fully answers.
-- "auto": the index of the option to run right away, ONLY when the request is unambiguous AND that option is non-destructive (a panel, a send with submit false, or a read-only playbook: morning-sweep, pr-review, db-safety). Never auto for kill/close/merge, team or feature work. Otherwise null.
+- "auto": the index of the option to run right away, ONLY when the request is unambiguous AND that option only shows something (a panel) or is a read-only playbook: morning-sweep, pr-review, db-safety. Never auto for a send. Never auto for kill/close/merge, team or feature work. Otherwise null.
 
 Playbooks (id · name · when to use · inputs; "?" = optional):
 ${playbookCatalog()}
@@ -204,7 +204,8 @@ function githubTarget(what: string, target: string) {
 /** Can this option run without a click? (enforced here, whatever the model said) */
 export function autoSafe(o: HelmOption): boolean {
   if (o.kind === 'panel') return true
-  if (o.kind === 'send') return o.submit === false && resolveRefs(o.targets ?? []).ids.length <= 6
+  // not even a message left unsent: Oracle's words come from a snapshot that holds other people's
+  // text, and a typed draft is submitted by the next Enter anything presses in that console
   if (o.kind === 'playbook') return AUTO_PLAYBOOKS.includes(o.playbook!.id) && !missingInputs(o).length
   return false
 }
