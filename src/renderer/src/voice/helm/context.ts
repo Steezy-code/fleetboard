@@ -1,9 +1,18 @@
 // Helm's view of the board: a compact plain-text snapshot of the open project (git, what is known
-// about the repo, workspaces, every console with a short output tail, the team, board content,
-// installed agents, CI and pull requests, the last morning sweep of the user's other repos) that fits
-// in one headless prompt. Console tails share whatever room is left after the rest.
+// about the repo, workspaces, every console with a short output tail, the team and the charter it
+// works to, board content, installed agents, CI and pull requests, the last morning sweep of the
+// user's other repos) that fits in one headless prompt. Console tails share whatever room is left
+// after the rest.
+//
+// With a board selection the snapshot is only what was pointed at: the selected consoles (with the
+// room the others would have had), the selected tiles, and the charter when a selected console is on
+// the team. Asked "why is this stuck?" about two consoles and a card, Oracle sees those three things.
+// What is known about the repo stays in either way: it is small, and it is what a charter cites.
 import type { BoardNode, ConsoleStatus, Workspace } from '@shared/types'
+import type { FleetMember, FleetState } from '@shared/fleet'
 import { agentById } from '@shared/agents'
+import { checkTrend, diffLabel, elapsedLabel, minutes, span } from '@shared/live'
+import { activityOf } from '../../engine/activity'
 import { knowledgeBlock } from '@shared/knowledge'
 import { refreshKnowledge } from '../../fleet/knowledge'
 import { invoke } from '../../lib/api'
@@ -20,7 +29,11 @@ import type { SweepResult } from '../../../../main/sweep'
 
 const MAX_CHARS = 12000
 const TAIL_CHARS = 500
+/** a selected console's tail: the room the rest of the board would have used */
+const SCOPED_TAIL_CHARS = 2500
 const BOARD_CHARS = 3000
+/** quieter than this, a member's line says so */
+const QUIET_NOTE_MIN = 2
 /** Standing facts are worth more than another console's tail, but not the whole snapshot. */
 const KNOWN_CHARS = 2000
 
@@ -139,26 +152,73 @@ function boardSection(): string {
   return text.length > BOARD_CHARS ? text.slice(0, BOARD_CHARS - 1) + '…' : text
 }
 
-function fleetSection(): string {
+/**
+ * What the job was agreed to be, and how the check is going: the charter is the user's, so Oracle
+ * answers "is it nearly done?" against it rather than against its own reading of the consoles.
+ *
+ * ponytail: plan 2's project profile joins here as its own section once it exists — the standing facts
+ * the charter's "known" assumptions cite. Until then the charter's citations are all there is.
+ */
+function charterLines(s: FleetState, lead: FleetMember | undefined): string[] {
+  const c = s.charter
+  if (!c) return []
+  const lines = [`charter (what the user confirmed the job is): ${clip(c.understood, 300)}`]
+  if (c.wontTouch.length) lines.push(`  won't touch: ${c.wontTouch.join(', ')}`)
+  if (c.doneWhen) lines.push(`  done when: ${c.doneWhen} · ${checkTrend(s.check, c.doneWhen)}`)
+  const job = lead ? elapsedLabel({ startedAt: lead.createdAt, endedAt: s.ready?.leadId === lead.id ? s.ready.at : undefined, estimate: c.estimate }, Date.now()) : ''
+  if (job) lines.push(`  time: ${job}`)
+  return lines
+}
+
+/** A member as Oracle reads it: role, status, task, and what the live work says about it. */
+function memberLine(s: FleetState, m: FleetMember, name: (id?: string) => string): string {
+  const now = Date.now()
+  const quiet = m.lastOutputAt !== undefined && (m.status === 'working' || m.status === 'starting') ? minutes(now - m.lastOutputAt) : 0
+  const bits = [
+    m.role,
+    m.status,
+    m.leadId ? `under ${name(m.leadId)}` : '',
+    activityOf(m.id) ?? '',
+    quiet >= QUIET_NOTE_MIN ? `silent ${span(quiet)}` : '',
+    m.role === 'worker' && m.status === 'working' ? diffLabel(m.diff) && `changed so far: ${diffLabel(m.diff)}` : ''
+  ].filter(Boolean)
+  return `${m.name} (${bits.join(', ')}${m.task && m.role !== 'lead' ? `: ${clip(m.task, 80)}` : ''})`
+}
+
+/** The team. `only`: the selected consoles — then just their members, their tasks, and the charter they work to. */
+function fleetSection(only?: Set<string>): string {
   const s = useFleet.getState().state
   if (!s) return 'none'
-  const members = Object.values(s.members).filter((m) => m.status !== 'closed')
+  const members = Object.values(s.members).filter((m) => m.status !== 'closed' && (!only || only.has(m.id)))
+  if (only && !members.length) return ''
   const name = (id?: string) => (!id ? '' : id === 'user' ? 'you' : (s.members[id]?.name ?? nameOf(id)))
   const lines: string[] = []
   const lead = activeLead()
-  if (lead) {
+  const leadIn = !only || (!!lead && only.has(lead.id))
+  if (lead && leadIn) {
     const goal = lead.task ?? s.messages.find((m) => m.to === lead.id && m.kind === 'goal')?.text ?? ''
     lines.push(`active lead: ${lead.name}${lead.branch ? ` on ${lead.branch}` : ''} · goal: ${clip(goal, 400)}`)
-  } else lines.push('active lead: none (a new goal starts one)')
-  if (s.tasks.length) lines.push('plan:\n' + s.tasks.map((t, i) => `  ${i + 1}. [${t.status}] ${clip(t.title, 90)}${t.owner ? ` (${name(t.owner)})` : ''}${t.note ? ` · ${clip(t.note, 60)}` : ''}`).join('\n'))
-  if (members.length)
+  } else if (!only) lines.push('active lead: none (a new goal starts one)')
+  // the charter's clock runs from its Lead's start, live console or not: one team at a time, so the newest
+  const owner = lead ?? Object.values(s.members).filter((m) => m.role === 'lead' && m.status !== 'closed').sort((a, b) => b.createdAt - a.createdAt)[0]
+  lines.push(...charterLines(s, owner))
+  const tasks = s.tasks.filter((t) => leadIn || (t.owner && only?.has(t.owner)))
+  if (tasks.length) {
+    const now = Date.now()
     lines.push(
-      'members: ' +
-        members.map((m) => `${m.name} (${m.role}, ${m.status}${m.leadId ? `, under ${name(m.leadId)}` : ''}${m.task && m.role !== 'lead' ? `: ${clip(m.task, 80)}` : ''})`).join('; ')
+      'plan:\n' +
+        tasks
+          .map((t, i) => {
+            const time = elapsedLabel(t, now)
+            return `  ${i + 1}. [${t.status}] ${clip(t.title, 90)}${t.owner ? ` (${name(t.owner)})` : ''}${time ? ` · ${time}` : ''}${t.note ? ` · ${clip(t.note, 60)}` : ''}`
+          })
+          .join('\n')
     )
-  const open = s.asks.filter((a) => !a.answer)
+  }
+  if (members.length) lines.push('members: ' + members.map((m) => memberLine(s, m, name)).join('; '))
+  const open = s.asks.filter((a) => !a.answer && (!only || only.has(a.from)))
   if (open.length) lines.push('unanswered questions for the user: ' + open.map((a) => `${name(a.from)} asks "${clip(a.question, 140)}"${a.options.length ? ` [${a.options.join(' / ')}]` : ''}`).join('; '))
-  if (s.ready) lines.push(`ready for review: branch ${s.ready.branch}, ${s.ready.commits} commit(s), ${s.ready.files.length} file(s): ${clip(s.ready.summary, 260)}`)
+  if (s.ready && (!only || only.has(s.ready.leadId))) lines.push(`ready for review: branch ${s.ready.branch}, ${s.ready.commits} commit(s), ${s.ready.files.length} file(s): ${clip(s.ready.summary, 260)}`)
   return lines.join('\n')
 }
 
@@ -224,30 +284,54 @@ function recentThread(): string {
   return entries.map((e) => `${e.kind === 'user' ? 'user' : e.kind}: ${clip(e.text, 160)}`).join('\n')
 }
 
-/** The whole snapshot, under ~12k characters. */
+/** What the user pointed at: the selected consoles (a selected group counts as its members) and the other selected tiles. Null with nothing selectable selected. */
+export function selectionScope(): { consoles: string[]; nodes: BoardNode[] } | null {
+  const ws = activeWs()
+  if (!ws) return null
+  const sel = new Set(useApp.getState().selection)
+  const consoles = selectedConsoles()
+  // wires and ink strokes can be selected too, but they are not things to ask about
+  const nodes = ws.nodes.filter((n) => n.type !== 'console' && sel.has(n.id))
+  return consoles.length || nodes.length ? { consoles, nodes } : null
+}
+
+/** A selected tile by name, for the line that says what the snapshot is scoped to. */
+const tileName = (n: BoardNode) => {
+  const t = n.title ?? n.data?.title
+  return t ? `${n.type} "${clip(String(t), 40)}"` : n.type
+}
+
+/** The whole snapshot, under ~12k characters; only the selection when there is one. */
 export async function boardContext(isCancelled: () => boolean = () => false): Promise<string> {
   const app = useApp.getState()
   const p = app.project
   if (!p) return ''
   const ws = activeWs()
-  const consoles = allConsoles().sort((a, b) => (STATUS_ORDER[statusOf(a.id)] ?? 9) - (STATUS_ORDER[statusOf(b.id)] ?? 9))
+  const scope = selectionScope()
+  const consoles = allConsoles()
+    .filter((c) => !scope || scope.consoles.includes(c.id))
+    .sort((a, b) => (STATUS_ORDER[statusOf(a.id)] ?? 9) - (STATUS_ORDER[statusOf(b.id)] ?? 9))
+  const tailChars = scope ? SCOPED_TAIL_CHARS : TAIL_CHARS
   const [git, known, sweep, tails] = await Promise.all([
-    gitLine(p.path),
+    scope ? Promise.resolve('') : gitLine(p.path),
     // read alongside git, so Oracle waits for nothing extra; bounded, and empty when the repo cannot be read
     refreshKnowledge(),
-    sweepSection(),
-    Promise.all(consoles.map((c) => (statusOf(c.id) === 'exited' || !isLive(c.id) ? Promise.resolve('') : consoleTail(c.id, 1600).catch(() => ''))))
+    scope ? Promise.resolve('') : sweepSection(),
+    Promise.all(consoles.map((c) => (statusOf(c.id) === 'exited' || !isLive(c.id) ? Promise.resolve('') : consoleTail(c.id, Math.max(1600, tailChars * 3)).catch(() => ''))))
   ])
   if (isCancelled()) return ''
 
   const fleet = useFleet.getState().state
-  const sel = selectedConsoles().map(nameOf)
   const cur = currentConsole()
+  const scopeLine = scope
+    ? `scope: the user selected ${[...consoles.map((c) => c.data.name as string), ...scope.nodes.map(tileName)].join(', ')} on the board and is asking about ${consoles.length + scope.nodes.length === 1 ? 'it' : 'them'}. The rest of the board is left out of this snapshot: answer about these. If the question needs the rest of the board, say so.`
+    : ''
+  const sel = selectedConsoles().map(nameOf)
   const head = [
     `project: ${p.name} (${p.path})`,
     git,
-    `workspaces: ${p.workspaces.map((w) => (w.id === ws?.id ? `${w.name} (active)` : w.name)).join(', ')}`,
-    sel.length ? `selected: ${sel.join(', ')}` : cur ? `most recently active console: ${nameOf(cur)}` : '',
+    scope ? '' : `workspaces: ${p.workspaces.map((w) => (w.id === ws?.id ? `${w.name} (active)` : w.name)).join(', ')}`,
+    scopeLine || (sel.length ? `selected: ${sel.join(', ')}` : cur ? `most recently active console: ${nameOf(cur)}` : ''),
     `installed agents: ${agentsSection()}`
   ]
     .filter(Boolean)
@@ -255,10 +339,17 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
 
   // the same facts, keys and provenance a charter cites, so an answer and a charter cannot disagree about the repo
   const knownText = `KNOWN ABOUT THIS REPO (cite one as fact:<key>)\n${knowledgeBlock(known, KNOWN_CHARS) || 'nothing yet: the Repo knowledge panel builds it'}`
-  const team = `TEAM\n${fleetSection()}`
-  const github = `CI AND PULL REQUESTS (GitHub, this repo)\n${ciSection()}\n\nOTHER REPOS (morning sweep)\n${sweep}`
-  const board = boardSection()
-  const boardText = board ? `BOARD CONTENT\n${board}` : 'BOARD CONTENT\n(nothing besides consoles)'
+  const teamBody = scope ? fleetSection(new Set(scope.consoles)) : fleetSection()
+  const team = teamBody ? `TEAM${scope ? ' (the selected members only)' : ''}\n${teamBody}` : ''
+  const github = scope ? '' : `CI AND PULL REQUESTS (GitHub, this repo)\n${ciSection()}\n\nOTHER REPOS (morning sweep)\n${sweep}`
+  let boardText: string
+  if (scope) {
+    const lines = scope.nodes.map((n) => (ws ? nodeLine(n, ws, p.path) : null) ?? tileName(n))
+    boardText = lines.length ? `SELECTED BOARD CONTENT\n${lines.map((l) => `- ${l}`).join('\n')}` : ''
+  } else {
+    const board = boardSection()
+    boardText = board ? `BOARD CONTENT\n${board}` : 'BOARD CONTENT\n(nothing besides consoles)'
+  }
   const thread = recentThread()
   const threadText = thread ? `RECENT COMMAND THREAD\n${thread}` : ''
 
@@ -269,21 +360,25 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     const bits = [
       c.data.agentId,
       statusOf(c.id),
+      activityOf(c.id) ?? '',
       m ? `${m.role}${m.task && m.role !== 'lead' ? `: ${clip(m.task, 100)}` : ''}` : '',
       group ? `group ${group}` : '',
       p.workspaces.length > 1 ? `in ${w?.name}` : ''
     ].filter(Boolean)
     return `## ${c.data.name} (${bits.join(' · ')})`
   }
-  const fixed = [head, knownText, team, github, boardText, threadText].filter(Boolean).join('\n\n')
+  const rest = [team, github, boardText, threadText].filter(Boolean)
+  const fixed = [head, knownText, ...rest].join('\n\n')
   const headers = consoles.map(consoleHead)
   const room = MAX_CHARS - fixed.length - headers.join('\n').length - 40
   const withTail = tails.filter(Boolean).length
-  const per = withTail ? Math.min(TAIL_CHARS, Math.floor(room / withTail) - 20) : 0
+  const per = withTail ? Math.min(tailChars, Math.floor(room / withTail) - 20) : 0
   const consoleText = consoles.length
     ? consoles.map((c, i) => (tails[i] && per >= 80 ? `${headers[i]}\n${cleanTail(tails[i], per)}` : headers[i])).join('\n')
-    : '(no consoles yet)'
+    : scope
+      ? '(no consoles selected)'
+      : '(no consoles yet)'
 
-  const all = `${head}\n\n${knownText}\n\nCONSOLES (newest output last)\n${consoleText}\n\n${[team, github, boardText, threadText].filter(Boolean).join('\n\n')}`
+  const all = `${head}\n\n${knownText}\n\n${scope ? 'SELECTED CONSOLES' : 'CONSOLES'} (newest output last)\n${consoleText}\n\n${rest.join('\n\n')}`
   return all.length > MAX_CHARS ? all.slice(0, MAX_CHARS - 2) + '\n…' : all
 }

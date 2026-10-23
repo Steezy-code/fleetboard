@@ -274,21 +274,31 @@ test('a board with no charter, or a charter that rules nothing out, is never blo
   }
 })
 
-test('stalled: only members still going without a report, past the threshold, worst first', () => {
+test('stalled: members still going that have gone quiet, past the threshold, quietest first', () => {
   const s = emptyFleet('p', '/repo')
   const now = 60 * 60000
   s.members = Object.fromEntries(
     [
-      member({ id: 'slow', name: 'Nadia', status: 'working', createdAt: 0 }),
-      member({ id: 'newer', name: 'Bo', status: 'working', createdAt: 50 * 60000 }),
-      member({ id: 'fresh', name: 'Cy', status: 'working', createdAt: 59 * 60000 }),
+      member({ id: 'quiet', name: 'Nadia', status: 'working', createdAt: 0, lastOutputAt: 20 * 60000 }),
+      member({ id: 'quieter', name: 'Bo', status: 'working', createdAt: 50 * 60000 }),
+      member({ id: 'talking', name: 'Cy', status: 'working', createdAt: 0, lastOutputAt: 58 * 60000 }),
       member({ id: 'spoke', name: 'Di', status: 'working', createdAt: 0, report: 'got there' }),
       member({ id: 'done', name: 'Eve', status: 'merged', createdAt: 0 })
     ].map((m) => [m.id, m])
   )
   assert.deepEqual(
-    stalled(s, now, 10).map((x) => x.who),
-    ['Nadia', 'Bo']
+    stalled(s, now, 5).map((x) => [x.who, x.minutes]),
+    [
+      ['Nadia', 40],
+      ['Bo', 10]
+    ]
   )
   assert.deepEqual(stalled(s, now, 90), [])
 })
+
+test('a member an hour old but still printing is not stalled: silence is what counts, not age', () => {
+  const s = emptyFleet('p', '/repo')
+  s.members = { old: member({ id: 'old', name: 'Old', status: 'working', createdAt: 0, lastOutputAt: 59 * 60000 }) }
+  assert.deepEqual(stalled(s, 60 * 60000), [])
+})
+

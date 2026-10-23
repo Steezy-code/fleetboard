@@ -8,6 +8,7 @@ import { emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
+import { estimateOf, stampTask } from '@shared/live'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -19,6 +20,7 @@ import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
+import { runCheck, startLive, stopCheck, stopLive } from './live'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -287,7 +289,7 @@ export function leadPrompt(m: FleetMember) {
     `You are ${m.name}, the Lead of a Fleetboard team. The user gives you goals; you get them done through workers.`,
     'You have fleet tools (mcp__fleet__*). Rules:',
     '1. Never edit files yourself. Read the repo to understand it, then delegate.',
-    '2. Break the goal into a short plan with fleet_plan (one line per task). Keep it small: 1-4 tasks.',
+    '2. Break the goal into a short plan with fleet_plan (one line per task, and in estimates the minutes you expect each to take). Keep it small: 1-4 tasks.',
     `3. Start one worker per task with fleet_spawn_worker, passing the plan task's id as task_ref. Give each worker files/folders it owns that no other worker touches, and a done_when check (a command that proves it works). At most ${MAX_WORKERS} workers at once.`,
     '4. After starting workers, call fleet_wait to receive their reports (it returns when something happens). Do not poll or sleep.',
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
@@ -311,7 +313,8 @@ function workerPrompt(m: FleetMember, lead?: FleetMember) {
     `You are ${m.name}, a worker on a Fleetboard team led by ${lead?.name ?? 'the lead'}.`,
     'Do only the task you are given and edit only the files you own. If you need something outside them, ask the lead with fleet_send.',
     'Work in your current directory (your own git worktree). Do not commit or push; Fleetboard commits your work when you report.',
-    'When your done_when check passes, call fleet_report with status "done" and a 3-6 line summary (what changed, files, how you verified). If you are stuck, call fleet_report with status "blocked" and what you need.'
+    'When your done_when check passes, call fleet_report with status "done" and a 3-6 line summary (what changed, files, how you verified). If you are stuck, call fleet_report with status "blocked" and what you need.',
+    'End the summary with a "Decisions:" line and under it one line per real choice you made that the task did not settle for you ("- kept X over Y: why"). Leave it out when you made none; do not list routine steps.'
   ].join('\n')
 }
 
@@ -564,9 +567,14 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   s.ready = null
   s.tasks = []
   s.charter = charter
+  // a new charter's check starts its own history: the last team's runs measured a different job
+  stopCheck(s.projectId)
+  delete s.check
   changed(s)
   await startConsole(s, m)
   post(s, { from: 'user', to: id, kind: 'goal', text: goalMessageFor(charter, opts.goal) })
+  // the baseline, so later runs can say "down from 11"
+  void runCheck(s, 'start')
   return m
 }
 
@@ -643,7 +651,14 @@ const TOOLS: ToolDef[] = [
     name: 'fleet_plan',
     roles: ['lead'],
     description: 'Show your plan on the board as a task list (replaces the previous plan). Keep tasks to one line each.',
-    inputSchema: { type: 'object', properties: { tasks: strArr('Task titles, in order') }, required: ['tasks'] }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tasks: strArr('Task titles, in order'),
+        estimates: { type: 'array', items: { type: 'number' }, description: 'Minutes you expect each task to take, same order as tasks' }
+      },
+      required: ['tasks']
+    }
   },
   {
     name: 'fleet_update_task',
@@ -778,7 +793,11 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
 
   switch (name) {
     case 'fleet_plan': {
-      s.tasks = (a.tasks ?? []).map((t: string): FleetTask => ({ id: uid('t'), title: String(t), status: 'todo' }))
+      const estimates: unknown[] = Array.isArray(a.estimates) ? a.estimates : []
+      s.tasks = (a.tasks ?? []).map((t: string, i: number): FleetTask => {
+        const estimate = estimateOf(estimates[i])
+        return { id: uid('t'), title: String(t), status: 'todo', ...(estimate ? { estimate } : {}) }
+      })
       ctx.emit('fleet:plan', { leadId: m.id })
       changed(s)
       return text(`Plan shown on the board:\n${s.tasks.map((t, i) => `${i + 1}. ${t.title} (id ${t.id})`).join('\n')}`)
@@ -789,7 +808,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (a.status) {
         const st = String(a.status).toLowerCase().trim()
         if (!TASK_STATUSES.includes(st as FleetTask['status'])) return fail(`Unknown status "${a.status}". Use one of: ${TASK_STATUSES.join(', ')}.`)
-        t.status = st as FleetTask['status']
+        stampTask(t, st as FleetTask['status'], Date.now())
       }
       if (a.owner) t.owner = findMember(s, a.owner)?.id ?? a.owner
       if (a.note) t.note = a.note
@@ -834,7 +853,10 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       s.members[id] = w
       memberProject.set(id, s.projectId)
       const ref = reviewer ? undefined : a.task_ref ? findTask(s.tasks, a.task_ref) : guessTask(s.tasks, String(a.task ?? ''))
-      if (ref) Object.assign(ref, { owner: id, status: 'doing' })
+      if (ref) {
+        ref.owner = id
+        stampTask(ref, 'doing', Date.now())
+      }
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
       await startConsole(s, w, { acceptEdits: !reviewer })
@@ -908,7 +930,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       m.status = 'reported'
       m.report = String(a.summary)
       const t = s.tasks.find((x) => x.owner === m.id)
-      if (t) t.status = a.status === 'blocked' ? 'blocked' : a.status === 'changes' ? 'review' : m.role === 'reviewer' ? t.status : 'review'
+      if (t) stampTask(t, a.status === 'blocked' ? 'blocked' : a.status === 'changes' ? 'review' : m.role === 'reviewer' ? t.status : 'review', Date.now())
       post(s, { from: m.id, to: lead.id, kind: 'report', text: `(${a.status}) ${a.summary}${commitNote}` })
       return text(`Reported to ${lead.name}.${commitNote} Stay available: the lead may send follow-ups.`)
     }
@@ -935,9 +957,11 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       }
       w.status = 'merged'
       const t = s.tasks.find((x) => x.owner === w.id)
-      if (t) t.status = 'done'
+      if (t) stampTask(t, 'done', Date.now())
       ctx.emit('fleet:traffic', { from: w.id, to: m.id, kind: 'merge' })
       changed(s)
+      // merged work has landed in the integration worktree: the one moment the charter's check can answer differently
+      void runCheck(s, 'merge')
       const stat = (await git(m.cwd, ['diff', '--stat', 'HEAD~1', 'HEAD'])).out.split('\n').pop()
       return text(`Merged ${w.name}'s work into ${m.branch}: ${stat}`)
     }
@@ -1126,7 +1150,7 @@ function memberStarted(req: PtySpawnRequest) {
     m.status = 'working'
     m.report = undefined
     const t = s.tasks.find((x) => x.owner === m.id)
-    if (t) t.status = 'doing'
+    if (t) stampTask(t, 'doing', Date.now())
     post(s, { from: m.id, to: lead.id, kind: 'message', text: `${m.name}'s console was restarted; it carries on with its task and will report when done.` })
   }
   if (m.status !== 'working' && m.status !== 'starting') return
@@ -1161,7 +1185,7 @@ function memberExited(id: string, code: number | undefined, appClosing: boolean)
   m.status = 'reported'
   m.report = `Console exited${how} before reporting.`
   const t = s.tasks.find((x) => x.owner === m.id)
-  if (t) t.status = 'blocked'
+  if (t) stampTask(t, 'blocked', Date.now())
   const work = m.role === 'worker' && m.branch ? ` Anything it changed is uncommitted in its worktree (branch ${m.branch}).` : ''
   post(s, { from: m.id, to: lead.id, kind: 'report', text: `(blocked) ${m.name}'s console exited${how} before it reported.${work} Start a new ${m.role} if the task still needs doing.` })
 }
@@ -1184,6 +1208,7 @@ export async function register(c: MainContext) {
     t.unref?.()
     ticks.push(t)
   }
+  startLive({ ctx, teams: () => states.values(), changed, trees: treesDir })
 
   const { ipc } = ctx
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
@@ -1205,6 +1230,20 @@ export async function register(c: MainContext) {
     return true
   })
   ipc.handle('fleet:answer', (_e, askId: string, answer: string) => answerAsk(askId, answer))
+  /** The user switches the charter's live check off or on. Off also ends a run in flight; on runs it now. */
+  ipc.handle('fleet:checkOff', (_e, projectId: string, off: boolean) => {
+    const s = states.get(projectId)
+    if (!s?.charter?.doneWhen) return false
+    s.check = { ...(s.check ?? { command: s.charter.doneWhen, runs: [] }), off: !!off }
+    if (!s.check.off) delete s.check.off
+    if (off) {
+      stopCheck(projectId)
+      delete s.check.running
+    }
+    changed(s)
+    if (!off) void runCheck(s, 'start')
+    return true
+  })
   ipc.handle('fleet:diff', async (_e, projectId: string) => {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
@@ -1378,11 +1417,14 @@ export async function revertMerge(projectId: string, commit: string): Promise<{ 
 export function stopFleetTicks() {
   for (const t of ticks) clearInterval(t)
   ticks.length = 0
+  stopLive()
 }
 
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
+  // its worktree is about to go: a check still running in it has nothing left to check
+  stopCheck(s.projectId)
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')
   // A worker's branch is only safe to delete once the lead's branch actually contains its commits.
   // It used to be deleted with -D either way, so a worker that reported "blocked", or whose console

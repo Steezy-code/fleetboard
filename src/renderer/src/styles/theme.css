@@ -393,6 +393,18 @@ button {
   color: var(--st);
   background: color-mix(in srgb, var(--st) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--st) 40%, transparent);
+  max-width: 46%;
+  min-width: 0;
+}
+/* what the agent is doing, in its own words: a path or a command, so not shouted in capitals */
+.status-doing {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 10.5px;
 }
 
 /* ---------- modal / panel ---------- */
