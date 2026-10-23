@@ -1318,8 +1318,10 @@ export async function register(c: MainContext) {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
     if (!s || !lead?.branch) return ''
-    const base = lead.base ?? 'HEAD~1'
-    return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
+    // what Merge would bring in: the card's commit, not whatever the Lead has committed since
+    const head = s.ready!.head ?? 'HEAD'
+    const base = lead.base ?? `${head}~1`
+    return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..${head}`])).out.slice(0, 400_000)
   })
   ipc.handle('fleet:mergeReady', (_e, projectId: string, head?: string) => mergeReady(projectId, typeof head === 'string' ? head : undefined))
   ipc.handle('fleet:revertMerge', (_e, projectId: string, commit: string) => revertMerge(projectId, String(commit)))
@@ -1329,7 +1331,8 @@ export async function register(c: MainContext) {
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
     if (!s?.ready || !lead?.branch) return { ok: false, error: 'Nothing to open a PR for.' }
     const base = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'main'
-    const push = await git(lead.cwd, ['push', '-u', 'origin', lead.branch])
+    // the card's commit, as Merge would take: a commit the Lead made after finishing is not in it
+    const push = await git(lead.cwd, ['push', '-u', 'origin', `${s.ready.head ?? 'HEAD'}:refs/heads/${lead.branch}`])
     if (!push.ok) return { ok: false, error: `Push failed: ${push.err.slice(0, 400)}` }
     const summary = s.ready.summary.trim()
     const title = ((summary.split('\n')[0] ?? '').replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
