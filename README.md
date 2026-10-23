@@ -28,6 +28,7 @@ npm run lint       # oxlint, errors only
 npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted claude
 #   FB_E2E_JOBS=3     several files at a time (what CI does; races show up under load)
 #   FB_E2E_HEADLESS=1 no Xvfb needed
+#   FB_E2E_KEEP=1     keep every test's temp sandbox (a failed test's is always kept, and named in its output)
 #   npm run test:e2e:one -- test/e2e/<file>.test.ts
 # by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
 #   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions,handoff}.test.ts
