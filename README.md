@@ -44,7 +44,7 @@ Then install your agent CLIs in Windows as usual (Claude Code, Codex, Gemini…)
 
 What's different on Windows:
 - Shell consoles are PowerShell (PowerShell 7 when installed, else Windows PowerShell).
-- **Pause** isn't available: Windows can't freeze a process the way Linux does. Closing a console ends everything it started.
+- **Pause** freezes the console's whole process tree through Windows' own suspend, since there is no `SIGSTOP` there. It takes about a second to take effect, and it is a real freeze: a paused agent is not quietly still working. Closing a console ends everything it started, paused or not.
 - The window uses the system's own minimize / maximize / close buttons, with Snap Layouts.
 - Claude Code's status hooks run through a small script (with Node when it's installed, else PowerShell).
 - Teams link dependencies into their worktrees with junctions, which need no admin rights.

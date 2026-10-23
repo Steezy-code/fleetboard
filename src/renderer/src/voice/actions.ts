@@ -9,7 +9,6 @@ import { agentLabel, isLive, killConsoles, pauseAll, resumeAll, sendToConsole, s
 import { handoff } from '../engine/handoff'
 import { memberOf } from '../engine/fleet'
 import { gateCharter } from '../fleet/charter'
-import { CAN_PAUSE } from '../lib/api'
 import { ensureOrchestratorNode } from '../orchestration/connect'
 import { DRAWER_NAMES, MODALS, isDrawer } from '../panels/names'
 
@@ -466,7 +465,6 @@ export async function runAction(a: Action): Promise<ActionResult> {
     }
     case 'pause':
     case 'resume': {
-      if (!CAN_PAUSE) return { ok: false, line: "Windows can't pause a console. Stop it with Close, or tell it to wait." }
       const { ids } = resolveRefs(a.targets)
       if (!ids.length) return { ok: false, line: `No console matches ${a.targets.join(', ')}.` }
       await (a.type === 'pause' ? pauseAll(ids) : resumeAll(ids))
