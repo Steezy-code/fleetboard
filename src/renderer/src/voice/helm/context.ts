@@ -1,9 +1,11 @@
-// Helm's view of the board: a compact plain-text snapshot of the open project (git, workspaces,
-// every console with a short output tail, the team, board content, installed agents, CI and pull
-// requests, the last morning sweep of the user's other repos) that fits in one headless prompt.
-// Console tails share whatever room is left after the rest.
+// Helm's view of the board: a compact plain-text snapshot of the open project (git, what is known
+// about the repo, workspaces, every console with a short output tail, the team, board content,
+// installed agents, CI and pull requests, the last morning sweep of the user's other repos) that fits
+// in one headless prompt. Console tails share whatever room is left after the rest.
 import type { BoardNode, ConsoleStatus, Workspace } from '@shared/types'
 import { agentById } from '@shared/agents'
+import { knowledgeBlock } from '@shared/knowledge'
+import { refreshKnowledge } from '../../fleet/knowledge'
 import { invoke } from '../../lib/api'
 import { relativeTo } from '../../workbench/paths'
 import { activeWs, allConsoles, useApp } from '../../state/store'
@@ -19,6 +21,8 @@ import type { SweepResult } from '../../../../main/sweep'
 const MAX_CHARS = 12000
 const TAIL_CHARS = 500
 const BOARD_CHARS = 3000
+/** Standing facts are worth more than another console's tail, but not the whole snapshot. */
+const KNOWN_CHARS = 2000
 
 const clip = (s: string, n: number) => {
   const t = s.replace(/\s+/g, ' ').trim()
@@ -227,8 +231,10 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
   if (!p) return ''
   const ws = activeWs()
   const consoles = allConsoles().sort((a, b) => (STATUS_ORDER[statusOf(a.id)] ?? 9) - (STATUS_ORDER[statusOf(b.id)] ?? 9))
-  const [git, sweep, tails] = await Promise.all([
+  const [git, known, sweep, tails] = await Promise.all([
     gitLine(p.path),
+    // read alongside git, so Oracle waits for nothing extra; bounded, and empty when the repo cannot be read
+    refreshKnowledge(),
     sweepSection(),
     Promise.all(consoles.map((c) => (statusOf(c.id) === 'exited' || !isLive(c.id) ? Promise.resolve('') : consoleTail(c.id, 1600).catch(() => ''))))
   ])
@@ -247,6 +253,8 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     .filter(Boolean)
     .join('\n')
 
+  // the same facts, keys and provenance a charter cites, so an answer and a charter cannot disagree about the repo
+  const knownText = `KNOWN ABOUT THIS REPO (cite one as fact:<key>)\n${knowledgeBlock(known, KNOWN_CHARS) || 'nothing yet: the Repo knowledge panel builds it'}`
   const team = `TEAM\n${fleetSection()}`
   const github = `CI AND PULL REQUESTS (GitHub, this repo)\n${ciSection()}\n\nOTHER REPOS (morning sweep)\n${sweep}`
   const board = boardSection()
@@ -267,7 +275,7 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     ].filter(Boolean)
     return `## ${c.data.name} (${bits.join(' · ')})`
   }
-  const fixed = [head, team, github, boardText, threadText].filter(Boolean).join('\n\n')
+  const fixed = [head, knownText, team, github, boardText, threadText].filter(Boolean).join('\n\n')
   const headers = consoles.map(consoleHead)
   const room = MAX_CHARS - fixed.length - headers.join('\n').length - 40
   const withTail = tails.filter(Boolean).length
@@ -276,6 +284,6 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     ? consoles.map((c, i) => (tails[i] && per >= 80 ? `${headers[i]}\n${cleanTail(tails[i], per)}` : headers[i])).join('\n')
     : '(no consoles yet)'
 
-  const all = `${head}\n\nCONSOLES (newest output last)\n${consoleText}\n\n${[team, github, boardText, threadText].filter(Boolean).join('\n\n')}`
+  const all = `${head}\n\n${knownText}\n\nCONSOLES (newest output last)\n${consoleText}\n\n${[team, github, boardText, threadText].filter(Boolean).join('\n\n')}`
   return all.length > MAX_CHARS ? all.slice(0, MAX_CHARS - 2) + '\n…' : all
 }

@@ -11,6 +11,11 @@ export interface CharterAssumption {
   known: boolean
   /** the path or command that backs a `known` assumption */
   from?: string
+  /**
+   * The key of the repo-knowledge fact a `known` assumption rests on (shared/knowledge.ts). Set by the
+   * gate's evidence check and nothing else: one a model writes is not believed.
+   */
+  fact?: string
 }
 
 /** Which kind of gap makes a charter unsure; each has a one-question fix. */
@@ -49,8 +54,9 @@ function coerceAssumption(raw: unknown): CharterAssumption | null {
   const text = str(a.text, 300)
   if (!text) return null
   const from = str(a.from, 200)
+  const fact = str(a.fact, 80)
   // a claim of knowing is only believed once it names what it rests on
-  return a.known === true && from ? { text, known: true, from } : { text, known: false }
+  return a.known === true && from ? { text, known: true, from, ...(fact ? { fact } : {}) } : { text, known: false }
 }
 
 function coerceQuestion(raw: unknown): Charter['question'] {
