@@ -28,8 +28,20 @@ before(async () => {
   for (const f of [...WEIRD, 'app/i/page.tsx', 'old name.txt']) write(f, 'v1\n')
   sh('add', '-A')
   sh('commit', '-qm', 'init')
+  // the open project, as the app declares it: git runs only inside the folders Fleetboard may use
+  ;(await import('../../src/main/roots')).declareProject(repo)
   const git = await import('../../src/main/git')
   git.register({ ipc: ipcMain as any, win: () => null, ptys: null as any, settings: () => ({}) as any, emit: () => {} })
+})
+
+test('a repo outside the folders Fleetboard may use is refused, whatever the board file says', async () => {
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-git-other-'))
+  execFileSync('git', ['init', '-q'], { cwd: other })
+  assert.equal(await ipcMain.invoke('git:isRepo', other), false)
+  const r = await ipcMain.invoke('git:status', other)
+  assert.equal(r.ok, false)
+  const push = await ipcMain.invoke('git:push', other)
+  assert.equal(push.ok, false)
 })
 
 test('status reads every odd file name exactly', async () => {
