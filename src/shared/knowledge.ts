@@ -38,6 +38,13 @@ export type CharterDelta = { at: number; request: string } & (
   | { field: 'wontTouch' | 'assumptions'; added: string[]; removed: string[] }
 )
 
+/** What the main process's read of a repo found (main/knowledge.ts). */
+export interface RepoReading {
+  facts: KnowledgeFact[]
+  /** the readme and guides that exist: what the model pass reads, and what `readme` provenance is checked against */
+  docs: string[]
+}
+
 export interface RepoKnowledge {
   facts: KnowledgeFact[]
   /** keys the user deleted. Remembered so the repo, or a model, cannot simply re-assert what the user rejected */
