@@ -23,7 +23,7 @@ const NOT_A_SHA = [
   'deadbe', // six, below the shortest unambiguous prefix git prints
   'g'.repeat(40),
   '',
-  '0123456789abcdef0123456789abcdef012345678' // 41
+  'a'.repeat(65) // longer than a SHA-256 id
 ]
 
 test('only a plain hex sha reaches git', async () => {
@@ -36,7 +36,7 @@ test('only a plain hex sha reaches git', async () => {
 
 test('a well-formed sha gets past the shape check and is refused on the project instead', async () => {
   // proves the shape check is not what rejects a real sha — the next guard is
-  for (const ok of ['0123456', 'a'.repeat(40), '9f8e7d6c5b4a']) {
+  for (const ok of ['0123456', 'a'.repeat(40), '9f8e7d6c5b4a', 'b'.repeat(64)]) {
     const r = await revertMerge('no-such-project', ok)
     assert.equal(r.ok, false)
     assert.equal(r.error, 'That project is not open.', `shape check rejected ${ok}`)

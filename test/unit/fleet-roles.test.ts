@@ -371,7 +371,7 @@ test('what a merge would touch is read once, and read the way the exclusions are
 
 test('the phone presses Merge through that same function', () => {
   const remote = fs.readFileSync(new URL('../../src/main/remote.ts', import.meta.url), 'utf8')
-  assert.match(remote, /mergeReady\(body\.projectId\)/, '/api/merge calls mergeReady')
+  assert.match(remote, /mergeReady\(body\.projectId, /, '/api/merge calls mergeReady')
   assert.doesNotMatch(remote, /\bgit\(/, 'and does not merge on its own')
 })
 
