@@ -118,6 +118,15 @@ export function startDoc(opts: { key: string; preset: string; agentId: string; d
       const g = useDocStudio.getState().gens[opts.key]
       if (!g || g.status !== 'running' || !current()) return
       cancels.delete(opts.key)
+      // a run that failed partway is not the document: saving it would replace the last good one
+      if (res.code !== 0) {
+        patch(opts.key, {
+          status: 'error',
+          markdown: '',
+          error: res.text.trim().slice(-700) || `The CLI exited with code ${res.code} before finishing the document.`
+        })
+        return
+      }
       const fromResult = cleanMarkdown(res.text)
       const md = fromResult || cleanMarkdown(raw) || cleanMarkdown(res.text, true)
       if (!titleOf(md)) {

@@ -276,7 +276,7 @@ function GenView({ gen, onRegenerate }: { gen: DocGen; onRegenerate: () => void 
           <div className="ds-error">
             <TriangleAlert size={18} />
             <div>
-              <b>Nothing to show yet.</b>
+              <b>No document came out of this run.</b>
               <pre>{gen.error}</pre>
             </div>
           </div>

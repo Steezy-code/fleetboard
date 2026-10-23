@@ -68,6 +68,8 @@ export function register(ctx: MainContext) {
       let text = ''
       let pending = ''
       let finalResult: string | null = null
+      // Claude Code exits 0 after a run that ended in an error (max turns, an API error): its result says so
+      let failed = false
       let truncated = false
       const push = (chunk: string) => {
         if (!chunk) return
@@ -96,6 +98,7 @@ export function register(ctx: MainContext) {
               push('\n\n')
             } else if (ev.type === 'result') {
               finalResult = typeof ev.result === 'string' ? ev.result : null
+              failed = ev.is_error === true
             } else if (ev.type === 'assistant' && ev.message?.content) {
               for (const c of ev.message.content) if (c.type === 'tool_use') ctx.emit('cli:activity', req.runId, `${c.name} ${summarizeInput(c.input)}`)
             }
@@ -110,7 +113,7 @@ export function register(ctx: MainContext) {
         runs.delete(req.runId)
         const out = finalResult ?? text
         if (code && !out) ctx.emit('cli:chunk', req.runId, `\n[${agent.name} exited ${code}] ${stripAnsi(err).slice(-600)}`)
-        resolve({ code: code ?? 0, text: out || stripAnsi(err) })
+        resolve({ code: code || (failed ? 1 : 0), text: out || stripAnsi(err) })
       })
       child.on('error', (e) => {
         runs.delete(req.runId)
