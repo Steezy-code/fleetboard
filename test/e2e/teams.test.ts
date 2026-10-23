@@ -405,9 +405,11 @@ test('the fleet and hook servers refuse requests without the secret, from a brow
   assert.equal((await call(`/mcp/${secret}/${member}`, {})).status, 404, 'the old secret-in-URL shape is gone')
   assert.equal((await call(url.pathname, { ...auth, Origin: 'https://evil.example' })).status, 403, 'from a web page')
   assert.equal((await call(url.pathname, { ...auth, 'Content-Type': 'text/plain' })).status, 403, 'a no-preflight content type')
-  // the hook settings file holds no secret: it comes from each console's environment
+  // the hook settings file holds no secret, and no command line names one: the hook script reads
+  // the token from each console's environment
   const hooks = fs.readFileSync(path.join(hooksDir, 'claude-hooks.json'), 'utf8')
-  assert.ok(!hooks.includes(secret) && hooks.includes('${FB_HOOK_TOKEN}'))
+  assert.ok(!hooks.includes(secret), 'no secret in the file')
+  assert.ok(hooks.includes('fb-hook.cjs') && !hooks.includes('FB_HOOK_TOKEN'), 'the token never reaches an argv')
   assert.ok(app!.fakeLog((e) => e.event === 'hook' && e.hook === 'Stop').length > 0, 'hooks still arrive')
 })
 
