@@ -9,7 +9,7 @@ import { activeLead, sendGoal } from '../../engine/fleet'
 import { playbookById } from '../../playbooks/catalog'
 import { runPlaybook } from '../../playbooks/run'
 import { type Action, coerceAction, describe, resolveRefs } from '../actions'
-import { setVoice, useThread, useVoice } from '../thread'
+import { setVoice, useThread } from '../thread'
 import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planner'
 import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
@@ -68,7 +68,7 @@ export const useHelm = create<HelmState>(() => ({ card: null, thinking: false, d
 
 export const dismissHelm = () => useHelm.setState({ card: null })
 
-export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
+export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills', 'journal']
 
 /** Read-only playbooks Helm may start without a click. */
 // only what starts no agents: the PR review and database playbooks are review-only in what they ask
@@ -438,5 +438,3 @@ export function editHelmOption(i: number | null = primaryIndex()) {
   useHelm.setState((s) => ({ draft: { text, n: (s.draft?.n ?? 0) + 1 } }))
 }
 
-/** Is a Helm call running right now? (for the bar's "Thinking…" text) */
-export const helmThinking = () => useHelm.getState().thinking && useVoice.getState().phase === 'thinking'

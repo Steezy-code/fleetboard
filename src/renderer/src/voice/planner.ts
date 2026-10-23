@@ -463,7 +463,7 @@ export const ACTION_SCHEMA = `Action schema (use console ids or exact console na
 - {"type":"ungroup","team":"<team>"} / {"type":"deleteTeam","team":"<team>"}
 - {"type":"orchestrator"} (adds an orchestrator node) / {"type":"wire","from":"orchestrator|<id/name>","to":"<team or console>"}
 - {"type":"handoff","from":["<console>"],"toAgent":"<agent id>","note":"<extra instruction>?"}
-- {"type":"openPanel","name":"missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|presets|composer|orchestrator|git|ci|accounts|skills|chat"}
+- {"type":"openPanel","name":"missionMap|loops|memory|documents|diagrams|code|markdown|usage|settings|presets|composer|orchestrator|git|ci|accounts|skills|chat|journal|sweep"}
 - {"type":"focus","target":"<console or team>"} / {"type":"zoom","mode":"in|out|fit"} / {"type":"newWorkspace","name":"<name>?"}
 - {"type":"say","text":"<answer>"} (for questions about the board; answer from the snapshot)`
 
@@ -763,5 +763,3 @@ export async function runCommand(raw: string, source: Source) {
   }
 }
 
-/** Speak + record a line from elsewhere (e.g. other features). */
-export const announce = reply

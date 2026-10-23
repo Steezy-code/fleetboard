@@ -10,6 +10,8 @@ import { handoff } from '../engine/handoff'
 import { memberOf } from '../engine/fleet'
 import { gateCharter } from '../fleet/charter'
 import { CAN_PAUSE } from '../lib/api'
+import { ensureOrchestratorNode } from '../orchestration/connect'
+import { DRAWER_NAMES, MODALS, isDrawer } from '../panels/names'
 
 export type Action =
   | { type: 'spawn'; agent: string; count: number; team?: string; role?: Role | string; prompt?: string }
@@ -249,12 +251,18 @@ export const PANEL_ALIASES: Record<string, { name: string; drawer?: boolean }> =
   skills: { name: 'skills' }, handoff: { name: 'handoff' }, spawn: { name: 'spawn' },
   orchestrator: { name: 'orchestrator', drawer: true }, git: { name: 'git', drawer: true }, accounts: { name: 'accounts', drawer: true },
   ci: { name: 'ci', drawer: true }, reviews: { name: 'ci', drawer: true }, checks: { name: 'ci', drawer: true },
-  profiles: { name: 'accounts', drawer: true }, chat: { name: 'chat', drawer: true }, thread: { name: 'chat', drawer: true }
+  profiles: { name: 'accounts', drawer: true }, chat: { name: 'chat', drawer: true }, thread: { name: 'chat', drawer: true },
+  journal: { name: 'journal', drawer: true }, log: { name: 'journal', drawer: true }, nightlog: { name: 'journal', drawer: true },
+  sweep: { name: 'sweep' }, morningsweep: { name: 'sweep' }
 }
 
-export function panelFor(word: string) {
+/** The panel a word names: an alias, or a panel's own name (panels/names.ts); null for no such panel. */
+export function panelFor(word: string): { name: string; drawer?: boolean } | null {
   const n = norm(word.replace(/\b(the|my|panel|studio|drawer|window|view)\b/gi, ''))
-  return PANEL_ALIASES[n] ?? Object.entries(PANEL_ALIASES).find(([, v]) => norm(v.name) === n)?.[1] ?? null
+  const alias = PANEL_ALIASES[n]
+  if (alias) return alias
+  const own = [...MODALS, ...DRAWER_NAMES].find((name) => norm(name) === n)
+  return own ? { name: own, drawer: isDrawer(own) } : null
 }
 
 // ---------------------------------------------------------------- describe / safety
@@ -393,19 +401,9 @@ function installed(agentId: string): boolean {
   return !!app.agents.find((a) => a.id === agentId)?.path
 }
 
-function ensureOrchestrator(): string | null {
-  const ws = activeWs()
-  if (!ws) return null
-  const existing = ws.nodes.find((n) => n.type === 'orchestrator')
-  if (existing) return existing.id
-  const boxes = [...ws.nodes, ...ws.groups]
-  const at = boxes.length ? { x: Math.min(...boxes.map((b) => b.x)) - 420, y: Math.min(...boxes.map((b) => b.y)) } : undefined
-  return useApp.getState().addNode({ type: 'orchestrator', w: 340, h: 420, ...at, data: {} })
-}
-
 /** Board item id (node or group) for a wire endpoint. */
 function wireEnd(ref: string): string | null {
-  if (/^(the\s+)?(new\s+)?orchestrator$/i.test(ref.trim())) return ensureOrchestrator()
+  if (/^(the\s+)?(new\s+)?orchestrator$/i.test(ref.trim())) return ensureOrchestratorNode()
   const ws = activeWs()
   if (ws?.nodes.some((n) => n.id === ref) || ws?.groups.some((g) => g.id === ref)) return ref
   const team = resolveTeam(ref)
@@ -507,7 +505,7 @@ export async function runAction(a: Action): Promise<ActionResult> {
       return { ok: true, line: `Deleted ${g.name}${members.length ? ` and its ${members.length} console${members.length === 1 ? '' : 's'}` : ''}` }
     }
     case 'orchestrator': {
-      const id = ensureOrchestrator()
+      const id = ensureOrchestratorNode()
       if (id) afterLayout(() => useApp.getState().fitAll())
       return { ok: !!id, line: 'Orchestrator on the board' }
     }
@@ -540,7 +538,9 @@ export async function runAction(a: Action): Promise<ActionResult> {
       }
     }
     case 'openPanel': {
-      const p = panelFor(a.name) ?? { name: a.name }
+      const p = panelFor(a.name)
+      // a name that is no panel opened nothing and still said "Opened"
+      if (!p) return { ok: false, line: `There is no ${a.name} panel` }
       if (p.drawer) app.openDrawer(p.name, {})
       else app.openPanel(p.name)
       return { ok: true, line: `Opened ${a.name}` }
