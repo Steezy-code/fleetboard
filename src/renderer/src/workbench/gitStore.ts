@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
-import { invoke } from '../lib/api'
+import { errorText, invoke } from '../lib/api'
 import type { GitResult, GitStatus } from '../../../main/git'
 
 export type { GitStatus, GitFile, GitCommit, GitBranch, GitRemote, GitPr, GitResult } from '../../../main/git'
@@ -56,7 +56,7 @@ export function refreshGit(cwd: string | null | undefined): Promise<void> {
         patch(cwd, { status: notRepo ? null : prev.status, isRepo: notRepo ? false : prev.isRepo, error: r.error, loading: false, version: prev.version + (notRepo && prev.status ? 1 : 0) })
       }
     })
-    .catch((e) => patch(cwd, { loading: false, error: String(e?.message ?? e) }))
+    .catch((e) => patch(cwd, { loading: false, error: errorText(e) }))
     .finally(() => inflight.delete(cwd))
   inflight.set(cwd, p)
   return p
@@ -105,5 +105,5 @@ export function useGitStatus(cwd: string | null | undefined, interval = 4000): G
 
 /** Typed invoke for git:* channels. */
 export function git<T = {}>(channel: string, ...args: unknown[]) {
-  return invoke<GitResult<T>>(`git:${channel}`, ...args).catch((e) => ({ ok: false as const, error: String(e?.message ?? e) }))
+  return invoke<GitResult<T>>(`git:${channel}`, ...args).catch((e) => ({ ok: false as const, error: errorText(e) }))
 }
