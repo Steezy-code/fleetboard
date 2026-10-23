@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dirs, writeJsonAtomic } from './paths'
 import { newSecret, refuse, sameSecret } from './localserver'
+import { logError } from './errors'
 import { IS_WIN, findExecutable } from './platform'
 
 // Claude Code reports its own lifecycle through hooks. Each console's CLI gets a settings file
@@ -59,6 +60,12 @@ export function startHookServer(onEvent: typeof listener): Promise<number> {
     })
     // the app lives as long as Electron does, not as long as this server listens
     server.unref()
+    // no loopback to listen on: start without hooks (port 0, which hookEnv and claudeHookArgs read
+    // as none) rather than wait here for ever with no window
+    server.once('error', (e) => {
+      logError('hooks', `the hook server could not listen, so consoles start without hooks: ${e.message}`)
+      resolve(0)
+    })
     server.listen(0, '127.0.0.1', () => {
       port = (server.address() as { port: number }).port
       writeSettingsFile()

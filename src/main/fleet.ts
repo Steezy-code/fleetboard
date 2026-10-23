@@ -537,6 +537,7 @@ export function leadRestartNote(o: { how: string; team: string; task: string; ch
 }
 
 export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
+  if (!port) throw new Error('Teams are unavailable: Fleetboard could not start its local team server. The log says why.')
   const s = state(opts.projectId, opts.projectPath)
   // A project has one team: the charter, tasks and Ready card below are the new one's. A team left
   // running would go on merging under the new charter's exclusions, and a finished one would lose its
@@ -1176,6 +1177,11 @@ function startServer(): Promise<number> {
     server.requestTimeout = 0
     server.headersTimeout = 0
     server.keepAliveTimeout = 600_000
+    // no loopback to listen on: the app starts without teams (port 0) rather than wait for ever
+    server.once('error', (e) => {
+      logError('fleet', `the team server could not listen, so teams cannot start: ${e.message}`)
+      resolve(0)
+    })
     server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port))
   })
 }
@@ -1355,11 +1361,13 @@ export async function register(c: MainContext) {
 }
 
 /** The user's answer to a lead's question (the Inbox on the board or a phone). */
-export function answerAsk(askId: string, answer: string): boolean {
+/** `fromOptions`: the answer must be one the Lead offered, when it offered any (the phone has no free text). */
+export function answerAsk(askId: string, answer: string, opts: { fromOptions?: boolean } = {}): boolean {
   for (const s of states.values()) {
     const ask = s.asks.find((a) => a.id === askId)
     if (!ask) continue
     if (ask.answer) return false
+    if (opts.fromOptions && ask.options.length && !ask.options.includes(answer)) return false
     ask.answer = answer
     const w = askWaiters.get(askId)
     if (w) {
