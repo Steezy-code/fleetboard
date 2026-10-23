@@ -181,7 +181,7 @@ src/renderer/src/
   the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests
   and the Windows-specific e2e files on Windows. It runs on a pull request and on a push to master —
   a branch with a pull request open would otherwise run all of it twice. The Windows installer is
-  built only for master and tags, since nothing consumes it otherwise and release.yml builds it again
-  from scratch on a tag.
+  built on master as a packaging check and not kept: release.yml builds the shipped one from a
+  vX.Y.Z tag on master, after the tests pass.
 - `FB_E2E_HEADLESS=1` skips Xvfb entirely (`--ozone-platform=headless`), which is how to run the e2e
   suite on a machine without it.
