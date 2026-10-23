@@ -480,7 +480,7 @@ function deliverTick() {
 // ---------------------------------------------------------------- consoles
 
 /** Ask the board to add a node for a new team console, then start its process. */
-async function startConsole(s: FleetState, m: FleetMember, extra: { acceptEdits?: boolean } = {}) {
+async function startConsole(s: FleetState, m: FleetMember) {
   // before the board can mount the node and start it: this is a first start, not a restart
   startedThisRun.add(m.id)
   const reqId = uid('req')
@@ -493,7 +493,6 @@ async function startConsole(s: FleetState, m: FleetMember, extra: { acceptEdits?
     m.name = named.name
     changed(s)
   }
-  void extra // role permissions come from fleetLaunch
   await ctx.ptys.spawn({ id: m.id, agentId: m.agentId, cwd: m.cwd, cols: 100, rows: 30 })
 }
 
@@ -897,7 +896,7 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       }
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
-      await startConsole(s, w, { acceptEdits: !reviewer })
+      await startConsole(s, w)
       post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m, s.charter?.wontTouch) })
       return text(
         `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +

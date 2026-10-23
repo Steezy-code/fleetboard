@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { ArrowLeft, Check, Clock, Minus, MoonStar, Pencil, Play, Plus, Repeat, ScanSearch, Trash2 } from 'lucide-react'
 import { useApp } from '../state/store'
+import { useNow } from '../lib/useNow'
 import { agentColor, agentLabel } from '../engine/consoles'
 import {
   describeLoop,
@@ -72,15 +73,6 @@ const TEMPLATES: Template[] = [
 ]
 
 const EVERY = [5, 10, 15, 30, 60, 120]
-
-function useNow(ms = 1000) {
-  const [now, setNow] = useState(Date.now())
-  useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), ms)
-    return () => window.clearInterval(t)
-  }, [ms])
-  return now
-}
 
 const countdown = (ms: number) => {
   const s = Math.max(0, Math.round(ms / 1000))
@@ -169,7 +161,7 @@ export default function LoopsPanel({ edit }: { edit?: string }) {
   const loops = useApp((s) => (s.project?.extras.loops as Loop[] | undefined) ?? EMPTY)
   const [draft, setDraft] = useState<Loop | null>(() => (edit ? loops.find((l) => l.id === edit) ?? null : null))
   const [isNew, setIsNew] = useState(false)
-  const now = useNow()
+  const now = useNow(1000)
 
   if (draft) return <LoopEditor draft={draft} setDraft={setDraft} isNew={isNew} onDone={() => setDraft(null)} />
 

@@ -45,7 +45,6 @@ export function register(ctx: MainContext) {
       if (req.prompt.length > MAX_ARG_PROMPT) {
         const msg = `[This prompt is ${Math.round(req.prompt.length / 1000)} KB, too long to pass to ${agent.name} on its command line. Use Claude Code for it, or include less.]`
         ctx.emit('cli:chunk', req.runId, msg)
-        ctx.emit('cli:done', req.runId, 1)
         return { code: 1, text: msg }
       }
       args = agent.headless(req.prompt)
@@ -58,7 +57,6 @@ export function register(ctx: MainContext) {
         const l = launch(bin, args, env)
         child = spawn(l.file, l.args, { cwd: req.cwd, env, stdio: [isClaude ? 'pipe' : 'ignore', 'pipe', 'pipe'], ...launchOptions(l) })
       } catch (e) {
-        ctx.emit('cli:done', req.runId, 1)
         return resolve({ code: 1, text: String(e) })
       }
       runs.set(req.runId, child)
@@ -112,7 +110,6 @@ export function register(ctx: MainContext) {
         runs.delete(req.runId)
         const out = finalResult ?? text
         if (code && !out) ctx.emit('cli:chunk', req.runId, `\n[${agent.name} exited ${code}] ${stripAnsi(err).slice(-600)}`)
-        ctx.emit('cli:done', req.runId, code ?? 0)
         resolve({ code: code ?? 0, text: out || stripAnsi(err) })
       })
       child.on('error', (e) => {

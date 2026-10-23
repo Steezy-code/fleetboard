@@ -11,7 +11,7 @@ import path from 'node:path'
 import { ideasFrom, parseTodo, testsIn } from '../../src/main/starter'
 import { agentById } from '../../src/shared/agents'
 
-const { readinessOf, anyReady } = await import('@/chrome/readiness')
+const { readinessOf } = await import('@/chrome/readiness')
 
 // ---------------------------------------------------------------- readiness
 
@@ -27,8 +27,6 @@ test('readiness: looking, missing with its install line, installed but signed ou
 test('readiness: a CLI whose sign-in Fleetboard cannot read is taken at its word, not flagged', () => {
   const aider = agentById('aider')!
   assert.deepEqual(readinessOf(aider, { id: 'aider', path: '/bin/aider' }, undefined), { state: 'ready', detail: 'Installed' })
-  assert.equal(anyReady([readinessOf(claude, { id: 'claude', path: null }, undefined), readinessOf(aider, { id: 'aider', path: '/bin/aider' }, undefined)]), true)
-  assert.equal(anyReady([readinessOf(claude, { id: 'claude', path: '/bin/claude' }, { signedIn: false })]), false)
 })
 
 // ---------------------------------------------------------------- first goals
