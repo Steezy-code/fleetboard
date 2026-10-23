@@ -90,6 +90,19 @@ export function upsertLoop(loop: Loop) {
 export function updateLoop(id: string, patch: Partial<Loop>) {
   saveLoops(getLoops().map((l) => (l.id === id ? { ...l, ...patch } : l)))
 }
+
+/**
+ * Save what the editor changes on a loop that already exists: its settings, never its run state.
+ * The draft was copied when the editor opened, and the engine has gone on counting runs, checking
+ * the goal and perhaps retiring the loop since; writing the copy back would undo all of it. False
+ * when the loop was deleted meanwhile, rather than bringing it back.
+ */
+export function saveEditedLoop(draft: Loop): boolean {
+  if (!getLoops().some((l) => l.id === draft.id)) return false
+  const { name, instruction, trigger, target, stop, background } = draft
+  updateLoop(draft.id, { name, instruction, trigger, target, stop, background })
+  return true
+}
 export function removeLoop(id: string) {
   saveLoops(getLoops().filter((l) => l.id !== id))
 }
