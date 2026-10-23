@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell, webContents } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell, webContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
 import type { MainContext } from './context'
@@ -14,8 +14,10 @@ import * as usage from './usage'
 import * as profiles from './profiles'
 import * as skills from './skills'
 import * as sweep from './sweep'
+import * as starter from './starter'
 import * as ci from './ci'
 import * as goal from './goal'
+import * as knowledge from './knowledge'
 import * as fleet from './fleet'
 import { stopFleetTicks } from './fleet'
 import * as remote from './remote'
@@ -183,6 +185,13 @@ function registerCore() {
     if (r.ok) journal.answered('you, on the board', id, describeAnswer(answer))
     return r
   })
+  // a team rule answering for you (teamRules.ts): only while the prompt asks for that very command
+  ipcMain.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string) => {
+    if (typeof command !== 'string' || !command) return { ok: false, reason: 'changed' }
+    const r = await ptys.answer(id, answer, command)
+    if (r.ok) journal.append({ kind: 'prompt.answer', text: `Fleetboard allowed \`${command.split('\n')[0]}\` for ${String(who)}, by your rule for its team`, detail: { consoleId: id, by: 'rule', command } })
+    return r
+  })
   ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
 
@@ -211,6 +220,9 @@ function registerCore() {
     crashRecovered = false
     return was
   })
+  // how long nobody has touched this computer: the Inbox's "while you were away" (renderer away.ts).
+  // 0 where the platform can't tell (some Wayland compositors), which just means focus alone decides
+  ipcMain.handle('app:idleSeconds', () => powerMonitor.getSystemIdleTime())
   ipcMain.handle('app:paths', () => ({ root: toRendererPath(dirs.root), home: toRendererPath(app.getPath('home')), assets: toRendererPath(dirs.assets) }))
   ipcMain.handle('win:minimize', () => win?.minimize())
   ipcMain.handle('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
@@ -288,7 +300,7 @@ app.whenReady().then(async () => {
   registerCore()
   // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
   // be registered from inside profiles, which made its handlers appear to come from nowhere.
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, ci, sweep, journal]) m.register(ctx)
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal]) m.register(ctx)
   // these two start servers, so they are awaited rather than listed
   await fleet.register(ctx)
   await remote.register(ctx)

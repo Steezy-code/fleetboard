@@ -68,7 +68,7 @@ Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1`
 
 ## Teams: give it a goal, not a task list
 
-Type (or say) what you want in the command bar, for example *"add a Split PDF command with tests"*. Anything that isn't a board command goes to a **Lead**, created automatically:
+Type (or say) what you want in the command bar, for example *"add a Split PDF command with tests"*. An empty board offers up to three goals read from the repo itself (the next unchecked item in PLAN.md, a TODO left in the code, a missing README or tests); a click puts one in the bar and Enter is still yours. Anything that isn't a board command goes to a **Lead**, created automatically:
 
 1. The Lead reads the repo and puts a **plan** on the board.
 2. It starts **workers**, one per task, each in its own git worktree with files only it owns, and briefs them.
@@ -77,6 +77,10 @@ Type (or say) what you want in the command bar, for example *"add a Split PDF co
 5. A **Ready** card appears in the Inbox on the command bar: **Merge** brings the branch into your checkout and dismisses the team.
 
 Everything that needs you lands in the **Inbox**, docked on top of the command bar: every agent's permission prompt (with what it was just doing, the command, and a plain note like "Runs your tests"), the Lead's questions (each option with its trade-off, and the one the Lead would pick), the Ready card (what changed, files with lines added and removed, what the Lead verified), and notices like red CI or review comments. The front item shows in full; **Show all** (Ctrl+I) lists the rest.
+
+When a worker asks to run a command, **Allow for the team** says yes once for the whole team: the same command asked by any of its members is answered for you until the team is merged or discarded. It matches the exact command only (never a prefix), and never applies to commands that delete, overwrite, run as root or reach the network. The team's rules show on its next approval card, each with an × to take it back. Every answer a rule gives is in the Night log.
+
+Come back after ten minutes or more away (the window lost focus, or nobody touched the computer) and the Inbox opens on **While you were away**: finished work, the Lead's questions, workers' reports, prompts answered for you (by a team rule or from your phone), spend limits hit, loops that ran and consoles that crashed. **Night log** has the rest.
 
 From the bar: **1**–**9** pick a button, **Enter** on an empty bar runs the highlighted one, **Tab** / **Shift+Tab** step through the items. When a question or a Ready card is in front, a tag shows who you're talking to and what you type goes to that agent; with a permission prompt in front, typing still goes to Oracle, so a stray sentence never approves anything. Saying "allow", "deny", "merge" or "option two" answers the front item by voice. Keys wait a moment after a new card appears, so a keystroke meant for something else can't answer it. In focus mode the tray floats in the corner.
 

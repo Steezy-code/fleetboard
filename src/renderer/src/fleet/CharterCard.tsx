@@ -1,4 +1,4 @@
-import { Ban, CircleHelp, TerminalSquare } from 'lucide-react'
+import { Ban, BookMarked, CircleHelp, TerminalSquare } from 'lucide-react'
 import type { Ambiguity, Charter } from '@shared/charter'
 import { fullCard } from './inboxModel'
 
@@ -49,9 +49,11 @@ export function CharterCard({ charter: c }: { charter: Charter }) {
             <div key={i} className="ch-row">
               <span className={`ch-badge ${a.known ? 'known' : 'guess'}`}>{a.known ? 'known' : 'guess'}</span>
               <span className="ch-text">{a.text}</span>
+              {/* a line resting on the repo knowledge says which fact, so a wrong one can be found and argued with in the panel */}
               {a.from && (
-                <span className="ch-from" title={a.from}>
+                <span className="ch-from" title={a.fact ? `${a.from} · repo knowledge, fact ${a.fact}` : a.from}>
                   {a.from}
+                  {a.fact && <BookMarked size={10} style={{ marginLeft: 4, verticalAlign: '-1px' }} />}
                 </span>
               )}
             </div>

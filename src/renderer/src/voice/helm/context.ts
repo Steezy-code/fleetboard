@@ -1,16 +1,20 @@
-// Helm's view of the board: a compact plain-text snapshot of the open project (git, workspaces,
-// every console with a short output tail, the team and the charter it works to, board content,
-// installed agents, CI and pull requests, the last morning sweep of the user's other repos) that fits
-// in one headless prompt. Console tails share whatever room is left after the rest.
+// Helm's view of the board: a compact plain-text snapshot of the open project (git, what is known
+// about the repo, workspaces, every console with a short output tail, the team and the charter it
+// works to, board content, installed agents, CI and pull requests, the last morning sweep of the
+// user's other repos) that fits in one headless prompt. Console tails share whatever room is left
+// after the rest.
 //
 // With a board selection the snapshot is only what was pointed at: the selected consoles (with the
 // room the others would have had), the selected tiles, and the charter when a selected console is on
 // the team. Asked "why is this stuck?" about two consoles and a card, Oracle sees those three things.
+// What is known about the repo stays in either way: it is small, and it is what a charter cites.
 import type { BoardNode, ConsoleStatus, Workspace } from '@shared/types'
 import type { FleetMember, FleetState } from '@shared/fleet'
 import { agentById } from '@shared/agents'
 import { checkTrend, diffLabel, elapsedLabel, minutes, span } from '@shared/live'
 import { activityOf } from '../../engine/activity'
+import { knowledgeBlock } from '@shared/knowledge'
+import { refreshKnowledge } from '../../fleet/knowledge'
 import { invoke } from '../../lib/api'
 import { relativeTo } from '../../workbench/paths'
 import { activeWs, allConsoles, useApp } from '../../state/store'
@@ -30,6 +34,8 @@ const SCOPED_TAIL_CHARS = 2500
 const BOARD_CHARS = 3000
 /** quieter than this, a member's line says so */
 const QUIET_NOTE_MIN = 2
+/** Standing facts are worth more than another console's tail, but not the whole snapshot. */
+const KNOWN_CHARS = 2000
 
 const clip = (s: string, n: number) => {
   const t = s.replace(/\s+/g, ' ').trim()
@@ -306,8 +312,10 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     .filter((c) => !scope || scope.consoles.includes(c.id))
     .sort((a, b) => (STATUS_ORDER[statusOf(a.id)] ?? 9) - (STATUS_ORDER[statusOf(b.id)] ?? 9))
   const tailChars = scope ? SCOPED_TAIL_CHARS : TAIL_CHARS
-  const [git, sweep, tails] = await Promise.all([
+  const [git, known, sweep, tails] = await Promise.all([
     scope ? Promise.resolve('') : gitLine(p.path),
+    // read alongside git, so Oracle waits for nothing extra; bounded, and empty when the repo cannot be read
+    refreshKnowledge(),
     scope ? Promise.resolve('') : sweepSection(),
     Promise.all(consoles.map((c) => (statusOf(c.id) === 'exited' || !isLive(c.id) ? Promise.resolve('') : consoleTail(c.id, Math.max(1600, tailChars * 3)).catch(() => ''))))
   ])
@@ -329,6 +337,8 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     .filter(Boolean)
     .join('\n')
 
+  // the same facts, keys and provenance a charter cites, so an answer and a charter cannot disagree about the repo
+  const knownText = `KNOWN ABOUT THIS REPO (cite one as fact:<key>)\n${knowledgeBlock(known, KNOWN_CHARS) || 'nothing yet: the Repo knowledge panel builds it'}`
   const teamBody = scope ? fleetSection(new Set(scope.consoles)) : fleetSection()
   const team = teamBody ? `TEAM${scope ? ' (the selected members only)' : ''}\n${teamBody}` : ''
   const github = scope ? '' : `CI AND PULL REQUESTS (GitHub, this repo)\n${ciSection()}\n\nOTHER REPOS (morning sweep)\n${sweep}`
@@ -358,7 +368,7 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
     return `## ${c.data.name} (${bits.join(' · ')})`
   }
   const rest = [team, github, boardText, threadText].filter(Boolean)
-  const fixed = [head, ...rest].join('\n\n')
+  const fixed = [head, knownText, ...rest].join('\n\n')
   const headers = consoles.map(consoleHead)
   const room = MAX_CHARS - fixed.length - headers.join('\n').length - 40
   const withTail = tails.filter(Boolean).length
@@ -369,6 +379,6 @@ export async function boardContext(isCancelled: () => boolean = () => false): Pr
       ? '(no consoles selected)'
       : '(no consoles yet)'
 
-  const all = `${head}\n\n${scope ? 'SELECTED CONSOLES' : 'CONSOLES'} (newest output last)\n${consoleText}\n\n${rest.join('\n\n')}`
+  const all = `${head}\n\n${knownText}\n\n${scope ? 'SELECTED CONSOLES' : 'CONSOLES'} (newest output last)\n${consoleText}\n\n${rest.join('\n\n')}`
   return all.length > MAX_CHARS ? all.slice(0, MAX_CHARS - 2) + '\n…' : all
 }
