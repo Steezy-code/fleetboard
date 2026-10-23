@@ -316,7 +316,9 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
     '',
     'Reply on the first line with exactly MET or NOT_MET, then one short sentence why.'
   ].join('\n')
-  const { text } = await runCli({ prompt, cwd, agentId: readOnlyAgent(s.judgeAgent) }).promise
+  const { code, text } = await runCli({ prompt, cwd, agentId: readOnlyAgent(s.judgeAgent) }).promise
+  // a judge that errored (signed out, an API outage) gave no verdict: a check that could not be made
+  if (code !== 0) return { met: false, failed: true, note: `the judge could not answer: ${text.trim().split('\n').at(-1)?.slice(0, 140) || `exit ${code}`}` }
   const first = text.trim().split('\n')[0] ?? ''
   const met = /^\W*MET\b/i.test(first) && !/NOT[_ ]?MET/i.test(first)
   return { met, note: text.trim().split('\n').slice(1).join(' ').trim().slice(0, 200) || first }

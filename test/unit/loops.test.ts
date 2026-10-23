@@ -233,6 +233,21 @@ test('a loop whose goal cannot be checked stops after three tries, instead of fi
   assert.equal(pastes().length, 3, 'the first run and two unchecked ones; the third check ended it')
 })
 
+test('a judge that errors gives no verdict: three of those stop the loop like an unrunnable check', async () => {
+  // signed out, or the API down: it used to count as NOT_MET, and the loop fired for ever
+  ipc.handle('cli:run', () => ({ code: 1, text: 'Invalid API key' }))
+  ipc.handle('pty:tail', () => '42 passing')
+  const l = loops.newLoop({ instruction: 'keep fixing', target: { kind: 'pick', ids: ['idle1'] }, stop: { ...loops.DEFAULT_STOP, goal: true, goalKind: 'judge', goalText: 'tests pass' } })
+  loops.upsertLoop(l)
+  loops.runLoopNow(l.id)
+  for (let i = 0; i < 3; i++) {
+    loops.runLoopNow(l.id)
+    await mock.timers.tick(0)
+    await new Promise((r) => setImmediate(r))
+  }
+  assert.equal(loop(l.id).ended?.reason, 'unchecked')
+})
+
 test('saving an edited loop keeps what the engine did while the editor was open', () => {
   const l = loops.newLoop({ name: 'tests', instruction: 'run the tests' })
   loops.upsertLoop(l)
