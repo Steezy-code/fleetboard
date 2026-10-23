@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import type { MainContext } from './context'
 import { which } from './env'
+import { readRegularFile } from './paths'
+import { allowed } from './roots'
 import { ghEnv, run, git as runGit, type GitOpts, type RunOut } from './run'
 
 // Git card / GitHub panel IPC. Every handler resolves to { ok: true, ... } or { ok: false, error }.
@@ -88,8 +90,13 @@ function cleanErr(r: RunOut, fallback = 'git failed') {
 
 const fail = (error: string) => ({ ok: false as const, error })
 
+/**
+ * A folder git may run in: one that exists, inside the folders Fleetboard may use (roots.ts), as the
+ * filesystem handlers already require. git here carries the user's credentials and can push, commit
+ * and check out, and a git card's folder comes from the board file.
+ */
 function validCwd(cwd: string) {
-  return typeof cwd === 'string' && cwd.length > 0 && fs.existsSync(cwd)
+  return typeof cwd === 'string' && cwd.length > 0 && allowed(cwd, 'git') && fs.existsSync(cwd)
 }
 
 const CODE_FOR: Record<string, string> = { M: 'M', T: 'M', A: 'A', D: 'D', R: 'R', C: 'C', U: 'U' }
@@ -229,7 +236,7 @@ async function diff(cwd: string, file: string, opts: { untracked?: boolean; stag
         return { ok: true, diff: `New folder · ${files.length} file${files.length === 1 ? '' : 's'}\n` + files.map((f) => '+ ' + f).join('\n') }
       }
       if (st.size > MAX_DIFF) return { ok: true, diff: `New file · ${(st.size / 1024).toFixed(0)} KB (too large to preview)`, truncated: true }
-      const buf = fs.readFileSync(abs)
+      const buf = readRegularFile(abs, MAX_DIFF)
       if (buf.subarray(0, 8000).includes(0)) return { ok: true, diff: 'New binary file', binary: true }
       const lines = buf.toString('utf8').split('\n')
       if (lines[lines.length - 1] === '') lines.pop()
@@ -262,7 +269,12 @@ async function show(cwd: string, hash: string): Promise<GitResult<{ diff: string
   return { ok: true, diff: r.stdout.length > MAX_DIFF ? r.stdout.slice(0, MAX_DIFF) : r.stdout }
 }
 
-async function commit(cwd: string, message: string, files?: { path: string; from?: string }[] | null): Promise<GitResult<{ hash: string; count: number }>> {
+/**
+ * `files` null commits everything, which the Git card does when every file is ticked. `shown` is the
+ * list that was on screen then: an agent may have written more files since (a new .env.local), and
+ * "everything" must not grow past what the user looked at, so the commit is refused if it would.
+ */
+async function commit(cwd: string, message: string, files?: { path: string; from?: string }[] | null, shown?: string[]): Promise<GitResult<{ hash: string; count: number }>> {
   if (!validCwd(cwd)) return fail('Folder not found')
   const msg = (message ?? '').trim()
   if (!msg) return fail('Write a commit message first')
@@ -278,6 +290,13 @@ async function commit(cwd: string, message: string, files?: { path: string; from
     if (r.code !== 0) return fail(cleanErr(r, 'git commit failed'))
     count = files.length
   } else {
+    if (Array.isArray(shown)) {
+      const now = await status(cwd)
+      if (!now.ok) return now
+      const seen = new Set(shown)
+      const added = now.status.files.map((f) => f.path).filter((p) => !seen.has(p))
+      if (added.length) return fail(`${added.length === 1 ? `${added[0]} changed` : `${added.length} more files changed`} since you looked. Check the list and commit again.`)
+    }
     const add = await git(root, ['add', '-A'])
     if (add.code !== 0) return fail(cleanErr(add, 'git add failed'))
     const r = await git(root, ['commit', '-F', '-'], { input: msg, timeout: 60000 })

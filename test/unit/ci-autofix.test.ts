@@ -124,3 +124,34 @@ test('past the spend ceiling the failure is still reported, and no agent is sent
   assert.ok(toasts.some((t) => /stopped sending an agent at a CI failure by itself/.test(t)), JSON.stringify(toasts))
   useUsage.setState({ budgets: DEFAULT_BUDGETS, limits: {} } as never)
 })
+
+const pr = (n: number, state: string, fork: boolean) => ({
+  number: n,
+  title: 'a title its author wrote',
+  branch: 'feature',
+  url: 'https://example.invalid/pr',
+  fork,
+  isDraft: false,
+  state,
+  checks: [{ name: 'test', state, runId: n * 10 }]
+})
+const prStatus = (prs: unknown[]) => ({ ok: true as const, at: Date.now(), branch: 'main', slug: 'o/r', runs: [], prs })
+const consoles = () => (useApp.getState().project?.workspaces ?? []).flatMap((w) => w.nodes).filter((n) => n.type === 'console')
+
+test('a fork’s PR going red is never fixed on its own: its title and log are a stranger’s words', async () => {
+  applyCiStatus(prStatus([pr(7, 'passing', true)]) as never)
+  applyCiStatus(prStatus([pr(7, 'failing', true)]) as never)
+  await new Promise((r) => setTimeout(r, 30))
+  assert.equal(spawned(), 0)
+})
+
+test('a CI fixer never auto-approves, whatever the global setting: its prompt holds a CI log', async () => {
+  useApp.setState((s) => ({ settings: { ...s.settings, autoApprove: true } }))
+  applyCiStatus(prStatus([pr(8, 'passing', false)]) as never)
+  applyCiStatus(prStatus([pr(8, 'failing', false)]) as never)
+  await new Promise((r) => setTimeout(r, 30))
+  const [fixer] = consoles()
+  assert.ok(fixer, 'a same-repo PR still gets its fixer')
+  assert.equal(fixer!.data.autoApprove, false)
+  useApp.setState((s) => ({ settings: { ...s.settings, autoApprove: false } }))
+})

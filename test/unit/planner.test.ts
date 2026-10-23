@@ -89,3 +89,57 @@ test('work requests are not mistaken for board commands', () => {
     assert.ok(!p || !p.actions.some((a) => a.type === 'kill' || a.type === 'deleteTeam'), `${text} → ${JSON.stringify(p)}`)
   }
 })
+
+test('a parked "close" plan: only a plain yes runs it, a "no" anywhere cancels it, and it stays in its project', async () => {
+  const { ipc } = await import('../support/renderer-env')
+  const { confirmPending, runCommand } = await import('@/voice/planner')
+  const { useVoice } = await import('@/voice/thread')
+  ipc.handle('pty:kill', () => {})
+  ipc.handle('store:saveProject', () => {})
+  ipc.handle('journal:append', () => {})
+  useApp.setState((st) => ({ settings: { ...st.settings, speakReplies: false, confirmKill: false } }))
+  const g = globalThis as { SpeechSynthesisUtterance?: unknown; speechSynthesis?: unknown }
+  g.SpeechSynthesisUtterance ??= class {}
+  g.speechSynthesis ??= { speak() {}, cancel() {}, getVoices: () => [] }
+  const kills = () => ipc.callsTo('pty:kill').length
+  const park = async () => {
+    await runCommand('close maya', 'typed')
+    assert.ok(useVoice.getState().pending, 'closing waits for a yes')
+  }
+
+  await park()
+  await runCommand('okay, cancel that', 'typed')
+  assert.equal(useVoice.getState().pending, null)
+  assert.equal(kills(), 0, '"okay, cancel that" is a no')
+
+  await park()
+  await runCommand('zoom out', 'typed')
+  assert.equal(useVoice.getState().pending, null, 'anything else drops it')
+  assert.equal(kills(), 0, 'and is not a yes')
+
+  await park()
+  const home = useApp.getState().project
+  useApp.setState({ project: { ...home!, id: 'other' } as never })
+  await confirmPending() // the confirm button, or "confirm" said in the other project
+  assert.equal(kills(), 0, 'a plan asked in one project is not run in another')
+  useApp.setState({ project: home })
+
+  await park()
+  await runCommand('confirm please', 'typed')
+  assert.equal(kills(), 1, 'a plain yes runs it')
+})
+
+test('spoken answers: a plain yes or no answers a permission card, but never merges or discards a team', async () => {
+  const { inboxPick } = await import('@/voice/planner')
+  const { useInbox } = await import('@/fleet/inboxModel')
+  const card = (kind: string, actions: { label: string; primary?: boolean; tone?: string }[]) =>
+    useInbox.setState({ items: [{ key: 'k', kind, who: 'x', sub: '', since: 0, actions } as never], front: 'k' })
+  card('approval', [{ label: 'Allow once', primary: true }, { label: 'Deny', tone: 'deny' }])
+  assert.equal(inboxPick('okay'), 0)
+  assert.equal(inboxPick('no'), 1)
+  card('ready', [{ label: 'Merge', primary: true }, { label: 'View diff' }, { label: 'Discard', tone: 'deny' }])
+  assert.equal(inboxPick('okay'), null, '"okay" is not "merge"')
+  assert.equal(inboxPick('no'), null, '"no" is not "discard"')
+  assert.equal(inboxPick('merge'), 0, 'saying the button does it')
+  useInbox.setState({ items: [], front: null })
+})

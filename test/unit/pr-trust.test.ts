@@ -69,3 +69,33 @@ test('a console that approves everything counts as auto-approving', () => {
   assert.equal(prf.autoApproves('asks'), false, 'an explicit false still wins')
   assert.equal(prf.autoApproves('no-such-console'), false)
 })
+
+test('a fork’s PR is never "made by an agent of ours" and has no owner, whatever its branch is called', () => {
+  // a team branch name is what a stranger would copy to have their comments reach our agent
+  assert.equal(prf.agentMade({ branch: 'fleet/csv-export-1a2b', fork: false }), true)
+  assert.equal(prf.agentMade({ branch: 'fleet/csv-export-1a2b', fork: true }), false)
+  assert.equal(prf.ownerOf({ branch: 'fleet/csv-export-1a2b', fork: true }), null)
+})
+
+test('a busy repo’s unchanged comments are not news on the next poll, however many there are', async () => {
+  // more than the old 1000-id window: ids fell out of it and came back "new" every two minutes
+  const comments = (pr: number, n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: `i${pr}-${i}`, kind: 'inline', author: 'maintainer', body: 'nit ' + i, createdAt: '2026-01-01T00:00:00Z', url: 'u', association: 'MEMBER', path: 'a.ts', line: 1 }))
+  const result = () => ({ ok: true as const, at: Date.now(), viewer: 'me', prs: Array.from({ length: 20 }, (_, k) => ({ number: k + 1, title: 't', branch: `fleet/b${k}`, url: 'u', author: 'me', fork: false, comments: comments(k + 1, 60) })) })
+  ipc.handle('journal:append', () => {})
+  ipc.handle('store:saveProject', () => {})
+  useApp.setState({ toasts: [], live: {}, project: { schema: 1, id: 'p', name: 'p', path: '/tmp/p', activeWorkspaceId: 'w', lastOpened: 0, extras: {}, workspaces: [{ id: 'w', name: 'W', nodes: [], groups: [], wires: [], ink: [], camera: { x: 0, y: 0, zoom: 1 }, extras: {} }] } } as never)
+  prf.applyFeedback(result() as never) // the first look: everything is old
+  const nodes = () => useApp.getState().project!.workspaces[0]!.nodes.length
+  ipc.sent.length = 0
+  for (let poll = 0; poll < 5; poll++) prf.applyFeedback(result() as never)
+  await new Promise((r) => setTimeout(r, 10))
+  assert.equal(nodes(), 0, 'no fixer spawned')
+  assert.equal(ipc.sent.filter((s) => s.channel === 'pty:paste').length, 0, 'nothing re-sent')
+  assert.equal(useApp.getState().toasts.length, 0, 'nothing announced')
+  // and a comment that does arrive is still news
+  const next = result()
+  next.prs[0]!.comments.push({ ...comments(1, 1)[0]!, id: 'fresh-1' })
+  prf.applyFeedback(next as never)
+  assert.ok(useApp.getState().toasts.length > 0 || nodes() > 0, 'the new comment is announced or routed')
+})

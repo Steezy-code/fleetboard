@@ -116,14 +116,19 @@ function Stepper({ value, onChange, min = 1, max = 999, step = 1, suffix }: { va
 
 // ---------------- list ----------------
 
+/** every way a loop ends, in the row's words (a stalled loop used to say "Time limit reached") */
+const ENDED: Record<NonNullable<Loop['ended']>['reason'], string> = {
+  goal: 'Goal met ✓',
+  runs: 'Finished runs',
+  time: 'Time limit reached',
+  stalled: 'Stopped: nothing was changing',
+  unchecked: 'Stopped: goal could not be checked'
+}
+
 function LoopRow({ l, now, onEdit }: { l: Loop; now: number; onEdit: () => void }) {
   const due = nextRunAt(l)
   const status = l.ended
-    ? l.ended.reason === 'goal'
-      ? 'Goal met ✓'
-      : l.ended.reason === 'runs'
-        ? 'Finished runs'
-        : 'Time limit reached'
+    ? ENDED[l.ended.reason]
     : !l.enabled
       ? 'Paused'
       : due !== null

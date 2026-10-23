@@ -25,8 +25,13 @@ export interface Prompt {
   options?: PromptOption[]
 }
 
-/** An answer the main process turns into keystrokes after checking the prompt is still there. */
-export type PromptAnswer = { option: string } | { yes: boolean } | { enter: true }
+/**
+ * An answer the main process turns into keystrokes after checking the prompt is still there. `seen`:
+ * the card it was given on (approvals.ts seenOf); when set, nothing is typed unless the prompt on
+ * screen now still makes that same card, so a stale card never answers a newer question that happens
+ * to offer the same button.
+ */
+export type PromptAnswer = ({ option: string } | { yes: boolean } | { enter: true }) & { seen?: string }
 
 export type AnswerResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'not-live' }
 

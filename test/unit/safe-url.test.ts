@@ -21,3 +21,14 @@ test('images: local files through fbfile and inline raster data only', () => {
   assert.equal(safeUrl('data:image/svg+xml;base64,AAAA', 'src'), null, 'SVG can carry script')
   assert.equal(safeUrl('java\tscript:x', 'src'), null)
 })
+
+test('a network path is refused: in the packaged app it is a UNC fetch that hands Windows credentials out', () => {
+  for (const u of ['//attacker.example/x.png', '\\\\attacker\\share\\x.png', '/\\attacker/x.png', '\\/attacker/x.png', ' //attacker/x', '/\t/attacker/x']) {
+    assert.equal(safeUrl(u, 'src'), null, JSON.stringify(u))
+    assert.equal(safeUrl(u, 'href'), null, JSON.stringify(u))
+  }
+  // a path in the same folder, or from its root, is still a path
+  assert.equal(safeUrl('/docs/a.png', 'src'), '/docs/a.png')
+  assert.equal(safeUrl('img/a.png', 'src'), 'img/a.png')
+  assert.equal(safeUrl('../a.md', 'href'), '../a.md')
+})

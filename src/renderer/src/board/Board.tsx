@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
 import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM, focusRect } from '../state/store'
-import { NodeFrame, removeWithHooks } from './NodeFrame'
+import { NodeFrame } from './NodeFrame'
+import { deleteSelection } from './deleteSelection'
+import { mayDropUnsaved } from '../lib/unsaved'
 import { GroupFrame } from './GroupFrame'
 import { Wires } from './Wires'
 import { InkLayer } from './InkLayer'
@@ -164,6 +166,9 @@ export function Board() {
     const onKey = (e: KeyboardEvent) => {
       const app = useApp.getState()
       if (isTyping(e.target)) return // Esc inside a terminal belongs to the CLI
+      // a dialog's keys are the dialog's: Escape on "close without saving?" means no, not also
+      // "close the studio behind it"
+      if (e.defaultPrevented || app.confirms.length) return
       const mod = e.ctrlKey || e.metaKey
       const key = e.key.toLowerCase()
 
@@ -178,19 +183,16 @@ export function Board() {
       }
       if (cmdRef.current === 'window' && e.key === 'Escape') return setCmd(null)
 
-      if ((e.key === 'Delete' || e.key === 'Backspace') && app.selection.length) {
-        const ws = activeWs()!
-        const sel = app.selection
-        const wires = ws.wires.filter((w) => sel.includes(w.id))
-        wires.forEach((w) => app.removeWire(w.id))
-        const groups = ws.groups.filter((g) => sel.includes(g.id))
-        groups.forEach((g) => app.removeGroup(g.id))
-        const ink = ws.ink.filter((i) => sel.includes(i.id)).map((i) => i.id)
-        if (ink.length) app.removeInk(ink)
-        removeWithHooks(sel.filter((id) => ws.nodes.some((n) => n.id === id)))
+      // only when the board itself has the keys: not over a panel or drawer, not from a button in the
+      // chrome, and not right after Escape left a note's editor (focus is then on the page, not a tile)
+      const onBoard = e.target === document.body || (e.target instanceof Node && !!ref.current?.contains(e.target))
+      if ((e.key === 'Delete' || e.key === 'Backspace') && app.selection.length && onBoard && !app.panel && !app.drawer) {
+        e.preventDefault()
+        void deleteSelection()
       } else if (e.key === 'Escape') {
         if (app.focusedNode) app.setFocusedNode(null)
-        else if (app.panel) app.closePanel()
+        // through the same question as the panel's own close: an editor in it may have unsaved edits
+        else if (app.panel) void mayDropUnsaved('Close').then((ok) => ok && useApp.getState().closePanel())
         else {
           app.setSelection([])
           app.setTool('select')

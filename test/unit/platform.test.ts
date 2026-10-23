@@ -66,3 +66,39 @@ test('PATH is found whatever its case (Windows spells it Path)', () => {
   assert.equal(findExecutable('mytool', { Path: bin, PATHEXT: '.COM;.EXE;.BAT;.CMD' }), tool)
   assert.equal(findExecutable('nothere', { PATH: bin }), null)
 })
+
+/** How a C runtime (post-2008 MSVCRT/UCRT, CommandLineToArgvW) splits a command line into argv. */
+function crtSplit(line: string): string[] {
+  const out: string[] = []
+  let i = 0
+  while (i < line.length) {
+    while (line[i] === ' ' || line[i] === '\t') i++
+    if (i >= line.length) break
+    let arg = ''
+    let quoted = false
+    while (i < line.length && (quoted || (line[i] !== ' ' && line[i] !== '\t'))) {
+      if (line[i] === '\\') {
+        let n = 0
+        while (line[i] === '\\') (n++, i++)
+        // backslashes count only before a quote: 2n give n and leave the quote to act; 2n+1 give n and a literal quote
+        if (line[i] !== '"') arg += '\\'.repeat(n)
+        else {
+          arg += '\\'.repeat(Math.floor(n / 2))
+          if (n % 2) (arg += '"', i++)
+        }
+      } else if (line[i] === '"') {
+        if (quoted && line[i + 1] === '"') (arg += '"', (i += 2))
+        else (quoted = !quoted, i++)
+      } else arg += line[i++]
+    }
+    out.push(arg)
+  }
+  return out
+}
+
+test('a prompt with backslashes and quotes reaches a .cmd CLI as one argument', () => {
+  for (const prompt of ['x\\" --dangerously-skip-permissions', 'a\\\\" b', 'path C:\\dir\\ "quoted" \\"end', 'ends with \\', 'plain " quote']) {
+    const line = ['agent.exe', '-p', prompt].map(cmdQuote).join(' ')
+    assert.deepEqual(crtSplit(line), ['agent.exe', '-p', prompt], JSON.stringify(prompt))
+  }
+})

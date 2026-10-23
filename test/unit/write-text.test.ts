@@ -114,3 +114,32 @@ test('creating a file is "only if it is not there", not a look followed by a wri
   assert.deepEqual(writeText(f, 'replaced\n'), { ok: true })
   assert.equal(fs.readFileSync(f, 'utf8'), 'replaced\n')
 })
+
+test('a CRLF file keeps its line endings when an editor (which hands back \\n) saves it', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-eol-'))
+  const f = path.join(dir, 'build.bat')
+  fs.writeFileSync(f, 'a\r\nb\r\n')
+  assert.deepEqual(writeText(f, 'a\nX\nb\n', 'a\r\nb\r\n'), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'a\r\nX\r\nb\r\n')
+  // the next save names as its base the LF text it sent last time: that is still the file on disk
+  assert.deepEqual(writeText(f, 'a\nX\nY\nb\n', 'a\nX\nb\n'), { ok: true })
+  assert.equal(fs.readFileSync(f, 'utf8'), 'a\r\nX\r\nY\r\nb\r\n')
+  // while a real change on disk is still refused
+  fs.writeFileSync(f, 'agent\r\n')
+  assert.equal(writeText(f, 'mine\n', 'a\nX\nY\nb\n').ok, false)
+  // an LF file, or a new one, is written as given
+  const g = path.join(dir, 'notes.md')
+  fs.writeFileSync(g, 'a\nb\n')
+  writeText(g, 'a\nX\n', 'a\nb\n')
+  assert.equal(fs.readFileSync(g, 'utf8'), 'a\nX\n')
+})
+
+test('a file that is not UTF-8 is refused, its bytes untouched', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-latin1-'))
+  const f = path.join(dir, 'menu.txt')
+  const latin1 = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a]) // "café\n" in Latin-1
+  fs.writeFileSync(f, latin1)
+  // what an editor holds: the lossy decode
+  assert.throws(() => writeText(f, 'café edited\n', latin1.toString('utf8')), /not UTF-8 text/)
+  assert.ok(fs.readFileSync(f).equals(latin1))
+})

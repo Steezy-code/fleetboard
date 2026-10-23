@@ -217,3 +217,18 @@ test('a loop that changes nothing stops itself, and a clock ticking is not a cha
   }
   assert.equal(loop(k.id).ended, undefined, 'no verdict without evidence')
 })
+
+test('a loop whose goal cannot be checked stops after three tries, instead of firing forever', async () => {
+  ipc.handle('goal:check', () => ({ code: null, tail: '', error: 'npm: command not found' }))
+  const l = loops.newLoop({ instruction: 'keep fixing', target: { kind: 'pick', ids: ['idle1'] }, stop: { ...loops.DEFAULT_STOP, goal: true, goalKind: 'command', command: 'npm test' } })
+  loops.upsertLoop(l)
+  loops.runLoopNow(l.id) // the first run sends without asking
+  for (let i = 0; i < 3; i++) {
+    loops.runLoopNow(l.id)
+    await mock.timers.tick(0)
+    await new Promise((r) => setImmediate(r))
+  }
+  assert.equal(loop(l.id).ended?.reason, 'unchecked')
+  assert.equal(loop(l.id).enabled, false)
+  assert.equal(pastes().length, 3, 'the first run and two unchecked ones; the third check ended it')
+})

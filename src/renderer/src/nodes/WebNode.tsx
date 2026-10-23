@@ -73,6 +73,14 @@ export function normalizeUrl(input: string): string {
 
 const prettyUrl = (u: string) => u.replace(/^https?:\/\//, '').replace(/\/$/, '')
 
+/**
+ * What a tile loads by itself when a board opens: web pages. The board file is written by agents and
+ * travels with a repo, so a data: or blob: URL stored there would run its own script the moment the
+ * board opened, and a file: URL would show a local file nobody asked to see. Those still load when
+ * the user types one, or clicks to open the one the tile holds.
+ */
+export const loadsOnOpen = (u: string) => /^(https?:\/\/|about:blank$)/i.test(u)
+
 export default function WebNode({ node, selected, maximized }: NodeProps) {
   const url: string = node.data.url ?? ''
   const deviceId: string = node.data.device ?? 'fit'
@@ -85,9 +93,13 @@ export default function WebNode({ node, selected, maximized }: NodeProps) {
   // Through the same allowlist the address bar uses. normalizeUrl's own comment says the stored URL is
   // "re-mounted as src on every load, so it is not only what someone types" — but only go() was
   // calling it, and this is the path a board file takes. A board file is written by agents.
-  if (url && !mountSrc.current) mountSrc.current = normalizeUrl(url)
+  const stored = url ? normalizeUrl(url) : ''
+  if (url && !mountSrc.current && loadsOnOpen(stored)) mountSrc.current = stored
   if (!url) mountSrc.current = ''
-  const hasView = !!url
+  // set when the user opens a stored URL that does not load by itself
+  const [, opened] = useState(0)
+  const hasView = !!mountSrc.current
+  const held = !!url && !hasView
 
   const [addr, setAddr] = useState(url)
   const [editingAddr, setEditingAddr] = useState(false)
@@ -183,6 +195,11 @@ export default function WebNode({ node, selected, maximized }: NodeProps) {
     setEditingAddr(false)
     setError(null)
     if (!u) return set({ url: '' })
+    // typed, or clicked to open: the user's own choice, so any scheme normalizeUrl allows
+    if (!mountSrc.current) {
+      mountSrc.current = u
+      opened((n) => n + 1)
+    }
     const wv = wvRef.current
     if (wv && ready) {
       wv.loadURL(u).catch(() => {})
@@ -305,6 +322,14 @@ export default function WebNode({ node, selected, maximized }: NodeProps) {
               </div>
             )}
           </>
+        ) : held ? (
+          <div className="web-error">
+            <div className="web-error-title">This tile holds a page that does not open by itself</div>
+            <div className="muted small mono">{stored.length > 120 ? stored.slice(0, 119) + '…' : stored}</div>
+            <button className="btn sm" onClick={() => go(url)}>
+              Open it
+            </button>
+          </div>
         ) : (
           <OpenPage onOpen={go} />
         )}

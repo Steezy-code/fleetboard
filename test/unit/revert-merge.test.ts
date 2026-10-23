@@ -42,3 +42,21 @@ test('a well-formed sha gets past the shape check and is refused on the project 
     assert.equal(r.error, 'That project is not open.', `shape check rejected ${ok}`)
   }
 })
+
+test('a merge finds the ignored files of the user’s it would overwrite (a real .env under a template)', async () => {
+  const { execFileSync } = await import('node:child_process')
+  const { ignoredInTheWay } = await import('../../src/main/fleet')
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-ignored-'))
+  const sh = (...a: string[]) => execFileSync('git', a, { cwd: repo, env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } })
+  sh('init', '-q')
+  fs.writeFileSync(path.join(repo, '.gitignore'), '.env\nlocal/\n')
+  fs.writeFileSync(path.join(repo, 'readme.md'), 'x\n')
+  sh('add', '-A')
+  sh('commit', '-qm', 'init')
+  fs.writeFileSync(path.join(repo, '.env'), 'SECRET=real\n')
+  fs.mkdirSync(path.join(repo, 'local'))
+  fs.writeFileSync(path.join(repo, 'local', 'notes.txt'), 'mine\n')
+  const incoming = ['.env', 'local/notes.txt', 'readme.md', 'src/new.ts']
+  assert.deepEqual((await ignoredInTheWay(repo, incoming)).sort(), ['.env', 'local/notes.txt'], 'tracked, and not here yet, are not in the way')
+  assert.deepEqual(await ignoredInTheWay(repo, ['readme.md', 'src/new.ts']), [])
+})
