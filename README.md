@@ -28,6 +28,7 @@ npm run lint       # oxlint, errors only
 npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted claude
 #   FB_E2E_JOBS=3     several files at a time (what CI does; races show up under load)
 #   FB_E2E_HEADLESS=1 no Xvfb needed
+#   FB_E2E_KEEP=1     keep every test's temp sandbox (a failed test's is always kept, and named in its output)
 #   npm run test:e2e:one -- test/e2e/<file>.test.ts
 # by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
 #   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions,handoff}.test.ts
@@ -54,7 +55,7 @@ Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1`
 
 | Area | What you get |
 |---|---|
-| **Board** | Infinite canvas with pan/zoom, workspaces as tabs, each console a real PTY (Ctrl‑C, vim, htop all work). Kanban, calendar, sticky notes, checklists, text, ink and shapes, images you can mark up, live web tiles with device presets and an inspector, and a git card with commit & push. |
+| **Board** | Infinite canvas with pan/zoom, workspaces as tabs, each console a real PTY (Ctrl‑C, vim, htop all work). Kanban, calendar, sticky notes, checklists, text, ink and shapes, images you can mark up, live web tiles with device presets and an inspector, and a git card with commit & push. New tiles land as near the middle of your view (or the tile they belong to) as they fit without covering anything; a group folds to its header while its consoles keep running; **Tidy** packs the board into rows, keeping teams and groups together (with Undo); **Clear finished** removes consoles whose programs have ended. |
 | **Voice** | Hold <kbd>Space</kbd> (or <kbd>Alt</kbd>+<kbd>Space</kbd> anywhere) to speak. Whisper runs on-device. A fast local parser handles common commands; anything else goes to a planner that runs through your own `claude -p`. Replies are spoken with Kokoro on-device. Destructive steps wait for "confirm". Dictation to `@name` only types: you press Enter. |
 | **Orchestration** | Status per console (working / ready / needs you) read from what each terminal actually shows, plus Claude Code's hooks; a question on screen becomes an Inbox card with its real options, and nothing the board types ever answers one for you. Mission map, orchestrator with @mentions, teams with roles, a composer for up to 12 consoles, handoffs that summarize one session and brief the next agent, and loops that run on a schedule, on idle or on output, then retire once their goal is met. |
 | **Studios** | Documents (streamed from your repo, exported as a paginated PDF), Diagrams (hand-drawn figures added to the board, exported as PNG or `.excalidraw`), a Code studio, and an Obsidian-style Markdown vault with a link graph. |

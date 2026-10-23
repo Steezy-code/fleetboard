@@ -106,6 +106,8 @@ interface FrameProps {
   selected: boolean
   zoom: number
   maximized?: boolean
+  /** in a collapsed group: kept mounted at its size, so its terminal keeps running unresized, but not shown */
+  hidden?: boolean
 }
 
 // Tiles that zoom in on a click to their body. Sticky notes and text labels edit in place instead.
@@ -132,7 +134,7 @@ function UnknownNode({ node, selected }: { node: BoardNode; selected: boolean })
   )
 }
 
-export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximized = false }: FrameProps) {
+export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximized = false, hidden = false }: FrameProps) {
   const def = NODE_DEFS[node.type]
   const ref = useRef<HTMLDivElement>(null)
   const viewport = useApp((s) => s.viewport)
@@ -156,7 +158,8 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
   return (
     <div
       ref={ref}
-      className={`node node-${node.type} ${selected && !focused ? 'selected' : ''} ${def.chromeless ? 'chromeless' : ''} ${focused ? 'focused' : ''}`}
+      className={`node node-${node.type} ${selected && !focused ? 'selected' : ''} ${def.chromeless ? 'chromeless' : ''} ${focused ? 'focused' : ''} ${hidden ? 'in-collapsed' : ''}`}
+      aria-hidden={hidden || undefined}
       style={{ left: node.x, top: node.y, width: fr ? fr.w : node.w, height: fr ? fr.h : node.h, zIndex: focused ? 100000 : node.z }}
       data-node-id={node.id}
       onPointerDown={(e) => {
