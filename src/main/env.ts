@@ -43,6 +43,13 @@ export async function loginEnv(): Promise<Record<string, string>> {
 
 export const shellPath = () => defaultShell(cached ?? process.env)
 
+/**
+ * The environment the user's CLIs run with, once the login shell has been read (the app reads it at
+ * start): where CLAUDE_CONFIG_DIR and CODEX_HOME point for them, which a desktop launcher's own
+ * environment often does not say.
+ */
+export const userEnv = (): Record<string, string | undefined> => cached ?? process.env
+
 /** Where an executable is, searched on the login PATH like a shell does (no `which` program needed). */
 export async function which(bin: string): Promise<string | null> {
   if (bin === '$SHELL') return shellPath()

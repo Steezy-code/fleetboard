@@ -5,6 +5,7 @@ import { shell } from 'electron'
 import type { MainContext } from './context'
 import { readRegularText } from './paths'
 import { writeText } from './fsops'
+import { userEnv } from './env'
 
 // Claude Code skills: folders with a SKILL.md (YAML frontmatter name + description) under
 // ~/.claude/skills/ (personal) and <project>/.claude/skills/ (shared with the repo).
@@ -21,7 +22,7 @@ export interface SkillInfo {
   files: number
 }
 
-const userRoot = () => path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills')
+const userRoot = () => path.join(userEnv().CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'skills')
 const projectRoot = (projectPath: string) => path.join(projectPath, '.claude', 'skills')
 /** a skill is prose: far more than this is not one */
 const MAX_SKILL = 2 * 1024 * 1024
