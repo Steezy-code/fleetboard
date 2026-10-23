@@ -1,10 +1,12 @@
-import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert, X } from 'lucide-react'
 import { Fragment } from 'react'
+import { removeRule } from './teamRules'
 import type { MergeReview } from '@shared/mergeReview'
 import { decisionsOf } from '@shared/live'
 import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
+import { Tip } from '../chrome/Tip'
 import { CharterCard } from './CharterCard'
 import { ago, charterHead, cycleFront, frontItem, openConsole, runAction, setFront, toggleFolded, toggleInbox, useInbox, type InboxItem } from './inboxModel'
 
@@ -96,6 +98,16 @@ export function InboxTray({ floating }: { floating?: boolean }) {
         </div>
       )}
 
+      {!folded && (item.kind === 'approval' || item.kind === 'ask') && (
+        <Tip id="inbox">
+          Agents stop and ask here. Number keys pick a button, <span className="kbd">Tab</span> moves to the next card, <span className="kbd">Ctrl</span>+<span className="kbd">I</span> lists them all.
+        </Tip>
+      )}
+      {!folded && item.kind === 'ready' && (
+        <Tip id="ready">
+          The team's work is on its own branch. <b>Merge</b> brings it into your checkout, and nothing is pushed. <b>View diff</b> shows every line first.
+        </Tip>
+      )}
       <div className={`it-card ${folded ? 'folded' : ''}`} key={item.key} data-kind={item.kind}>
         {/* folded, the header is the whole card, so clicking it is the obvious way back */}
         <div className="it-head" onClick={folded ? toggleFolded : undefined}>
@@ -108,7 +120,7 @@ export function InboxTray({ floating }: { floating?: boolean }) {
               <b>{item.who}</b> <span className="it-headtext">{headOf(item)}</span>
             </div>
             <div className="it-meta">
-              {[item.sub, item.kind === 'ask' ? item.ask && progressOf(item) : '', item.kind === 'ready' ? readyMeta(item) : `${item.kind === 'notice' ? '' : 'waiting '}${ago(item.since)}${item.kind === 'notice' ? ' ago' : ''}`]
+              {[item.sub, item.kind === 'ask' ? item.ask && progressOf(item) : '', item.kind === 'ready' ? readyMeta(item) : `${item.kind === 'notice' ? '' : 'waiting '}${ago(item.since)}${item.kind === 'notice' && ago(item.since) !== 'just now' ? ' ago' : ''}`]
                 .filter(Boolean)
                 .join(' · ')}
             </div>
@@ -209,6 +221,23 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
   )
 }
 
+/** What this team is allowed without asking, where you decide whether to allow one more. */
+function TeamRules({ lead, rules }: { lead: string; rules: string[] }) {
+  return (
+    <div className="it-rules">
+      <span className="it-meta">Allowed for this team:</span>
+      {rules.map((r) => (
+        <span key={r} className="it-rule mono" title={r}>
+          {r.split('\n')[0]}
+          <button className="icon-btn xs" title="Ask about this command again" onClick={() => removeRule(lead, r)}>
+            <X size={11} />
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function Body({ item }: { item: InboxItem }) {
   switch (item.kind) {
     case 'charter':
@@ -233,6 +262,7 @@ function Body({ item }: { item: InboxItem }) {
           )}
           {item.note && <div className="it-meta">{item.note}</div>}
           {!ap && <div className="it-meta">Its question isn't one Fleetboard can read. Open the console to answer it.</div>}
+          {item.team && item.rules.length > 0 && <TeamRules lead={item.team} rules={item.rules} />}
         </>
       )
     }

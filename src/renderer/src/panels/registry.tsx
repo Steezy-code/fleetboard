@@ -7,6 +7,7 @@ import OrchestratorPanel from './OrchestratorPanel'
 import LoopsPanel from './LoopsPanel'
 import HandoffPanel from './HandoffPanel'
 import MemoryPanel from './MemoryPanel'
+import KnowledgePanel from './KnowledgePanel'
 import UsagePanel from './UsagePanel'
 import AccountsPanel from './AccountsPanel'
 import SkillsPanel from './SkillsPanel'
@@ -34,6 +35,7 @@ export const PANELS: Record<string, ComponentType<any>> = {
   loops: LoopsPanel,
   handoff: HandoffPanel,
   memory: MemoryPanel,
+  knowledge: KnowledgePanel,
   skills: SkillsPanel,
   settings: SettingsPanel,
   code: CodeStudio,
