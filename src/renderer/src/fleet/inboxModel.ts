@@ -6,16 +6,19 @@ import { allConsoles, useApp } from '../state/store'
 import { agentLabel, consoleTail } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
 import { approvalFor, type Approval } from '@shared/approvals'
+import { gateCharter, useCharter } from './charter'
 import { ciItems, fixCi, useCi, type CiItem } from '../workbench/ciStore'
 import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
+import { charterMessage, coerceCharter, FULL_CARD_BELOW, type Charter } from '@shared/charter'
 import type { AnswerResult, Prompt, PromptAnswer } from '@shared/prompt'
 import type { FleetAsk, FleetMember, FleetReady } from '@shared/fleet'
 import { reviewReady, stalled, type MergeReview, type Stall } from '@shared/mergeReview'
 import type { Spent } from '@shared/spend'
 
-// The Inbox, as one ordered list: what blocks an agent first (its permission prompts, then the
-// Lead's questions), then finished work, then notices (red CI, review comments). The tray on the
-// command bar (InboxTray.tsx) shows it; the command bar's keys and voice answer the front item.
+// The Inbox, as one ordered list: the charter of work that has not started first, then what blocks
+// an agent (its permission prompts, then the Lead's questions), then finished work, then notices
+// (red CI, review comments). The tray on the command bar (InboxTray.tsx) shows it; the command bar's
+// keys and voice answer the front item.
 
 export interface InboxAction {
   label: string
@@ -42,6 +45,7 @@ interface Base {
 }
 
 export type InboxItem =
+  | (Base & { kind: 'charter'; charter: Charter })
   | (Base & { kind: 'approval'; approval: Approval | null; context: string[]; note: string | null })
   | (Base & { kind: 'ask'; ask: FleetAsk; progress: string })
   | (Base & { kind: 'ready'; ready: FleetReady; lead?: FleetMember; workers: number; review: MergeReview | null; spend: Record<string, Spent | null> })
@@ -221,6 +225,18 @@ function fetchSpend(key: string, cwds: string[]) {
   )
 }
 
+/**
+ * Typed back to the Lead on its Ready card. More work for a team is more work however it is asked
+ * for, so this door crosses the gate like a goal typed into the bar: the text becomes a charter, the
+ * user sees what it was taken to mean, and only then does the Lead hear it.
+ */
+async function replyToLead(lead: FleetMember, text: string) {
+  const confirmed = await gateCharter(coerceCharter(null, text), lead)
+  if (!confirmed) return
+  await invoke('fleet:userMessage', lead.id, charterMessage(confirmed, text))
+  useApp.getState().toast(`Sent to ${lead.name}`, 'ok')
+}
+
 /** Ask a member that has gone quiet for a status, in its own console. */
 const nudge = (id: string, who: string) => {
   invoke('fleet:userMessage', id, `${who}, where are you up to? Reply with what is done, what is left, and anything you are stuck on.`)
@@ -243,6 +259,68 @@ export async function discardTeam(projectId: string, leadId?: string) {
   await invoke('fleet:discard', projectId, leadId)
 }
 
+// ---------------------------------------------------------------- the charter nothing has started on
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s)
+const noStop = (s: string) => s.trim().replace(/[.,;]+$/, '')
+
+/**
+ * Which of the charter's two renderings this one gets. An exclusion always opens the full card,
+ * whatever the charter scores: it is the one thing on it that refuses a merge later, and the
+ * one-line form has nowhere to show it, so a confident charter would otherwise be agreed to with a
+ * rule on it the user never saw. Otherwise low confidence opens the card — but only where there is
+ * something to open it on. A one-line message ("tell Kaz it's Windows-only") coerces to a charter
+ * with no assumptions, no exclusions and no question, and a card of empty headings says less than
+ * the line itself does. `understood` and `doneWhen` both show in the one-line form, so neither is
+ * ever the reason to unfold it.
+ */
+export const fullCard = (c: Charter) => c.wontTouch.length > 0 || (c.confidence < FULL_CARD_BELOW && (c.assumptions.length > 0 || !!c.question))
+
+/**
+ * Answering the charter's one question. The answer joins what the job is understood to be — that is
+ * the line the Lead is briefed from, so an answer kept anywhere else would not reach it — and the
+ * question goes, which also lifts the cap it put on confidence. It starts nothing: the card is still
+ * up, now saying what it will do.
+ *
+ * Appended as a clause rather than a sentence of its own: an option is written as an answer ("by page
+ * range"), and few of them read as a sentence after a full stop.
+ */
+const answerQuestion = (c: Charter, option: string) => useCharter.getState().edit({ understood: `${noStop(c.understood)} — ${noStop(option)}.`, question: undefined, ambiguity: undefined })
+
+/**
+ * What confirming this charter will do, after the name on the card. A door that always starts a new
+ * team (a playbook) while one is running takes the running team's place — the card is the one screen
+ * where that can be said before it happens, so it says it.
+ */
+export const charterHead = (c: Charter) => (c.followUpTo ? 'gets this next' : c.replaces ? `starts with this, replacing ${c.replaces}’s team` : 'starts with this')
+
+/**
+ * The card on the command bar: what the user asked for, as it was understood, before anything runs.
+ * Confirm is the primary answer, so Enter in the bar starts it; what the user types there edits
+ * `understood` instead of going to Oracle, the way an ask's reply goes to the Lead that asked.
+ */
+function charterItem(c: Charter, memberName: (id: string) => string): InboxItem {
+  const gate = useCharter.getState()
+  return {
+    kind: 'charter',
+    // stable across edits (`at` survives recoercion), so answering the question does not move the card
+    key: `charter:${c.at}`,
+    who: c.followUpTo ? memberName(c.followUpTo) : 'New team',
+    sub: clip(c.request, 90),
+    since: c.at,
+    charter: c,
+    actions: [
+      { label: 'Confirm', primary: true, run: () => gate.confirm() },
+      ...(c.question?.options ?? []).map((o) => ({ label: o, keeps: true, run: () => answerQuestion(c, o) })),
+      { label: 'Dismiss', tone: 'deny' as const, run: () => gate.dismiss() }
+    ],
+    replyTo: { label: 'the charter', send: (text: string) => gate.edit({ understood: text }) }
+  }
+}
+
+/** A charter already brought to the front, so Tabbing away from that one card sticks. */
+let fronted = ''
+
 // ---------------------------------------------------------------- building the list
 
 let approvals: Record<string, { approval: Approval | null; context: string[] }> = {}
@@ -263,6 +341,10 @@ function build() {
   const consoles = Object.fromEntries(allConsoles().map((c) => [c.id, c]))
   const items: InboxItem[] = []
   const memberName = (id: string) => fleet?.members[id]?.name ?? (consoles[id]?.data.name as string) ?? 'Lead'
+
+  // 0. work that has not started: nothing blocks the user harder
+  const charter = useCharter.getState().pending
+  if (charter) items.push(charterItem(charter, memberName))
 
   // 1. permission prompts and other questions a console is stuck on
   for (const id of Object.keys(app.statuses).filter((id) => app.statuses[id] === 'needs-you' && app.live[id])) {
@@ -332,11 +414,19 @@ function build() {
     const review = fleet ? reviewReady(fleet) : null
     fetchSpend(key, review?.claims.map((c) => c.cwd) ?? [])
     const closeOnly = !ready.branch || ready.commits === 0 || !!ready.prUrl
+    // the diff touches a file the charter ruled out: the card offers no Merge at all, as fleet_merge
+    // refuses the same work on the Lead's side. Reading the diff is what is left to do.
+    const blocked = !!review?.blocked
     const actions: InboxAction[] = closeOnly
       ? [{ label: 'Done', primary: true, run: () => invoke('fleet:done', project.id) }]
-      : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id) }]
+      : blocked
+        ? []
+        : [{ label: 'Merge', primary: true, run: () => mergeReady(project.id) }]
+    // a blocked review keeps this on purpose: pushing is not merging, and a draft PR is how a person
+    // other than the user gets to see the file that was ruled out
     if (ready.branch && ready.commits > 0 && ready.hasRemote && !ready.prUrl) actions.push({ label: 'Open draft PR', keeps: true, run: () => openPr(project.id, ready) })
-    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
+    // primary only where Merge was taken away; with nothing to merge, Done is already the primary
+    if (ready.branch && ready.commits > 0) actions.push({ label: 'View diff', primary: blocked && !closeOnly, keeps: true, run: () => app.openPanel('fleetDiff', { projectId: project.id }) })
     if (ready.prUrl) actions.push({ label: 'Open PR', keeps: true, run: () => invoke('shell:openExternal', ready.prUrl) })
     actions.push({ label: 'Discard', tone: 'deny', run: () => discardTeam(project.id) })
     items.push({
@@ -352,7 +442,7 @@ function build() {
       review,
       spend,
       actions,
-      replyTo: lead ? { label: lead.name, send: (text: string) => invoke('fleet:userMessage', lead.id, text) } : undefined
+      replyTo: lead ? { label: lead.name, send: (text: string) => replyToLead(lead, text) } : undefined
     })
   }
 
@@ -389,8 +479,18 @@ function build() {
 
   const list = items
   const { front } = useInbox.getState()
-  const keepFront = list.some((i) => i.key === front)
-  useInbox.setState({ items: list, front: keepFront ? front : (list[0]?.key ?? null), ...(keepFront ? {} : { shownAt: Date.now() }) })
+  // The gate is the one card that cannot be missed, so a charter new to the list takes the front and
+  // unfolds the tray: Enter in the bar answers it, and the check it will run is on screen before it
+  // is agreed to. Only a charter not yet fronted does this, so Tabbing away from it sticks.
+  const arrived = list.find((i) => i.kind === 'charter' && i.key !== fronted)
+  if (arrived) fronted = arrived.key
+  const keepFront = !arrived && list.some((i) => i.key === front)
+  useInbox.setState({
+    items: list,
+    front: arrived?.key ?? (keepFront ? front : (list[0]?.key ?? null)),
+    ...(keepFront ? {} : { shownAt: Date.now() }),
+    ...(arrived ? { folded: false } : {})
+  })
 }
 
 function ciNotice(key: string, item: CiItem, failing: string[]): InboxItem {
@@ -476,8 +576,9 @@ export function useInboxWatcher() {
   const ci = useCi((s) => s.status)
   const fb = useFeedback((s) => s.result)
   const sent = useApp((s) => s.project?.extras.prSent)
+  const charter = useCharter((s) => s.pending)
 
-  useEffect(refreshInbox, [projectId, blocked.join(','), sig.join('|'), fleet, ci, fb, sent])
+  useEffect(refreshInbox, [projectId, blocked.join(','), sig.join('|'), fleet, ci, fb, sent, charter])
 
   useEffect(() => {
     if (!blocked.length) {

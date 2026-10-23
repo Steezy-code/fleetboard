@@ -4,7 +4,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyFleet, type FleetMember, type FleetReady, type FleetState } from '../../src/shared/fleet'
-import { ownedBy, reviewReady, stalled } from '../../src/shared/mergeReview'
+import { coerceCharter } from '../../src/shared/charter'
+import { excludedBy, ownedBy, reviewReady, stalled } from '../../src/shared/mergeReview'
 
 const member = (over: Partial<FleetMember> & { id: string; name: string }): FleetMember => ({
   role: 'worker',
@@ -19,8 +20,9 @@ const member = (over: Partial<FleetMember> & { id: string; name: string }): Flee
 
 const LEAD: FleetMember = { id: 'lead', name: 'Ada', role: 'lead', agentId: 'claude', projectId: 'p', cwd: '/repo/.wt/lead', status: 'reported', createdAt: 1000 }
 
-function fleet(members: FleetMember[], ready: Partial<FleetReady> & { files: string[] }): FleetState {
+function fleet(members: FleetMember[], ready: Partial<FleetReady> & { files: string[] }, wontTouch?: string[]): FleetState {
   const s = emptyFleet('p', '/repo')
+  if (wontTouch) s.charter = coerceCharter({ understood: 'the job', wontTouch, doneWhen: 'npm test' }, 'the job', 1)
   s.members = Object.fromEntries([LEAD, ...members].map((m) => [m.id, m]))
   s.ready = { leadId: 'lead', branch: 'fleet/x', summary: 'did it', commits: 3, at: 2000, ...ready }
   return s
@@ -161,6 +163,115 @@ test('reviewers carry no claim and own nothing', () => {
 
 test('no Ready card, nothing to review', () => {
   assert.equal(reviewReady(emptyFleet('p', '/repo')), null)
+})
+
+// ---- the charter's "won't touch": what the user ruled out, held against what the diff touched
+
+test('an empty exclusion list excludes nothing', () => {
+  assert.equal(excludedBy('src/main/pty.ts', []), null)
+  assert.equal(excludedBy('src/main/pty.ts', undefined), null)
+  assert.equal(excludedBy('src/main/pty.ts', ['']), null)
+})
+
+test('exclusions match however the model wrote the path', () => {
+  for (const pattern of ['src/renderer', 'src/renderer/', './src/renderer', 'src\\renderer', 'src/renderer/*']) {
+    assert.ok(excludedBy('src/renderer/src/App.tsx', [pattern]), `${pattern} should match`)
+  }
+  assert.ok(excludedBy('src\\renderer\\src\\App.tsx', ['src/renderer']), 'a backslash path from the file side too')
+})
+
+test('an exclusion matches a file, a folder and a star prefix, and nothing outside them', () => {
+  assert.equal(excludedBy('src/main/pty.ts', ['src/main/pty.ts']), 'src/main/pty.ts')
+  assert.equal(excludedBy('src/main/pty.ts', ['src/main']), 'src/main')
+  assert.equal(excludedBy('src/main/pty.ts', ['src/main/*']), 'src/main/*')
+  assert.equal(excludedBy('src/mainframe/x.ts', ['src/main/']), null)
+  assert.equal(excludedBy('src/main-old/x.ts', ['src/main']), null)
+  assert.equal(excludedBy('src/main/pty.ts', ['src/main/pty.tsx']), null)
+})
+
+test('the exclusion that matched comes back as it was written, whichever entry it was', () => {
+  // the Lead is told which of the user's lines a file broke, so it has to be that line, not a tidied copy
+  assert.equal(excludedBy('src/renderer/a.ts', ['docs', './src/renderer/', 'src']), './src/renderer/')
+})
+
+// An exclusion that matches nothing is worse than no exclusion: the card says the folder is out of
+// bounds, the user agrees to that, and nothing holds anyone to it. These two forms are what a model
+// writes when it means the folder, so they are read as the folder rather than failing open.
+test('a leading slash and a ** tail still exclude the folder they name', () => {
+  for (const entry of ['/src/renderer', '//src/renderer', '/src/renderer/', 'src/renderer/**', 'src/renderer/**/*', '/src/renderer/**']) {
+    assert.equal(excludedBy('src/renderer/a.ts', [entry]), entry, `${entry} must exclude a file under it`)
+  }
+  assert.equal(excludedBy('src/renderertop.ts', ['/src/renderer']), null, 'and still not a string prefix')
+  assert.equal(excludedBy('docs/a.md', ['src/renderer/**']), null)
+})
+
+// The other direction: an exclusion that matches *everything* is not a rule the user read either —
+// a charter carrying it would refuse every merge, over a line one character long.
+test('an exclusion that is nothing but a wildcard excludes nothing at all', () => {
+  // `/./*`, `//./*` and the backslash spelling each reached `covers` as `./*`, which it normed back
+  // to a bare `*`: every path excluded, every merge refused, and no way to edit the charter after a
+  // team has started.
+  for (const entry of ['*', '**', '/*', './*', '/**', '*/', '/./*', '//./*', '\\.\\*', '/.//*'] as const) {
+    for (const file of ['src/a.ts', 'package.json', 'docs/deep/x.md']) assert.equal(excludedBy(file, [entry]), null, `${entry} vs ${file}`)
+  }
+  assert.equal(excludedBy('src/a.ts', ['*', 'src']), 'src', 'a real entry beside it still matches')
+})
+
+// None of the above is `owns`: a grant that matches nothing only over-flags, which is the safe way
+// round, and "everything" there plausibly means everything. Changing it would change which files the
+// review calls out of scope.
+test('ownedBy reads the same strings exactly as it did', () => {
+  assert.equal(ownedBy('src/a.ts', ['*']), true)
+  assert.equal(ownedBy('package.json', ['*']), true)
+  assert.equal(ownedBy('src/renderer/a.ts', ['/src/renderer']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**/*']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['**']), false)
+})
+
+test('an excluded file is flagged with its exclusion and blocks the review', () => {
+  // the worker owns src, so the file is inside its scope and is not sensitive: the exclusion alone has to raise it
+  const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['src'], doneWhen: 'ok', report: 'ok' })], { files: ['src/main/a.ts', 'src/renderer/src/App.tsx'] }, ['src/renderer/'])
+  const r = reviewReady(s)!
+  assert.equal(r.blocked, true)
+  assert.deepEqual(r.flags, [{ path: 'src/renderer/src/App.tsx', outside: false, excluded: 'src/renderer/' }])
+  assert.equal(r.clean, false)
+})
+
+test('a file that is excluded, outside the scope and sensitive is still one flag', () => {
+  const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['src'], doneWhen: 'ok', report: 'ok' })], { files: ['package.json'] }, ['package.json'])
+  assert.deepEqual(reviewReady(s)!.flags, [{ path: 'package.json', outside: true, excluded: 'package.json', why: 'changes dependencies' }])
+})
+
+test('excluded files sort ahead of outside-the-scope ones, which sort ahead of the merely sensitive', () => {
+  const s = fleet(
+    [member({ id: 'w1', name: 'Nadia', owns: ['package.json', 'src'], doneWhen: 'ok', report: 'ok' })],
+    // sensitive and granted, then outside and sensitive, then granted and excluded — the reverse of the order wanted
+    { files: ['package.json', '.github/workflows/release.yml', 'src/renderer/a.ts'] },
+    ['src/renderer']
+  )
+  assert.deepEqual(
+    reviewReady(s)!.flags.map((f) => f.path),
+    ['src/renderer/a.ts', '.github/workflows/release.yml', 'package.json']
+  )
+})
+
+test('a merely sensitive file does not block', () => {
+  const s = fleet([member({ id: 'w1', name: 'Nadia', owns: ['package.json'], doneWhen: 'ok', report: 'ok' })], { files: ['package.json'] }, ['src/renderer'])
+  const r = reviewReady(s)!
+  assert.equal(r.flags.length, 1)
+  assert.equal(r.blocked, false)
+  assert.equal(r.clean, true)
+})
+
+test('a board with no charter, or a charter that rules nothing out, is never blocked', () => {
+  const files = ['src/renderer/a.ts']
+  for (const wontTouch of [undefined, []]) {
+    const r = reviewReady(fleet([member({ id: 'w1', name: 'Nadia', owns: ['src'], doneWhen: 'ok', report: 'ok' })], { files }, wontTouch))!
+    assert.equal(r.blocked, false)
+    assert.deepEqual(r.flags, [])
+    assert.equal(r.clean, true)
+  }
 })
 
 test('stalled: only members still going without a report, past the threshold, worst first', () => {

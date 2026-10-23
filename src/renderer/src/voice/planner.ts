@@ -719,7 +719,8 @@ export async function runCommand(raw: string, source: Source) {
   if (!board) {
     try {
       const lead = await sendGoal(text)
-      const line = lead && activeLead()?.id === lead.id ? `Sent to ${lead.name}.` : 'Started a Lead for this. It will plan, delegate and report back in your Inbox.'
+      if (!lead) return // dismissed at the gate, or the folder was declined: nothing started
+      const line = activeLead()?.id === lead.id ? `Sent to ${lead.name}.` : 'Started a Lead for this. It will plan, delegate and report back in your Inbox.'
       thread().add('system', line)
       showReply(line)
     } catch (e: any) {
