@@ -14,7 +14,7 @@ import type {
   Workspace
 } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
-import { invoke, uid } from '../lib/api'
+import { errorText, invoke, uid } from '../lib/api'
 import { baseName } from '../workbench/paths'
 
 /**
@@ -275,7 +275,7 @@ function scheduleSave(p: Project | null) {
         console.error('saving the board failed', e)
         if (Date.now() - saveWarnedAt < 30_000) return
         saveWarnedAt = Date.now()
-        useApp.getState().toast(`Could not save the board: ${String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, 'warn')
+        useApp.getState().toast(`Could not save the board: ${errorText(e)}`, 'warn')
       }),
     350
   )
@@ -361,7 +361,7 @@ export const useApp = create<AppState>((set, get) => {
       // build must not touch it — opening a blank board over that id would be a board that can never
       // save, so stay where we are and say why.
       const loaded = await invoke<Project | null>('store:loadProject', id).catch((e) => {
-        get().toast(String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'warn')
+        get().toast(errorText(e), 'warn')
         return undefined
       })
       if (loaded === undefined) return

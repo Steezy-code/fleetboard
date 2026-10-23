@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Brain, Check, Circle, FileText, Loader2, Pencil, Plus, ScanSearch, Send, Square, Trash2 } from 'lucide-react'
 import type { MemoryCard } from '@shared/types'
-import { extractJson, runCli } from '../lib/api'
+import { errorText, extractJson, runCli } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor } from '../engine/consoles'
 import { Modal, Seg, Switch } from '../ui/Modal'
@@ -343,7 +343,7 @@ function ScanView({ existing, onCancel, onAdd }: { existing: MemoryCard[]; onCan
             .map((x) => ({ category: normalizeCategory(x.category), title: String(x.title ?? '').trim(), body: String(x.body ?? '').trim(), on: true }))
         )
       })
-      .catch((e) => setError(String(e?.message ?? e)))
+      .catch((e) => setError(errorText(e)))
     return () => {
       // closing the panel mid-scan stops the run
       if (!done) run.cancel()

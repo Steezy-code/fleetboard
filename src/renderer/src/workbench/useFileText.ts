@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { invoke } from '../lib/api'
+import { errorText, invoke } from '../lib/api'
 
 export const MAX_TEXT_BYTES = 3 * 1024 * 1024
 
@@ -52,7 +52,7 @@ export function useFileText(path: string | null | undefined, pollMs = 3000): Fil
         const binary = text.slice(0, 8000).includes('\u0000')
         setState({ text: binary ? null : text, error: null, binary, loading: false, mtime: st.mtime, size: st.size })
       } catch (e: any) {
-        setState({ text: null, error: String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), binary: false, loading: false, mtime: st.mtime, size: st.size })
+        setState({ text: null, error: errorText(e), binary: false, loading: false, mtime: st.mtime, size: st.size })
       }
     },
     [path]
