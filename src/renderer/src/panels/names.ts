@@ -9,3 +9,6 @@ export const DRAWER_NAMES = ['orchestrator', 'usage', 'accounts', 'git', 'ci', '
 
 export type ModalName = (typeof MODALS)[number]
 export type DrawerName = (typeof DRAWER_NAMES)[number]
+
+export const isDrawer = (n: string): n is DrawerName => (DRAWER_NAMES as readonly string[]).includes(n)
+export const isModal = (n: string): n is ModalName => (MODALS as readonly string[]).includes(n)

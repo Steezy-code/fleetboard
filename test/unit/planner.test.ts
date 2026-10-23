@@ -143,3 +143,12 @@ test('spoken answers: a plain yes or no answers a permission card, but never mer
   assert.equal(inboxPick('merge'), 0, 'saying the button does it')
   useInbox.setState({ items: [], front: null })
 })
+
+test('panels by name: the night log and the sweep can be asked for, and a panel that does not exist is not "opened"', async () => {
+  const { panelFor } = await import('@/voice/actions')
+  assert.deepEqual(panelFor('the night log'), { name: 'journal', drawer: true })
+  assert.deepEqual(panelFor('journal'), { name: 'journal', drawer: true })
+  assert.deepEqual(panelFor('morning sweep'), { name: 'sweep' })
+  assert.deepEqual(panelFor('fleetDiff'), { name: 'fleetDiff', drawer: false })
+  assert.equal(panelFor('spaceship'), null)
+})

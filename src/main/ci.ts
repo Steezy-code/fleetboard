@@ -7,6 +7,7 @@ import type { MainContext } from './context'
 import { which } from './env'
 import { ghEnv, git, run } from './run'
 import { stripAnsi } from '@shared/ansi'
+import { isFailing } from '@shared/ci'
 
 export type CiState = 'passing' | 'failing' | 'running' | 'none'
 
@@ -63,7 +64,7 @@ export function runState(status: string, conclusion: string | null | undefined):
   const s = (status || '').toLowerCase()
   if (s && s !== 'completed') return 'running'
   const c = (conclusion || '').toLowerCase()
-  if (['failure', 'timed_out', 'startup_failure', 'action_required', 'error'].includes(c)) return 'failing'
+  if (isFailing(c)) return 'failing'
   if (['success', 'neutral'].includes(c)) return 'passing'
   return 'none'
 }

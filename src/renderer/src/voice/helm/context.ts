@@ -26,6 +26,7 @@ import { useThread } from '../thread'
 import { useCi } from '../../workbench/ciStore'
 import { agentMade, ownerOf, unsent, useFeedback } from '../../workbench/prFeedback'
 import type { SweepResult } from '../../../../main/sweep'
+import { dayKey } from '@shared/time'
 
 const MAX_CHARS = 12000
 const TAIL_CHARS = 500
@@ -118,7 +119,8 @@ function nodeLine(n: BoardNode, ws: Workspace, root: string): string | null {
       return `orchestrator${to.length ? ` wired to ${to.join(', ')}` : ''}`
     }
     case 'calendar': {
-      const today = new Date().toISOString().slice(0, 10)
+      // the local day: the calendar's dates are, and in the evening west of UTC the UTC day is already tomorrow
+      const today = dayKey(Date.now())
       const evs: any[] = (d.events ?? []).filter((e: any) => e.date >= today).sort((a: any, b: any) => (a.date < b.date ? -1 : 1))
       return evs.length ? `calendar, next: ${evs.slice(0, 4).map((e) => `${e.date}${e.time ? ' ' + e.time : ''} ${clip(e.title, 40)}`).join('; ')}` : null
     }
