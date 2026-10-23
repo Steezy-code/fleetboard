@@ -17,6 +17,7 @@ import * as sweep from './sweep'
 import * as starter from './starter'
 import * as ci from './ci'
 import * as goal from './goal'
+import * as knowledge from './knowledge'
 import * as fleet from './fleet'
 import { stopFleetTicks } from './fleet'
 import * as remote from './remote'
@@ -289,7 +290,7 @@ app.whenReady().then(async () => {
   registerCore()
   // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
   // be registered from inside profiles, which made its handlers appear to come from nowhere.
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, ci, sweep, starter, journal]) m.register(ctx)
+  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal]) m.register(ctx)
   // these two start servers, so they are awaited rather than listed
   await fleet.register(ctx)
   await remote.register(ctx)
