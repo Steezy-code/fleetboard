@@ -1,6 +1,7 @@
 // Lead/worker teams: shared shapes between the fleet core (main) and the board (renderer).
 
 import type { Charter } from './charter'
+import type { DoneWhenCheck, LiveDiff } from './live'
 
 export type FleetRole = 'lead' | 'worker' | 'reviewer'
 
@@ -22,6 +23,10 @@ export interface FleetMember {
   status: 'starting' | 'working' | 'reported' | 'merged' | 'closed'
   report?: string
   createdAt: number
+  /** when its console last printed anything, stamped coarsely (main/live.ts): silence is what a stall is */
+  lastOutputAt?: number
+  /** a worker's uncommitted work in its worktree, sampled while it works (main/live.ts) */
+  diff?: LiveDiff
 }
 
 export interface FleetTask {
@@ -30,6 +35,12 @@ export interface FleetTask {
   owner?: string
   status: 'todo' | 'doing' | 'review' | 'done' | 'blocked'
   note?: string
+  /** first taken up (live.stampTask) */
+  startedAt?: number
+  /** handed in or stuck; cleared if it goes back to doing */
+  endedAt?: number
+  /** minutes the Lead expected it to take, from fleet_plan */
+  estimate?: number
 }
 
 export interface FleetMessage {
@@ -82,6 +93,8 @@ export interface FleetState {
   ready: FleetReady | null
   /** what the current job was agreed to be; absent on a board saved before charters, or one started without */
   charter?: Charter
+  /** the charter's done-when, run in the Lead's worktree as the work lands: progress, not part of what was agreed */
+  check?: DoneWhenCheck
 }
 
 export const emptyFleet = (projectId: string, projectPath: string): FleetState => ({

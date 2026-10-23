@@ -8,6 +8,7 @@ import { emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
+import { estimateOf, stampTask } from '@shared/live'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -287,7 +288,7 @@ export function leadPrompt(m: FleetMember) {
     `You are ${m.name}, the Lead of a Fleetboard team. The user gives you goals; you get them done through workers.`,
     'You have fleet tools (mcp__fleet__*). Rules:',
     '1. Never edit files yourself. Read the repo to understand it, then delegate.',
-    '2. Break the goal into a short plan with fleet_plan (one line per task). Keep it small: 1-4 tasks.',
+    '2. Break the goal into a short plan with fleet_plan (one line per task, and in estimates the minutes you expect each to take). Keep it small: 1-4 tasks.',
     `3. Start one worker per task with fleet_spawn_worker, passing the plan task's id as task_ref. Give each worker files/folders it owns that no other worker touches, and a done_when check (a command that proves it works). At most ${MAX_WORKERS} workers at once.`,
     '4. After starting workers, call fleet_wait to receive their reports (it returns when something happens). Do not poll or sleep.',
     '5. When a worker reports done, read its summary and fleet_merge it into your integration branch. If it is blocked, help it with fleet_send.',
@@ -643,7 +644,14 @@ const TOOLS: ToolDef[] = [
     name: 'fleet_plan',
     roles: ['lead'],
     description: 'Show your plan on the board as a task list (replaces the previous plan). Keep tasks to one line each.',
-    inputSchema: { type: 'object', properties: { tasks: strArr('Task titles, in order') }, required: ['tasks'] }
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tasks: strArr('Task titles, in order'),
+        estimates: { type: 'array', items: { type: 'number' }, description: 'Minutes you expect each task to take, same order as tasks' }
+      },
+      required: ['tasks']
+    }
   },
   {
     name: 'fleet_update_task',
@@ -778,7 +786,11 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
 
   switch (name) {
     case 'fleet_plan': {
-      s.tasks = (a.tasks ?? []).map((t: string): FleetTask => ({ id: uid('t'), title: String(t), status: 'todo' }))
+      const estimates: unknown[] = Array.isArray(a.estimates) ? a.estimates : []
+      s.tasks = (a.tasks ?? []).map((t: string, i: number): FleetTask => {
+        const estimate = estimateOf(estimates[i])
+        return { id: uid('t'), title: String(t), status: 'todo', ...(estimate ? { estimate } : {}) }
+      })
       ctx.emit('fleet:plan', { leadId: m.id })
       changed(s)
       return text(`Plan shown on the board:\n${s.tasks.map((t, i) => `${i + 1}. ${t.title} (id ${t.id})`).join('\n')}`)
@@ -789,7 +801,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (a.status) {
         const st = String(a.status).toLowerCase().trim()
         if (!TASK_STATUSES.includes(st as FleetTask['status'])) return fail(`Unknown status "${a.status}". Use one of: ${TASK_STATUSES.join(', ')}.`)
-        t.status = st as FleetTask['status']
+        stampTask(t, st as FleetTask['status'], Date.now())
       }
       if (a.owner) t.owner = findMember(s, a.owner)?.id ?? a.owner
       if (a.note) t.note = a.note
@@ -834,7 +846,10 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       s.members[id] = w
       memberProject.set(id, s.projectId)
       const ref = reviewer ? undefined : a.task_ref ? findTask(s.tasks, a.task_ref) : guessTask(s.tasks, String(a.task ?? ''))
-      if (ref) Object.assign(ref, { owner: id, status: 'doing' })
+      if (ref) {
+        ref.owner = id
+        stampTask(ref, 'doing', Date.now())
+      }
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
       await startConsole(s, w, { acceptEdits: !reviewer })
@@ -908,7 +923,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       m.status = 'reported'
       m.report = String(a.summary)
       const t = s.tasks.find((x) => x.owner === m.id)
-      if (t) t.status = a.status === 'blocked' ? 'blocked' : a.status === 'changes' ? 'review' : m.role === 'reviewer' ? t.status : 'review'
+      if (t) stampTask(t, a.status === 'blocked' ? 'blocked' : a.status === 'changes' ? 'review' : m.role === 'reviewer' ? t.status : 'review', Date.now())
       post(s, { from: m.id, to: lead.id, kind: 'report', text: `(${a.status}) ${a.summary}${commitNote}` })
       return text(`Reported to ${lead.name}.${commitNote} Stay available: the lead may send follow-ups.`)
     }
@@ -935,7 +950,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       }
       w.status = 'merged'
       const t = s.tasks.find((x) => x.owner === w.id)
-      if (t) t.status = 'done'
+      if (t) stampTask(t, 'done', Date.now())
       ctx.emit('fleet:traffic', { from: w.id, to: m.id, kind: 'merge' })
       changed(s)
       const stat = (await git(m.cwd, ['diff', '--stat', 'HEAD~1', 'HEAD'])).out.split('\n').pop()
@@ -1126,7 +1141,7 @@ function memberStarted(req: PtySpawnRequest) {
     m.status = 'working'
     m.report = undefined
     const t = s.tasks.find((x) => x.owner === m.id)
-    if (t) t.status = 'doing'
+    if (t) stampTask(t, 'doing', Date.now())
     post(s, { from: m.id, to: lead.id, kind: 'message', text: `${m.name}'s console was restarted; it carries on with its task and will report when done.` })
   }
   if (m.status !== 'working' && m.status !== 'starting') return
@@ -1161,7 +1176,7 @@ function memberExited(id: string, code: number | undefined, appClosing: boolean)
   m.status = 'reported'
   m.report = `Console exited${how} before reporting.`
   const t = s.tasks.find((x) => x.owner === m.id)
-  if (t) t.status = 'blocked'
+  if (t) stampTask(t, 'blocked', Date.now())
   const work = m.role === 'worker' && m.branch ? ` Anything it changed is uncommitted in its worktree (branch ${m.branch}).` : ''
   post(s, { from: m.id, to: lead.id, kind: 'report', text: `(blocked) ${m.name}'s console exited${how} before it reported.${work} Start a new ${m.role} if the task still needs doing.` })
 }
