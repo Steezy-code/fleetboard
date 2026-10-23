@@ -6,7 +6,7 @@
 //   5. Helm off (or failed): work → the Lead; board commands → the CLI planner (JSON actions)
 // Destructive or unrequested steps wait for a spoken / clicked confirmation.
 import { activeLead, looksLikeBoardCommand, sendGoal } from '../engine/fleet'
-import { AGENTS } from '@shared/agents'
+import { AGENTS, readOnlyAgent } from '@shared/agents'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { agentLabel, isLive } from '../engine/consoles'
 import { extractJson, runCli, uid } from '../lib/api'
@@ -490,7 +490,7 @@ async function askPlanner(text: string): Promise<{ actions: Action[]; say: strin
   const app = useApp.getState()
   const project = app.project
   if (!project) return null
-  const run = runCli({ prompt: plannerPrompt(text), cwd: project.path, agentId: app.settings.plannerAgent || undefined })
+  const run = runCli({ prompt: plannerPrompt(text), cwd: project.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
   let cancelled = false
   setVoice({
     phase: 'thinking',

@@ -16,6 +16,7 @@ import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
 import { autoApproves, routeFeedback, useFeedback } from '../../workbench/prFeedback'
 import { startBrainstorm } from './brainstorm'
 import { CHARTER_FIELDS } from '../../fleet/charter'
+import { readOnlyAgent } from '@shared/agents'
 
 // ---------------------------------------------------------------- types / store
 
@@ -255,7 +256,7 @@ export async function askHelm(text: string): Promise<HelmResult | null> {
   try {
     const board = await boardContext(() => cancelled)
     if (cancelled) return null
-    run = runCli({ prompt: helmPrompt(text, board), cwd: project.path, agentId: app.settings.plannerAgent || undefined })
+    run = runCli({ prompt: helmPrompt(text, board), cwd: project.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
     const res = await run.promise
     if (cancelled) return null
     const json = extractJson<any>(res.text)

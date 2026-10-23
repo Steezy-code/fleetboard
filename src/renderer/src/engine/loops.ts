@@ -5,6 +5,7 @@ import { maySpendOn, spendable } from './guards'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
 import type { ConsoleStatus } from '@shared/types'
 import { stripAnsi } from '@shared/ansi'
+import { readOnlyAgent } from '@shared/agents'
 
 // Loops: recurring instructions typed into consoles on a schedule, when an agent goes idle, or when
 // its output matches. Stored per project in extras.loops; run by startLoops() (registered engine).
@@ -315,7 +316,7 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
     '',
     'Reply on the first line with exactly MET or NOT_MET, then one short sentence why.'
   ].join('\n')
-  const { text } = await runCli({ prompt, cwd, agentId: s.judgeAgent || undefined }).promise
+  const { text } = await runCli({ prompt, cwd, agentId: readOnlyAgent(s.judgeAgent) }).promise
   const first = text.trim().split('\n')[0] ?? ''
   const met = /^\W*MET\b/i.test(first) && !/NOT[_ ]?MET/i.test(first)
   return { met, note: text.trim().split('\n').slice(1).join(' ').trim().slice(0, 200) || first }

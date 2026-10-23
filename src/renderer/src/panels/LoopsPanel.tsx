@@ -20,6 +20,7 @@ import {
 } from '../engine/loops'
 import { Modal, Seg, Switch } from '../ui/Modal'
 import { plural, useFleet, useInstalledAgents } from '../orchestration/fleet'
+import { readsOnly } from '@shared/agents'
 
 const SUB =
   'Recurring instructions for your agents — on a schedule, when they go idle, or when their output says so. Loops can stop themselves when a goal is met.'
@@ -240,7 +241,8 @@ function WhenCard({ on, icon, title, sub, onClick, children }: { on: boolean; ic
 function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft: (l: Loop) => void; isNew: boolean; onDone: () => void }) {
   const fleet = useFleet()
   const installed = useInstalledAgents()
-  const judges = useMemo(() => installed.filter((a) => a !== 'shell'), [installed])
+  // a judge reads what the consoles printed: only a CLI whose headless run can be held to reading
+  const judges = useMemo(() => installed.filter(readsOnly), [installed])
   const set = (patch: Partial<Loop>) => setDraft({ ...draft, ...patch })
   const setStop = (patch: Partial<Loop['stop']>) => setDraft({ ...draft, stop: { ...draft.stop, ...patch } })
   const t = draft.trigger

@@ -15,7 +15,7 @@ before(async () => {
   fs.mkdirSync(bin)
   const fake = path.resolve(import.meta.dirname, '../fake-agent/claude.mjs')
   fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`, { mode: 0o755 })
-  fs.writeFileSync(path.join(bin, 'gemini'), `#!/bin/sh\necho "gemini got $# args"\n`, { mode: 0o755 })
+  fs.writeFileSync(path.join(bin, 'gemini'), `#!/bin/sh\necho "gemini got $# args: $1 $2"\n`, { mode: 0o755 })
   // no login shell: the app falls back to this process's environment
   process.env.SHELL = '/bin/false'
   // leave out any real codex on this machine, so "not installed" stays true
@@ -59,7 +59,22 @@ test('a prompt far over the command-line limit reaches claude whole (through std
   assert.equal(r.text, 'Here is the summary.')
   assert.equal(lastPrint().promptLength, big.length)
   assert.ok(!lastPrint().args.some((a: string) => a.length > 1000), 'the prompt is not on the command line')
-  assert.ok(lastPrint().args.includes('--allowedTools'), 'read-only tools by default')
+  // the whole argv: allowed tools add to the user's own settings, so the mode is pinned too, or a
+  // defaultMode of bypassPermissions would let a run that reads console output do anything
+  assert.deepEqual(lastPrint().args, [
+    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--permission-mode', 'default',
+    '--allowedTools', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)'
+  ])
+})
+
+test('a run allowed to change files says so in full, and only when asked', async () => {
+  await ipcMain.invoke('cli:run', { runId: 'rw', prompt: 'summarize', cwd: dir, allowTools: true })
+  assert.deepEqual(lastPrint().args, [
+    '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
+    '--permission-mode', 'acceptEdits',
+    '--allowedTools', 'Bash', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)', 'Edit', 'Write'
+  ])
 })
 
 test('other CLIs get a clear error instead of a crash when the prompt cannot fit in argv', async () => {
@@ -68,7 +83,7 @@ test('other CLIs get a clear error instead of a crash when the prompt cannot fit
   assert.match(r.text, /too long to pass to Gemini CLI/)
   const ok = await run('short', 'gemini')
   assert.equal(ok.code, 0)
-  assert.match(ok.text, /gemini got 2 args/)
+  assert.match(ok.text, /gemini got 4 args: --approval-mode plan/, 'held to reading, the prompt after -p')
 })
 
 test('an agent that is not installed is a clear error', async () => {
