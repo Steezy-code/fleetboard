@@ -59,6 +59,32 @@ test('Markdown studio: autosave after an agent changed the note asks; "load the 
   assert.deepEqual(app.rendererErrors, [])
 })
 
+test('Markdown studio: keeping your version unsaved is not asked again every autosave, nor after the studio closes', async () => {
+  // Declining both dialogs left the edit pending, and the next autosave refused and asked again 600 ms
+  // later, for ever — even after the studio closed, over the board, until a destructive choice.
+  const file = path.join(repo, 'notes.md')
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().closePanel())
+  await app.waitFor(() => app.eval(() => !document.querySelector('textarea')), { label: 'the studio closed' })
+  fs.writeFileSync(file, '# Notes\n\nsecond\n')
+  await app.eval((p) => (window as any).__fleetboard.useApp.getState().openPanel('markdown', { path: p }), file)
+  await app.waitFor(() => app.eval(() => (document.querySelector('textarea') as HTMLTextAreaElement | null)?.value.includes('second')), { label: 'note open' })
+  fs.writeFileSync(file, '# Notes\n\nsecond, by an agent\n')
+  await typeInto('# Notes\n\nsecond, mine\n')
+  await dialog(/notes\.md changed on disk/)
+  await app.click('button', 'Cancel')
+  await dialog(/Load the version on disk\?/)
+  await app.click('button', 'Cancel')
+  const asking = async () => (await app.texts('.modal.confirm')).length > 0
+  await new Promise((r) => setTimeout(r, 2000))
+  assert.equal(await asking(), false, 'not asked again')
+  assert.match((await app.texts('.wb-save-state')).join(''), /Changed on disk/)
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().closePanel())
+  await new Promise((r) => setTimeout(r, 2000))
+  assert.equal(await asking(), false, 'nor over the board once the studio closed')
+  assert.equal(fs.readFileSync(file, 'utf8'), '# Notes\n\nsecond, by an agent\n', "the agent's text is untouched")
+  assert.deepEqual(app.rendererErrors, [])
+})
+
 test('Markdown studio: a note it could not read is never saved over', async () => {
   // The bulk prefetch used to fill the notes map but not the "what is on disk" map, and a read that
   // failed cached the empty string. fs:write with no base overwrites unconditionally, so a note that
