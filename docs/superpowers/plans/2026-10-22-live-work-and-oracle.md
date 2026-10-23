@@ -30,7 +30,7 @@
 ## Reading of the spec where it leaves room
 
 - **"A field the charter model emits per task."** The charter is drafted before the Lead has planned, so the charter model cannot name the Lead's tasks without doing the Lead's planning, which the spec rules out as a non-goal. So the charter model emits one `estimate` for the job, and `fleet_plan` takes an optional estimate per task from the Lead in the same reply that names the tasks. Both are model-emitted numbers carried on the objects they describe; neither is accumulated from history.
-- **"Running it periodically."** The integration worktree only changes when the Lead merges (the Lead never edits files), so a run on an unchanged commit tells nothing new. The check runs once as a baseline when the team starts, after each merge, at `fleet_finish`, and on a slow tick only if the integration branch moved since the last run. That is the cheap reading of "periodically" and still never overlaps itself.
+- **"Running it periodically."** The integration worktree only changes when the Lead merges (the Lead never edits files), so a run on an unchanged commit tells nothing new. The check runs once as a baseline when the team starts, after each merge, and on a slow tick only if the integration branch moved since the last run. The run after the last merge is the one the Ready card is read against. That is the cheap reading of "periodically" and still never overlaps itself.
 - **Where the ambient line lives.** Its own one-line strip above the Inbox tray, not an Inbox item: an Inbox item asks for an answer, and the line asks for nothing.
 
 ## Review Focus
@@ -239,7 +239,7 @@ The tick reads `ptys.lastOutput(id)` every 15 s and writes it to the member only
 - Modify: `src/main/live.ts` — the runner
 - Modify: `src/shared/live.ts` — `commandLike`, `failingCount`, `checkTrend`
 - Modify: `src/shared/fleet.ts` — `FleetState.check`
-- Modify: `src/main/fleet.ts` — triggers at start, merge and finish; `fleet:checkOff`; a dismissed team's run is stopped
+- Modify: `src/main/fleet.ts` — triggers at start and merge; `fleet:checkOff`; a dismissed team's run is stopped
 - Modify: `src/renderer/src/nodes/PlanNode.tsx` — the done-when line and its switch
 - Test: `test/unit/live-work.test.ts`, `test/e2e/live-work.test.ts`
 
@@ -254,10 +254,10 @@ The tick reads `ptys.lastOutput(id)` every 15 s and writes it to the member only
   /** "3 failing, down from 11" · "passing" · "failing" · "running…" · "off" · "not a command, not run" */
   export function checkTrend(c: DoneWhenCheck | undefined, doneWhen: string): string
   /** whether a run may start now; the reason it may not, otherwise */
-  export function mayRun(o: { command: string; off?: boolean; running?: number; leadWorking: boolean; head?: string; lastHead?: string; reason: 'start' | 'merge' | 'finish' | 'tick' }): true | string
+  export function mayRun(o: { command: string; off?: boolean; running?: number; leadWorking: boolean; inWorktree: boolean; head?: string; lastHead?: string; reason: 'start' | 'merge' | 'tick' }): true | string
   ```
 
-- [ ] **Step 1: Write the failing tests** — Review Focus 3: `commandLike` is true for `npm test`, `test -f a.txt`, `pytest -q tests/`, `./scripts/check.sh` and false for "The page renders", "tests pass", "", and for anything with a newline; `failingCount` reads node:test, jest/vitest, pytest and mocha summaries and is undefined otherwise; `checkTrend` over a run list; `mayRun` refuses when off, when running, when the Lead is not working, and on a tick whose head has not moved.
+- [ ] **Step 1: Write the failing tests** — Review Focus 3: `commandLike` is true for `npm test`, `test -f a.txt`, `pytest -q tests/`, `./scripts/check.sh` and false for "The page renders", "tests pass", "", and for anything with a newline; `failingCount` reads node:test, jest/vitest, pytest and mocha summaries and is undefined otherwise; `checkTrend` over a run list; `mayRun` refuses when off, when running, when the Lead is not working, when the Lead has no integration worktree (a team in the user's own files), and on a tick whose head has not moved.
 - [ ] **Step 2: Run them and watch them fail.**
 - [ ] **Step 3: Implement** — runs reuse `runGoalCheck`, in the Lead's `cwd` (its integration worktree), with a 10-minute timeout and the team's own `AbortController`, aborted when the team is dismissed. The last ten runs are kept. The command is always the charter's `doneWhen` verbatim: there is no other source. The plan node shows ``Done when `npm test` · 3 failing, down from 11`` with a switch that writes `check.off` through `fleet:checkOff`.
 - [ ] **Step 4: e2e** — a team whose charter's done-when is `test -f a.txt`: a baseline run fails, a run after the merges passes, and the plan node says "passing". Switched off, no further run starts.

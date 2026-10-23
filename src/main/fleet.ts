@@ -20,6 +20,7 @@ import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
+import { runCheck, startLive, stopCheck, stopLive } from './live'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -565,9 +566,14 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   s.ready = null
   s.tasks = []
   s.charter = charter
+  // a new charter's check starts its own history: the last team's runs measured a different job
+  stopCheck(s.projectId)
+  delete s.check
   changed(s)
   await startConsole(s, m)
   post(s, { from: 'user', to: id, kind: 'goal', text: goalMessageFor(charter, opts.goal) })
+  // the baseline, so later runs can say "down from 11"
+  void runCheck(s, 'start')
   return m
 }
 
@@ -953,6 +959,8 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (t) stampTask(t, 'done', Date.now())
       ctx.emit('fleet:traffic', { from: w.id, to: m.id, kind: 'merge' })
       changed(s)
+      // merged work has landed in the integration worktree: the one moment the charter's check can answer differently
+      void runCheck(s, 'merge')
       const stat = (await git(m.cwd, ['diff', '--stat', 'HEAD~1', 'HEAD'])).out.split('\n').pop()
       return text(`Merged ${w.name}'s work into ${m.branch}: ${stat}`)
     }
@@ -1199,6 +1207,7 @@ export async function register(c: MainContext) {
     t.unref?.()
     ticks.push(t)
   }
+  startLive({ ctx, teams: () => states.values(), changed, trees: treesDir })
 
   const { ipc } = ctx
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
@@ -1220,6 +1229,17 @@ export async function register(c: MainContext) {
     return true
   })
   ipc.handle('fleet:answer', (_e, askId: string, answer: string) => answerAsk(askId, answer))
+  /** The user switches the charter's live check off or on. Off also ends a run in flight; on runs it now. */
+  ipc.handle('fleet:checkOff', (_e, projectId: string, off: boolean) => {
+    const s = states.get(projectId)
+    if (!s?.charter?.doneWhen) return false
+    s.check = { ...(s.check ?? { command: s.charter.doneWhen, runs: [] }), off: !!off }
+    if (!s.check.off) delete s.check.off
+    if (off) stopCheck(projectId)
+    changed(s)
+    if (!off) void runCheck(s, 'start')
+    return true
+  })
   ipc.handle('fleet:diff', async (_e, projectId: string) => {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
@@ -1393,11 +1413,14 @@ export async function revertMerge(projectId: string, commit: string): Promise<{ 
 export function stopFleetTicks() {
   for (const t of ticks) clearInterval(t)
   ticks.length = 0
+  stopLive()
 }
 
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
+  // its worktree is about to go: a check still running in it has nothing left to check
+  stopCheck(s.projectId)
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')
   // A worker's branch is only safe to delete once the lead's branch actually contains its commits.
   // It used to be deleted with -D either way, so a worker that reported "blocked", or whose console
