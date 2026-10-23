@@ -5,6 +5,8 @@
 // evidence a model offered, never taken from the model: asked for a number it says 90-plus nearly
 // every time.
 
+import { estimateOf } from './live'
+
 export interface CharterAssumption {
   text: string
   /** it rests on something in the repo, named in `from` — otherwise it is a guess */
@@ -27,6 +29,8 @@ export interface Charter {
   confidence: number
   ambiguity?: Ambiguity
   question?: { text: string; options: string[] }
+  /** minutes the whole job was expected to take, by the model that drafted this; it colours the elapsed time and nothing else */
+  estimate?: number
   /** set when this is a follow-up to a Lead already running */
   followUpTo?: string
   /** the running Lead whose team confirming this would replace, by name; set at the gate, never stored */
@@ -72,6 +76,7 @@ export function coerceCharter(raw: unknown, request: string, at: number = Date.n
   const doneWhen = str(r.doneWhen, 300)
   const question = coerceQuestion(r.question)
   const ambiguity = AMBIGUITIES.find((x) => x === str(r.ambiguity, 20).toLowerCase())
+  const estimate = estimateOf(r.estimate)
   return {
     request,
     understood: str(r.understood, 600) || request,
@@ -81,6 +86,7 @@ export function coerceCharter(raw: unknown, request: string, at: number = Date.n
     confidence: scoreConfidence({ assumptions, wontTouch, doneWhen, question }),
     ...(ambiguity ? { ambiguity } : {}),
     ...(question ? { question } : {}),
+    ...(estimate ? { estimate } : {}),
     at
   }
 }

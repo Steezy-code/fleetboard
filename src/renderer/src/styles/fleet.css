@@ -108,6 +108,24 @@
   color: var(--accent-2);
   white-space: nowrap;
 }
+.plan-time {
+  font-size: 11px;
+  color: var(--dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.plan-time.over {
+  color: var(--warn);
+}
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin-top: -4px;
+  font-size: 11px;
+  color: var(--dim);
+}
 .pl-todo {
   color: var(--dim);
 }

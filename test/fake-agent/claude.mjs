@@ -287,7 +287,7 @@ const fill = (s) => String(s ?? '').replace(/\{name\}/g, me.name)
 async function leadFlow(goal) {
   const sc = scenario.lead ?? {}
   const tasks = sc.tasks ?? [{ task: `Do: ${goal}`, owns: ['work.txt'], done_when: 'work.txt exists' }]
-  await tool('fleet_plan', { tasks: tasks.map((t) => t.title ?? t.task) })
+  await tool('fleet_plan', { tasks: tasks.map((t) => t.title ?? t.task), ...(tasks.some((t) => t.estimate) ? { estimates: tasks.map((t) => t.estimate ?? 0) } : {}) })
   const started = []
   for (const t of tasks) {
     const r = await tool('fleet_spawn_worker', { task: t.task, owns: t.owns, done_when: t.done_when, name: t.name, agent: t.agent, task_ref: 'ref' in t ? (t.ref ?? undefined) : (t.title ?? t.task) })

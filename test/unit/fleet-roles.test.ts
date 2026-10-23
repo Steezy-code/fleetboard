@@ -388,3 +388,7 @@ test('fleet_merge checks the exclusions before it attempts the merge', () => {
   assert.match(body, /s\.charter\?\.wontTouch/, "against the board's charter")
   assert.match(body, /wouldTouch\(m\.cwd, at\)/, "the diff is what the merge would bring in: the worker's branch since it left the lead's")
 })
+
+test('the Lead is asked how long each task should take, in the plan it already makes', () => {
+  assert.match(leadPrompt(LEAD_MEMBER), /fleet_plan \(.*estimates.*minutes/)
+})
