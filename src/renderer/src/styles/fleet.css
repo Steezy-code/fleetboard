@@ -597,6 +597,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.it-claim-decisions {
+  margin: -2px 0 2px 18px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.it-claim-decisions > div::before {
+  content: '↳ ';
+  color: var(--dim);
+}
 .it-claim.warn .it-claim-ev {
   color: var(--warn-text);
 }

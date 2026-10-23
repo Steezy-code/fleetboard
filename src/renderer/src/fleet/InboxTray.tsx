@@ -1,5 +1,7 @@
 import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { Fragment } from 'react'
 import type { MergeReview } from '@shared/mergeReview'
+import { decisionsOf } from '@shared/live'
 import { billed, type Spent } from '@shared/spend'
 import { agentColor } from '../engine/consoles'
 import { allConsoles } from '../state/store'
@@ -166,14 +168,25 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
       {claims.map((c, i) => {
         const s = spend[c.cwd]
         const spent = s ? billed(s) : 0
+        // the choices it says it made: the part of a report worth reading afterwards
+        const decisions = decisionsOf(c.report).slice(0, 3)
         return (
-          <div key={i} className={`it-claim ${c.proven ? 'ok' : 'warn'}`}>
-            {c.proven ? <Check size={12} /> : <TriangleAlert size={12} />}
-            <span className="it-claim-who">{c.who}</span>
-            <span className="it-claim-what">{c.doneWhen}</span>
-            {spent ? <span className="it-claim-spend">{tokens(spent)}</span> : null}
-            <span className="it-claim-ev">{c.proven ? c.report?.split('\n')[0] ?? 'merged' : c.gap}</span>
-          </div>
+          <Fragment key={i}>
+            <div className={`it-claim ${c.proven ? 'ok' : 'warn'}`}>
+              {c.proven ? <Check size={12} /> : <TriangleAlert size={12} />}
+              <span className="it-claim-who">{c.who}</span>
+              <span className="it-claim-what">{c.doneWhen}</span>
+              {spent ? <span className="it-claim-spend">{tokens(spent)}</span> : null}
+              <span className="it-claim-ev">{c.proven ? c.report?.split('\n')[0] ?? 'merged' : c.gap}</span>
+            </div>
+            {decisions.length > 0 && (
+              <div className="it-claim-decisions">
+                {decisions.map((d, k) => (
+                  <div key={k}>{d}</div>
+                ))}
+              </div>
+            )}
+          </Fragment>
         )
       })}
       {shown.map((f) => (
