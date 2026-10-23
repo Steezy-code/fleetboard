@@ -3,7 +3,7 @@
 // actions, a panel), and runs the one the user picks. The card itself is HelmCard.tsx.
 import { create } from 'zustand'
 import { coerceCharter } from '@shared/charter'
-import { useApp } from '../../state/store'
+import { allConsoles, useApp } from '../../state/store'
 import { extractJson, runCli, uid } from '../../lib/api'
 import { activeLead, sendGoal } from '../../engine/fleet'
 import { playbookById } from '../../playbooks/catalog'
@@ -13,7 +13,7 @@ import { setVoice, useThread, useVoice } from '../thread'
 import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planner'
 import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
-import { routeFeedback, useFeedback } from '../../workbench/prFeedback'
+import { autoApproves, routeFeedback, useFeedback } from '../../workbench/prFeedback'
 import { startBrainstorm } from './brainstorm'
 import { CHARTER_FIELDS } from '../../fleet/charter'
 
@@ -336,6 +336,35 @@ export async function runHelmOption(i: number | null = primaryIndex()) {
   await execOption(o, card.request)
 }
 
+/**
+ * Oracle's words are about to be submitted into a console that acts on them without a model or a
+ * person in between: a shell or command console (it runs the line), or an agent that approves its
+ * own prompts. Those are asked about with the text in full, whatever the card said.
+ */
+async function mayRunIn(actions: Action[]): Promise<boolean> {
+  const risky = new Set<string>()
+  let text = ''
+  for (const a of actions) {
+    if (a.type !== 'send' || !a.submit) continue
+    for (const id of resolveRefs(a.targets).ids) {
+      const c = allConsoles().find((x) => x.id === id)
+      if (!c) continue
+      if (c.data.agentId === 'shell' || c.data.command || autoApproves(id)) {
+        risky.add(String(c.data.name ?? id))
+        text ||= a.text
+      }
+    }
+  }
+  if (!risky.size) return true
+  const names = [...risky]
+  return useApp.getState().confirm({
+    title: `Send this to ${names.join(', ')}?`,
+    body: `${names.length === 1 ? 'It runs' : 'They run'} what it is sent without asking: “${text.length > 300 ? text.slice(0, 299) + '…' : text}”`,
+    confirm: 'Send',
+    danger: true
+  })
+}
+
 async function execOption(o: HelmOption, request: string) {
   const app = useApp.getState()
   try {
@@ -365,9 +394,13 @@ async function execOption(o: HelmOption, request: string) {
         setVoice({ reply: line, captionUntil: Date.now() + 6000 })
         return
       }
-      case 'send':
-        return await plan([{ type: 'send', targets: o.targets!, text: o.text!, submit: o.submit !== false }], '', request, false)
+      case 'send': {
+        const send: Action = { type: 'send', targets: o.targets!, text: o.text!, submit: o.submit !== false }
+        if (!(await mayRunIn([send]))) return
+        return await plan([send], '', request, false)
+      }
       case 'actions':
+        if (!(await mayRunIn(o.actions!))) return
         return await plan(o.actions!, '', request, false)
       case 'panel':
         return await plan([{ type: 'openPanel', name: o.panel! }], '', request, false)
