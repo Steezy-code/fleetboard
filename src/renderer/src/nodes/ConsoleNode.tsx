@@ -135,7 +135,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
   // Deliver a queued first prompt (spawn with a prompt, a handoff's brief). The main process waits until
   // the CLI can take input and makes sure Enter took: typed at the first "idle", Claude Code could drop it.
   useEffect(() => {
-    const pending = (node.data as any).pendingPrompt as string | undefined
+    const pending = node.data.pendingPrompt
     if (!pending || !live) return
     useApp.getState().updateNodeData(node.id, { pendingPrompt: undefined })
     invoke<boolean>('pty:deliver', node.id, pending.trim()).then(

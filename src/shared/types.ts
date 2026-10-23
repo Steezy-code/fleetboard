@@ -164,6 +164,10 @@ export interface ConsoleData {
   launch?: 'fresh' | 'resume' | 'ask'
   /** this console's conversation, for CLIs that take one (AgentDef.session): what a resume picks up */
   sessionId?: string
+  /** typed into the console once it can take input (spawnConsoles' initialPrompt, a handoff's brief), then cleared */
+  pendingPrompt?: string
+  /** run this shell command instead of the agent CLI (a preset's dev server or watcher) */
+  command?: string
   createdAt: number
 }
 

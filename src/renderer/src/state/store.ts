@@ -254,8 +254,6 @@ function clearFocusReturn(w: Workspace): Workspace {
   return { ...w, camera: saved, extras }
 }
 
-const removeNodesNow = (ids: string[]) => (useApp.getState() as any)._removeNodes(ids)
-
 let saveTimer: number | undefined
 let saveWarnedAt = 0
 /**
@@ -466,7 +464,7 @@ export const useApp = create<AppState>((set, get) => {
       }),
     removeNodes: (ids) => {
       if (get().focusedNode && ids.includes(get().focusedNode!)) get().exitFocus()
-      removeNodesNow(ids)
+      get()._removeNodes(ids)
     },
     _removeNodes: (ids: string[]) =>
       mutateWs((ws) => {

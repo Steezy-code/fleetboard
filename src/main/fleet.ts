@@ -54,8 +54,6 @@ const waiters = new Map<string, (events: FleetMessage[]) => void>()
 const askWaiters = new Map<string, (answer: string) => void>()
 /** request id → renderer ack for a new console node */
 const acks = new Map<string, (v: { name?: string }) => void>()
-/** lead id → commit the lead's integration branch started from */
-const baseCommit = new Map<string, string>()
 
 const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
 const MAX_WORKERS = 4
@@ -88,7 +86,6 @@ function loadAll() {
     if (!s) continue
     states.set(s.projectId, s)
     for (const m of Object.values(s.members)) memberProject.set(m.id, s.projectId)
-    for (const m of Object.values(s.members)) if (m.role === 'lead' && (m as any).base) baseCommit.set(m.id, (m as any).base)
   }
 }
 
@@ -543,12 +540,12 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   const slug = `${slugify(title)}-${id.slice(-4)}`
   let cwd = opts.projectPath
   let branch: string | undefined
+  let base: string | undefined
   const isRepo = (await git(opts.projectPath, ['rev-parse', '--verify', 'HEAD'])).ok
   if (isRepo) {
     branch = `fleet/${slug}`
     cwd = await createWorktree(opts.projectPath, opts.projectPath, opts.projectId, `${slug}-lead`, branch)
-    const base = (await git(cwd, ['rev-parse', 'HEAD'])).out
-    baseCommit.set(id, base)
+    base = (await git(cwd, ['rev-parse', 'HEAD'])).out
   }
   const leads = Object.values(s.members).filter((m) => m.role === 'lead' && m.status !== 'closed').length
   const m: FleetMember = {
@@ -560,10 +557,10 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
     task: title,
     cwd,
     branch,
+    ...(base ? { base } : {}),
     status: 'working',
     createdAt: Date.now()
   }
-  ;(m as any).base = baseCommit.get(id)
   s.members[id] = m
   memberProject.set(id, s.projectId)
   s.ready = null
@@ -1048,7 +1045,7 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       if (!m.branch) {
         s.ready = { leadId: m.id, branch: '', summary: String(a.summary), commits: 0, files: [], at: Date.now(), ...(verified ? { verified } : {}) }
       } else {
-        const base = baseCommit.get(m.id) ?? 'HEAD~1'
+        const base = m.base ?? 'HEAD~1'
         const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..HEAD`])).out) || 0
         const files = (await git(m.cwd, ['diff', '--name-only', `${base}..HEAD`])).out.split('\n').filter(Boolean)
         const stat = numstat((await git(m.cwd, ['diff', '--numstat', `${base}..HEAD`])).out)
@@ -1289,7 +1286,7 @@ export async function register(c: MainContext) {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
     if (!s || !lead?.branch) return ''
-    const base = baseCommit.get(lead.id) ?? 'HEAD~1'
+    const base = lead.base ?? 'HEAD~1'
     return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
   })
   ipc.handle('fleet:mergeReady', (_e, projectId: string) => mergeReady(projectId))

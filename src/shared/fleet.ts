@@ -27,6 +27,8 @@ export interface FleetMember {
   lastOutputAt?: number
   /** a worker's uncommitted work in its worktree, sampled while it works (main/live.ts) */
   diff?: LiveDiff
+  /** a Lead's: the commit its integration branch started from, what Ready's counts and fleet:diff are measured against */
+  base?: string
 }
 
 export interface FleetTask {
