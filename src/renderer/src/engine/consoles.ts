@@ -2,6 +2,7 @@ import type { BoardNode, ConsoleData, Role } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { invoke, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
+import { setActivity } from './activity'
 
 // Console lifecycle shared by the board, the composer, the orchestrator, voice and loops.
 
@@ -16,7 +17,9 @@ export function wireConsoleEvents() {
   wired = true
   const app = useApp.getState
   on('pty:status', (id: string, status) => app().setStatus(id, status))
+  on('pty:activity', (id: string, text: string | null) => setActivity(id, text))
   on('pty:exit', (id: string) => {
+    setActivity(id, null)
     app().setLive(id, false)
     app().setStatus(id, 'exited')
   })
