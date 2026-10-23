@@ -13,6 +13,7 @@ import { renderMarkdown, sanitizeHtml } from './workbench/markdown'
 import { renderMarkdown as renderDocMarkdown } from './studios/docs/render'
 import { handoff } from './engine/handoff'
 import { sendGoal, useFleet } from './engine/fleet'
+import { useAway } from './fleet/away'
 import { useCi, applyCiStatus, ciItems, fixCi } from './workbench/ciStore'
 import { useFeedback, applyFeedback, routeFeedback } from './workbench/prFeedback'
 import { boardContext } from './voice/helm/context'
@@ -38,6 +39,8 @@ if ((window as any).fb?.devtools === true) {
     // the board's mirror of the team. Writable, so a Ready card can be put up without running a
     // team: useFleet.setState({ state }) and the Inbox rebuilds from it.
     useFleet,
+    // "while you were away": since (when you left) and summary (the card); writable, like useFleet
+    useAway,
     NODE_DEFS,
     PANELS,
     DRAWERS,
