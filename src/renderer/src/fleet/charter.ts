@@ -1,5 +1,6 @@
 // Making a charter: the prompt fragment both producers send, the standalone draft for a door that
-// never consults Oracle, and the check that what a charter cites is really in the repo, or in what is known about it.
+// never consults Oracle, and the check that what a charter cites is really in the repo, or in what is
+// known about it (fleet/knowledge.ts).
 // Through Oracle the charter rides the pass that is already happening (voice/helm/helm.ts), so this
 // file's own model call is the exception, not the common path.
 // And the gate: every door that gives work to a team puts its charter up here and waits for the user.

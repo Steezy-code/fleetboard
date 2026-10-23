@@ -117,7 +117,7 @@ Seven things the spec implies that no task's happy path exercises, most likely t
   export const PROVENANCE_LABEL: Record<Provenance, string>
   ```
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // Review Focus 1
@@ -156,12 +156,12 @@ test('a charter edit is a typed delta per field, and an unedited charter has non
 test('deltas are kept newest last and capped', () => {})
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
+- [x] **Step 2: Run them and watch them fail**
 
 Run: `node --enable-source-maps --import ./test/support/register.mjs --test test/unit/knowledge.test.ts`
 Expected: FAIL — cannot find module `src/shared/knowledge`.
 
-- [ ] **Step 3: Write `src/shared/knowledge.ts`**
+- [x] **Step 3: Write `src/shared/knowledge.ts`**
 
 `coerceKnowledge` follows `coerceCharter`'s defensive shape: strings clamped, wrong types dropped, never throws. `coerceLearned` builds the key as `topic.slug(key || text)` and sets provenance by the rule in the Global Constraints.
 
@@ -171,9 +171,9 @@ Expected: FAIL — cannot find module `src/shared/knowledge`.
 
 `charterDeltas` compares the charter as the gate first showed it with the one confirmed, one delta per changed field; list fields as added and removed entries rather than before and after, so a later reader can compare like with like across goals.
 
-- [ ] **Step 4: Run them and watch them pass**
+- [x] **Step 4: Run them and watch them pass**
 
-- [ ] **Step 5: Commit** — `git commit -m "Repo knowledge says where each fact came from, and yours win"`
+- [x] **Step 5: Commit** — `git commit -m "Repo knowledge says where each fact came from, and yours win"`
 
 ---
 
@@ -201,11 +201,11 @@ What it reads, every fact `provenance: 'repo'` with its `source`:
 
 Each file is read with a size cap and its own `try`: one unreadable or malformed file costs its own facts and nothing else.
 
-- [ ] **Step 1: Write the failing tests** — a temp repo with a pnpm lockfile, scripts, `test/`, a `CODEOWNERS`, an `.editorconfig` and a workflow: the commands are `pnpm test` and `pnpm run lint`, the owner rule is there, every fact is `repo` with a forward-slash source. An empty folder and a malformed `package.json` read as no facts without throwing. (Review Focus 7: a source is never written with `\`.)
-- [ ] **Step 2: Run them and watch them fail**
-- [ ] **Step 3: Write `readRepo` and the handler.** The handler answers null for a root outside `allowed()` (`src/main/roots.ts`), as the filesystem handlers do: the renderer names the folder, and nothing else should be read on its say-so.
-- [ ] **Step 4: Run them and watch them pass**
-- [ ] **Step 5: Commit** — `git commit -m "How a repo checks itself is read from the repo"`
+- [x] **Step 1: Write the failing tests** — a temp repo with a pnpm lockfile, scripts, `test/`, a `CODEOWNERS`, an `.editorconfig` and a workflow: the commands are `pnpm test` and `pnpm run lint`, the owner rule is there, every fact is `repo` with a forward-slash source. An empty folder and a malformed `package.json` read as no facts without throwing. (Review Focus 7: a source is never written with `\`.)
+- [x] **Step 2: Run them and watch them fail**
+- [x] **Step 3: Write `readRepo` and the handler.** The handler answers null for a root outside `allowed()` (`src/main/roots.ts`), as the filesystem handlers do: the renderer names the folder, and nothing else should be read on its say-so.
+- [x] **Step 4: Run them and watch them pass**
+- [x] **Step 5: Commit** — `git commit -m "How a repo checks itself is read from the repo"`
 
 ---
 
@@ -226,13 +226,17 @@ Each file is read with a size cap and its own `try`: one unreadable or malformed
   export function learnKnowledge(): { promise: Promise<{ ok: boolean; added: number; error?: string }>; cancel: () => void }
   export function changeKnowledge(f: (k: RepoKnowledge) => RepoKnowledge): void
   export function recordCharterEdits(drafted: Charter, confirmed: Charter): void
+  /** an engine (features/fleet.ts): read each board's repo as it opens */
+  export function watchKnowledge(): void
   ```
 
-- [ ] **Step 1: Write the failing tests** — a read lands in `project.extras.knowledge`; a second call within `READ_EVERY_MS` does not read again; a read that never answers gives up at the timeout with the knowledge as it was; (Review Focus 6) a read or a model pass whose project closed or changed meanwhile writes nothing; a model pass that fails keeps the repo facts and says why.
-- [ ] **Step 2: Run them and watch them fail**
-- [ ] **Step 3: Write it.** Every write checks the project id it started with. A read that changes nothing does not touch the board, so it costs no save.
-- [ ] **Step 4: Run them and watch them pass**
-- [ ] **Step 5: Commit** — `git commit -m "Repo knowledge is kept with the board and read again when stale"`
+When a board was last read is kept in memory, not on the board: it is this session's freshness, and saving it would make every read a save. `readAt` on the board is the last read that changed something.
+
+- [x] **Step 1: Write the failing tests** — a read lands in `project.extras.knowledge`; a second call within `READ_EVERY_MS` does not read again; a read that never answers gives up at the timeout with the knowledge as it was; (Review Focus 6) a read or a model pass whose project closed or changed meanwhile writes nothing; a model pass that fails keeps the repo facts and says why.
+- [x] **Step 2: Run them and watch them fail**
+- [x] **Step 3: Write it.** Every write checks the project id it started with. A read that changes nothing does not touch the board, so it costs no save.
+- [x] **Step 4: Run them and watch them pass**
+- [x] **Step 5: Commit** — `git commit -m "Repo knowledge is kept with the board and read again when stale"`
 
 ---
 
@@ -249,7 +253,7 @@ Each file is read with a size cap and its own `try`: one unreadable or malformed
 - `verifyEvidence(c, exists, facts?: RepoKnowledge)`: an assumption whose `from` is `fact:<key>` is known when `citable` finds the key, with `from` the fact's source and `fact` its key; otherwise a guess. A `fact` the model wrote is ignored and the line checked as a path.
 - `citeKnownCheck(c, k)`: when the charter's done-when is a check the repo was read to have, and no assumption already rests on that fact, a known assumption says so — which is what makes confidence move with the knowledge even when the model cited nothing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 test('an assumption citing a fact read from the repo is known, with the fact as its citation', () => {})
@@ -262,10 +266,10 @@ test('the draft prompt carries the facts, and the fragment says how to cite one'
 test('a goal in a repo with no knowledge still reaches the gate', async () => {})
 ```
 
-- [ ] **Step 2: Run them and watch them fail**
-- [ ] **Step 3: Implement.** The gate refreshes the knowledge first (bounded; a failure is no knowledge), then `citeKnownCheck`, then `verifyEvidence` with it. The card shows a fact-backed assumption's source with the fact's text as its title.
-- [ ] **Step 4: Run the charter suites** — `test/unit/charter.test.ts`, `charter-gate.test.ts`, `knowledge-charter.test.ts`: PASS, the existing ones unchanged.
-- [ ] **Step 5: Commit** — `git commit -m "A charter's known lines can rest on what the repo knowledge says"`
+- [x] **Step 2: Run them and watch them fail**
+- [x] **Step 3: Implement.** The gate refreshes the knowledge first (bounded; a failure is no knowledge), then `citeKnownCheck`, then `verifyEvidence` with it. The card shows a fact-backed assumption's source, marked as resting on the repo knowledge. `draftCharter` uses the knowledge already on the board rather than reading first: it must start its run, and put its stop button up, at once (the plan-1 tests pin that), and `watchKnowledge` has read the repo when the board opened.
+- [x] **Step 4: Run the charter suites** — `test/unit/charter.test.ts`, `charter-gate.test.ts`, `knowledge-charter.test.ts`: PASS, the existing ones unchanged.
+- [x] **Step 5: Commit** — `git commit -m "A charter's known lines can rest on what the repo knowledge says"`
 
 ---
 
@@ -276,11 +280,11 @@ test('a goal in a repo with no knowledge still reaches the gate', async () => {}
 - Modify: `src/renderer/src/voice/helm/helm.ts`
 - Test: `test/unit/knowledge-charter.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — `boardContext()` contains `KNOWN ABOUT THIS REPO` with each fact's key and provenance, and says so plainly when nothing is known yet; `helmPrompt` lists the panel.
-- [ ] **Step 2: Run them and watch them fail**
-- [ ] **Step 3: Implement.** The section is part of the fixed text, ahead of console tails, and capped, so the snapshot stays under its limit. The read runs alongside `git:status` in the same `Promise.all`, so Oracle waits for nothing extra.
-- [ ] **Step 4: Run them and watch them pass**
-- [ ] **Step 5: Commit** — `git commit -m "Oracle answers from the repo knowledge"`
+- [x] **Step 1: Write the failing tests** — `boardContext()` contains `KNOWN ABOUT THIS REPO` with each fact's key and provenance, and says so plainly when nothing is known yet; `helmPrompt` lists the panel.
+- [x] **Step 2: Run them and watch them fail**
+- [x] **Step 3: Implement.** The section is part of the fixed text, ahead of console tails, and capped, so the snapshot stays under its limit. The read runs alongside `git:status` in the same `Promise.all`, so Oracle waits for nothing extra.
+- [x] **Step 4: Run them and watch them pass**
+- [x] **Step 5: Commit** — `git commit -m "Oracle answers from the repo knowledge"`
 
 ---
 
@@ -290,11 +294,11 @@ test('a goal in a repo with no knowledge still reaches the gate', async () => {}
 - Modify: `src/renderer/src/fleet/charter.ts` — the gate's queue keeps the charter as first shown
 - Test: `test/unit/knowledge-charter.test.ts`
 
-- [ ] **Step 1: Write the failing tests** — confirming a charter whose `understood` was edited and whose question was answered records one delta per field in the knowledge, with the request; confirming one unedited records nothing; dismissing records nothing.
-- [ ] **Step 2: Run them and watch them fail**
-- [ ] **Step 3: Implement.** Recorded at confirm, from the charter as the gate showed it — after evidence was checked and a follow-up's exclusions cleared — so a delta is only ever something the user did.
-- [ ] **Step 4: Run them and watch them pass**
-- [ ] **Step 5: Commit** — `git commit -m "Every edit to a charter is kept, field by field"`
+- [x] **Step 1: Write the failing tests** — confirming a charter whose `understood` was edited and whose question was answered records one delta per field in the knowledge, with the request; confirming one unedited records nothing; dismissing records nothing.
+- [x] **Step 2: Run them and watch them fail**
+- [x] **Step 3: Implement.** Recorded at confirm, from the charter as the gate showed it — after evidence was checked and a follow-up's exclusions cleared — so a delta is only ever something the user did.
+- [x] **Step 4: Run them and watch them pass**
+- [x] **Step 5: Commit** — `git commit -m "Every edit to a charter is kept, field by field"`
 
 ---
 
@@ -307,17 +311,17 @@ test('a goal in a repo with no knowledge still reaches the gate', async () => {}
 
 The panel groups facts by topic. Every fact shows its provenance and source and can be edited or deleted; an inferred one can also be confirmed as right. A fact can be added by hand. "Rebuild" runs the read and the model pass, saying it is one call to the planner CLI. Below the facts, the charter edits, newest first, each as its field and what changed, with a way to clear them.
 
-- [ ] **Step 1: Write the failing e2e test** — open a repo with a `package.json` test script; open the panel; the `npm test` fact is there marked as read from the repo; edit its text; force a read; the edit stands, now marked as yours.
-- [ ] **Step 2: Run it and watch it fail** — `npm run build && FB_E2E_HEADLESS=1 npm run test:e2e:one -- test/e2e/knowledge.test.ts`
-- [ ] **Step 3: Write the panel, and reach it from the Tools menu, Oracle's panel list and the spoken panel aliases.**
-- [ ] **Step 4: Run it and watch it pass**
-- [ ] **Step 5: Commit** — `git commit -m "The repo knowledge panel: every fact, where it came from, and your edits"`
+- [x] **Step 1: Write the failing e2e test** — open a repo with a `package.json` test script; open the panel; the `npm test` fact is there marked as read from the repo; edit its text; force a read; the edit stands, now marked as yours.
+- [x] **Step 2: Run it and watch it fail** — `npm run build && FB_E2E_HEADLESS=1 npm run test:e2e:one -- test/e2e/knowledge.test.ts`
+- [x] **Step 3: Write the panel, and reach it from the Tools menu, Oracle's panel list and the spoken panel aliases.** The e2e test reads the knowledge through `window.__fleetboard.knowledge`, beside the `useCharter` handle the charter tests already use.
+- [x] **Step 4: Run it and watch it pass**
+- [x] **Step 5: Commit** — `git commit -m "The repo knowledge panel: every fact, where it came from, and your edits"`
 
 ---
 
 ### Task 8: The whole thing
 
-- [ ] `npm run typecheck`, `npm run typecheck:strict`, `npm run lint`, `npm test`, and the e2e suite headless (`FB_E2E_HEADLESS=1 npm run test:e2e`): all pass.
+- [x] `npm run typecheck`, `npm run typecheck:strict`, `npm run lint`, `npm test`, and the e2e suite headless (`FB_E2E_HEADLESS=1 npm run test:e2e`): all pass.
 
 ---
 
