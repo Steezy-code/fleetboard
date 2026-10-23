@@ -233,8 +233,12 @@ const VIEWABLE_ON_WINDOWS = /\.(md|markdown|txt|text|log|csv|tsv|json|jsonl|ya?m
 export function opensSafely(p: string, platform: NodeJS.Platform = process.platform): boolean {
   try {
     const st = fs.statSync(p)
-    // a folder opens in the file manager, unless it is one macOS runs: an app bundle and its kin
-    if (st.isDirectory()) return !RUNNABLE.test(p) && !BUNDLE.test(p)
+    // a folder opens in the file manager, unless it is one macOS runs: an app bundle and its kin,
+    // by its own name or the name a link to it hides (statSync follows the link, and so does open)
+    if (st.isDirectory()) {
+      const real = fs.realpathSync(p)
+      return ![p, real].some((x) => RUNNABLE.test(x) || BUNDLE.test(x))
+    }
     if (!st.isFile()) return false
     if (platform === 'win32') return VIEWABLE_ON_WINDOWS.test(p)
     if (st.mode & 0o111) return false

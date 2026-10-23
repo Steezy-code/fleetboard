@@ -1026,7 +1026,8 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       return text(`${w.name} dismissed.`)
     }
     case 'fleet_ask_user': {
-      const options = (a.options ?? []).map(String).slice(0, 4)
+      // trimmed as the phone trims its answer, which must equal one of them
+      const options = (a.options ?? []).map((o: unknown) => String(o).trim()).filter(Boolean).slice(0, 4)
       const notes = Array.isArray(a.notes) ? a.notes.slice(0, options.length).map((n: unknown) => String(n ?? '').slice(0, 160)) : undefined
       const rec = a.recommended == null ? -1 : options.findIndex((o: string) => o.toLowerCase() === String(a.recommended).trim().toLowerCase())
       const ask: FleetAsk = { id: uid('ask'), from: m.id, question: String(a.question), options, at: Date.now(), ...(notes?.some(Boolean) ? { notes } : {}), ...(rec >= 0 ? { recommended: rec } : {}) }
