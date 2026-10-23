@@ -263,7 +263,8 @@ async function prFeedback(cwd: string): Promise<PrFeedbackResult> {
 
 /** The failed steps' log, cleaned up and cut to where it failed (the cleanup steps after it are noise). */
 export function cleanLog(raw: string, maxLines = 160): string {
-  let lines = stripAnsi(raw)
+  // the failure is at the end, and the whole log can be tens of megabytes: read its last megabyte
+  let lines = stripAnsi(raw.length > 1_000_000 ? raw.slice(-1_000_000) : raw)
     .split('\n')
     .map((l) => {
       // "job<TAB>step<TAB>2026-10-19T22:01:01.1234567Z text"

@@ -269,7 +269,12 @@ async function show(cwd: string, hash: string): Promise<GitResult<{ diff: string
   return { ok: true, diff: r.stdout.length > MAX_DIFF ? r.stdout.slice(0, MAX_DIFF) : r.stdout }
 }
 
-async function commit(cwd: string, message: string, files?: { path: string; from?: string }[] | null): Promise<GitResult<{ hash: string; count: number }>> {
+/**
+ * `files` null commits everything, which the Git card does when every file is ticked. `shown` is the
+ * list that was on screen then: an agent may have written more files since (a new .env.local), and
+ * "everything" must not grow past what the user looked at, so the commit is refused if it would.
+ */
+async function commit(cwd: string, message: string, files?: { path: string; from?: string }[] | null, shown?: string[]): Promise<GitResult<{ hash: string; count: number }>> {
   if (!validCwd(cwd)) return fail('Folder not found')
   const msg = (message ?? '').trim()
   if (!msg) return fail('Write a commit message first')
@@ -285,6 +290,13 @@ async function commit(cwd: string, message: string, files?: { path: string; from
     if (r.code !== 0) return fail(cleanErr(r, 'git commit failed'))
     count = files.length
   } else {
+    if (Array.isArray(shown)) {
+      const now = await status(cwd)
+      if (!now.ok) return now
+      const seen = new Set(shown)
+      const added = now.status.files.map((f) => f.path).filter((p) => !seen.has(p))
+      if (added.length) return fail(`${added.length === 1 ? `${added[0]} changed` : `${added.length} more files changed`} since you looked. Check the list and commit again.`)
+    }
     const add = await git(root, ['add', '-A'])
     if (add.code !== 0) return fail(cleanErr(add, 'git add failed'))
     const r = await git(root, ['commit', '-F', '-'], { input: msg, timeout: 60000 })

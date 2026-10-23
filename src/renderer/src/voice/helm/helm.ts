@@ -3,7 +3,7 @@
 // actions, a panel), and runs the one the user picks. The card itself is HelmCard.tsx.
 import { create } from 'zustand'
 import { coerceCharter } from '@shared/charter'
-import { useApp } from '../../state/store'
+import { allConsoles, useApp } from '../../state/store'
 import { extractJson, runCli, uid } from '../../lib/api'
 import { activeLead, sendGoal } from '../../engine/fleet'
 import { playbookById } from '../../playbooks/catalog'
@@ -13,7 +13,7 @@ import { setVoice, useThread, useVoice } from '../thread'
 import { ACTION_SCHEMA, doneThinking, plan, reply, type Source } from '../planner'
 import { boardContext, playbookCatalog } from './context'
 import { ciItems, fixCi, useCi } from '../../workbench/ciStore'
-import { routeFeedback, useFeedback } from '../../workbench/prFeedback'
+import { autoApproves, routeFeedback, useFeedback } from '../../workbench/prFeedback'
 import { startBrainstorm } from './brainstorm'
 import { CHARTER_FIELDS } from '../../fleet/charter'
 
@@ -71,7 +71,9 @@ export const dismissHelm = () => useHelm.setState({ card: null })
 export const HELM_PANELS = ['ci', 'missionMap', 'loops', 'memory', 'knowledge', 'documents', 'diagrams', 'code', 'markdown', 'usage', 'settings', 'sweep', 'presets', 'git', 'chat', 'orchestrator', 'accounts', 'skills']
 
 /** Read-only playbooks Helm may start without a click. */
-const AUTO_PLAYBOOKS = ['morning-sweep', 'pr-review', 'db-safety']
+// only what starts no agents: the PR review and database playbooks are review-only in what they ask
+// for, but each starts a Lead and reviewers, which spends and puts a charter in front of the user
+const AUTO_PLAYBOOKS = ['morning-sweep']
 
 // ---------------------------------------------------------------- prompt
 
@@ -106,7 +108,7 @@ Rules:
 - Prefer a playbook when one fits. Prefer "send" to an existing console when an agent on the board is already working on that thing or owns that area. Use "team" for custom multi-step work no playbook fits.
 - Only use console names, playbook ids and panels that exist. Never add kill/close/delete steps the user did not ask for.
 - At most 3 options, best first, each meaningfully different. Leave options empty when the reply fully answers.
-- "auto": the index of the option to run right away, ONLY when the request is unambiguous AND that option is non-destructive (a panel, a send with submit false, or a read-only playbook: morning-sweep, pr-review, db-safety). Never auto for kill/close/merge, team or feature work. Otherwise null.
+- "auto": the index of the option to run right away, ONLY when the request is unambiguous AND that option only shows something (a panel) or is the morning-sweep playbook (it starts no agents). Never auto for a send or any other playbook. Never auto for kill/close/merge, team or feature work. Otherwise null.
 
 Playbooks (id · name · when to use · inputs; "?" = optional):
 ${playbookCatalog()}
@@ -204,7 +206,8 @@ function githubTarget(what: string, target: string) {
 /** Can this option run without a click? (enforced here, whatever the model said) */
 export function autoSafe(o: HelmOption): boolean {
   if (o.kind === 'panel') return true
-  if (o.kind === 'send') return o.submit === false && resolveRefs(o.targets ?? []).ids.length <= 6
+  // not even a message left unsent: Oracle's words come from a snapshot that holds other people's
+  // text, and a typed draft is submitted by the next Enter anything presses in that console
   if (o.kind === 'playbook') return AUTO_PLAYBOOKS.includes(o.playbook!.id) && !missingInputs(o).length
   return false
 }
@@ -333,6 +336,35 @@ export async function runHelmOption(i: number | null = primaryIndex()) {
   await execOption(o, card.request)
 }
 
+/**
+ * Oracle's words are about to be submitted into a console that acts on them without a model or a
+ * person in between: a shell or command console (it runs the line), or an agent that approves its
+ * own prompts. Those are asked about with the text in full, whatever the card said.
+ */
+async function mayRunIn(actions: Action[]): Promise<boolean> {
+  const risky = new Set<string>()
+  let text = ''
+  for (const a of actions) {
+    if (a.type !== 'send' || !a.submit) continue
+    for (const id of resolveRefs(a.targets).ids) {
+      const c = allConsoles().find((x) => x.id === id)
+      if (!c) continue
+      if (c.data.agentId === 'shell' || c.data.command || autoApproves(id)) {
+        risky.add(String(c.data.name ?? id))
+        text ||= a.text
+      }
+    }
+  }
+  if (!risky.size) return true
+  const names = [...risky]
+  return useApp.getState().confirm({
+    title: `Send this to ${names.join(', ')}?`,
+    body: `${names.length === 1 ? 'It runs' : 'They run'} what it is sent without asking: “${text.length > 300 ? text.slice(0, 299) + '…' : text}”`,
+    confirm: 'Send',
+    danger: true
+  })
+}
+
 async function execOption(o: HelmOption, request: string) {
   const app = useApp.getState()
   try {
@@ -362,9 +394,13 @@ async function execOption(o: HelmOption, request: string) {
         setVoice({ reply: line, captionUntil: Date.now() + 6000 })
         return
       }
-      case 'send':
-        return await plan([{ type: 'send', targets: o.targets!, text: o.text!, submit: o.submit !== false }], '', request, false)
+      case 'send': {
+        const send: Action = { type: 'send', targets: o.targets!, text: o.text!, submit: o.submit !== false }
+        if (!(await mayRunIn([send]))) return
+        return await plan([send], '', request, false)
+      }
       case 'actions':
+        if (!(await mayRunIn(o.actions!))) return
         return await plan(o.actions!, '', request, false)
       case 'panel':
         return await plan([{ type: 'openPanel', name: o.panel! }], '', request, false)

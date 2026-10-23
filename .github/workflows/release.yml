@@ -1,32 +1,46 @@
 name: Release
 
-# Push a tag like v0.2.0 (or v0.2.0-win.1 for a pre-release) and the Windows installer is built on
-# Windows and attached to a GitHub Release of that name.
+# Push a tag like v0.2.0 (or v0.2.0-win.1 for a pre-release) on a master commit and the Windows
+# installer is built on Windows and attached to a new GitHub Release of that name.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to build and release (it must exist)
+        description: Tag to build and release (it must exist and be on master)
         required: true
 
-# no workflow-wide write: only the job that publishes the release gets it
 permissions:
   contents: read
 
+# a tag push and a manual run for the same tag must not race to create the release
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   windows:
+    # a manual run uses master's copy of this file, never a branch's
+    if: github.event_name == 'push' || github.ref == 'refs/heads/master'
     runs-on: windows-latest
     timeout-minutes: 40
     permissions:
-      contents: write
+      contents: write # only the last step uses it (gh release create)
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          ref: refs/tags/${{ env.TAG }}
+          fetch-depth: 0 # origin/master, for the check below
+          persist-credentials: false # no token in .git/config while npm ci and the build run
+
+      - name: The tag is a version tag on master
+        shell: bash
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::$TAG is not a vX.Y.Z tag"; exit 1; }
+          git merge-base --is-ancestor HEAD origin/master || { echo "::error::$TAG is not on master"; exit 1; }
 
       - uses: actions/setup-node@v7
         with:
@@ -34,16 +48,24 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
       - name: Version from the tag
         shell: bash
         run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
 
+      # bash -e, not pwsh: pwsh fails a step only on its last command's exit code, so a failed build
+      # went unnoticed as long as electron-builder then found something to pack
       - name: Build the installer
+        shell: bash
         run: |
           npx electron-vite build
           npx electron-builder --win --x64 --publish never
 
+      # One call: gh creates it as a draft, uploads, then publishes (which also works with immutable
+      # releases on). It fails if a release for this tag exists, so a published installer is never
+      # replaced under the same name.
       - name: Publish the release
         shell: bash
         env:
@@ -51,5 +73,6 @@ jobs:
         run: |
           pre=""
           case "$TAG" in *-*) pre="--prerelease" ;; esac
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" $pre --title "Fleetboard $TAG" --notes "Windows installer: download **Fleetboard-Setup-${TAG#v}.exe** below and run it (it installs for your user only; Windows SmartScreen may warn because the installer isn't code-signed: More info → Run anyway). Then install and sign in to your agent CLIs (Claude Code, Codex, Gemini…) in Windows."
-          gh release upload "$TAG" release/*.exe --clobber
+          gh release create "$TAG" release/*.exe -R "$GITHUB_REPOSITORY" --verify-tag $pre \
+            --title "Fleetboard $TAG" \
+            --notes "Windows installer: download **Fleetboard-Setup-${TAG#v}.exe** below and run it (it installs for your user only; Windows SmartScreen may warn because the installer isn't code-signed: More info → Run anyway). Then install and sign in to your agent CLIs (Claude Code, Codex, Gemini…) in Windows."

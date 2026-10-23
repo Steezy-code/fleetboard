@@ -36,13 +36,16 @@ export const validProject = (v: unknown): v is Project =>
   v.workspaces.length > 0 &&
   v.workspaces.every((w: unknown) => isObj(w) && typeof w.id === 'string' && Array.isArray(w.nodes))
 
-type Read<T> = { ok: true; value: T } | { ok: false; missing: boolean }
+type Read<T> = { ok: true; value: T } | { ok: false; missing: boolean; error?: NodeJS.ErrnoException }
 function readValid<T>(file: string, valid: (v: unknown) => v is T): Read<T> {
   let text: string
   try {
     text = fs.readFileSync(file, 'utf8')
-  } catch {
-    return { ok: false, missing: true }
+  } catch (e) {
+    // Only "not there" is "nothing saved yet". EACCES, a Windows sharing lock, EMFILE or EIO is a file
+    // that may be perfectly good: it must be neither set aside nor replaced by an empty one.
+    const err = e as NodeJS.ErrnoException
+    return err?.code === 'ENOENT' ? { ok: false, missing: true } : { ok: false, missing: false, error: err }
   }
   try {
     const v = JSON.parse(text)
@@ -84,6 +87,8 @@ function load<T>(file: string, what: string, prefix: string, valid: (v: unknown)
   const r = readValid(file, valid)
   if (r.ok) return r.value
   if (r.missing) return null
+  if (r.error)
+    throw new Error(`${what === 'app' ? 'The settings file' : "This board's file"} could not be read (${r.error.code ?? r.error.message}). It was left untouched and not opened; try again.`)
   const corruptCopy = setAside(file)
   const snap = newestValidSnapshot(prefix, valid)
   if (snap) writeJsonAtomic(file, snap.value)
@@ -92,7 +97,18 @@ function load<T>(file: string, what: string, prefix: string, valid: (v: unknown)
 }
 
 const appFile = path.join(dirs.root, 'app.json')
-let app: AppFile = load(appFile, 'app', 'app', validApp) ?? { schema: SCHEMA_VERSION, settings: DEFAULT_SETTINGS, projects: [], global: {} }
+// app.json there but unreadable at startup: run on defaults and never write over it this session
+let appUnreadable = false
+let app: AppFile = (() => {
+  try {
+    return load(appFile, 'app', 'app', validApp)
+  } catch (e) {
+    appUnreadable = true
+    logError('store', e)
+    recovered({ what: 'app', corruptCopy: appFile })
+    return null
+  }
+})() ?? { schema: SCHEMA_VERSION, settings: DEFAULT_SETTINGS, projects: [], global: {} }
 app.settings = { ...DEFAULT_SETTINGS, ...app.settings }
 app.projects = (app.projects ?? []).filter((m) => isObj(m) && typeof m.id === 'string' && typeof m.path === 'string')
 app.global = isObj(app.global) ? app.global : {}
@@ -106,6 +122,7 @@ function prune(prefix: string, keep: number) {
 }
 
 function saveApp() {
+  if (appUnreadable) return
   writeJsonAtomic(appFile, app)
   // settings and the project list deserve snapshots too
   const now = Date.now()

@@ -135,8 +135,11 @@ export function HelmCard() {
 
 function OptionRow({ o, i, primary, ran }: { o: HelmOption; i: number; primary: boolean; ran: boolean }) {
   const missing = o.kind === 'playbook' ? missingInputs(o) : []
-  const detail = o.detail || (missing.length ? `Needs: ${missing.map((m) => m.label).join(', ')}` : '')
-  const title = o.kind === 'actions' ? o.actions!.filter((a) => a.type !== 'say').map(describe).join(' → ') : o.kind === 'send' ? `${o.submit === false ? 'Type' : 'Send'} to ${o.targets!.join(', ')}: ${o.text}` : o.kind === 'team' ? o.goal : detail
+  // What runs is what the card shows: the model's own label and description sit beside it, but a
+  // click (or Enter) does the payload, which comes from a snapshot holding other people's text.
+  const payload = o.kind === 'actions' ? o.actions!.filter((a) => a.type !== 'say').map(describe).join(' → ') : o.kind === 'send' ? `${o.submit === false ? 'Type' : 'Send'} to ${o.targets!.join(', ')}: “${o.text}”` : o.kind === 'team' ? o.goal! : ''
+  const detail = payload || o.detail || (missing.length ? `Needs: ${missing.map((m) => m.label).join(', ')}` : '')
+  const title = payload ? o.detail || payload : detail
   const editable = o.kind === 'team' || o.kind === 'send'
   return (
     <div className={`helm-opt ${primary ? 'primary' : ''} ${ran ? 'ran' : ''}`}>

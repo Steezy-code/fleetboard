@@ -82,3 +82,8 @@ test('an answer given on a card types nothing unless the screen still makes that
   assert.deepEqual(await ptys.answer('c2', no.answer), { ok: true })
   await until(() => events('startup-answer').length > answered)
 })
+
+test('what the board pastes is text only: no Enter, Ctrl-C or escape rides inside it', async () => {
+  const { pasteText } = await import('../../src/main/pty')
+  assert.equal(pasteText('a\rb\x03c\x1b[201~d\ne\tf'), 'abc[201~d e f')
+})
