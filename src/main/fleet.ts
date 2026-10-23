@@ -663,6 +663,30 @@ export function excludedMergeRefusal(touched: string[], wontTouch: string[] | un
 const str = (description: string) => ({ type: 'string', description })
 const strArr = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
 
+type ArgSchema = { properties?: Record<string, { type?: string; items?: { type?: string } }>; required?: string[] }
+
+/**
+ * A tool call's arguments, held to the tool's own schema before any case reads them. They come from a
+ * model, and inputSchema is only advertised (tools/list), never checked: a string where an array was
+ * promised has a length, so it got past every `?? []` and then threw at `owns.join` in the worker's
+ * brief, after the worker's console had started (trustedCharter coerces the charter for the same
+ * reason). A string field becomes a string, a string-list field a list of strings (a lone value a list
+ * of one), and numbers pass through, since each use already guards them. A field that is absent or
+ * null stays absent, and a key the schema does not name is dropped.
+ */
+export function coerceArgs(schema: ArgSchema | undefined, raw: unknown): Record<string, unknown> {
+  const given = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const out: Record<string, unknown> = {}
+  for (const [k, p] of Object.entries(schema?.properties ?? {})) {
+    const v = given[k]
+    if (v == null) continue
+    if (p.type === 'string') out[k] = String(v)
+    else if (p.type === 'array' && p.items?.type === 'string') out[k] = (Array.isArray(v) ? v : [v]).map((x) => String(x ?? ''))
+    else out[k] = v
+  }
+  return out
+}
+
 const TOOLS: ToolDef[] = [
   {
     name: 'fleet_plan',
@@ -787,6 +811,9 @@ export function toolRoles(name: string): FleetRole[] | null {
   return TOOLS.find((t) => t.name === name)?.roles ?? null
 }
 
+/** The arguments a tool declares (see coerceArgs), or undefined for a name that is not a fleet tool. */
+export const toolSchema = (name: string): ArgSchema | undefined => TOOLS.find((t) => t.name === name)?.inputSchema
+
 /** Why `role` may not call `name`, or null when it may. Says what the caller can use instead. */
 export function toolDenial(name: string, role: FleetRole): string | null {
   const roles = toolRoles(name)
@@ -799,12 +826,18 @@ export function toolDenial(name: string, role: FleetRole): string | null {
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true })
 
-async function callTool(callerId: string, name: string, a: any, signal?: AbortSignal): Promise<any> {
+async function callTool(callerId: string, name: string, raw: unknown, signal?: AbortSignal): Promise<any> {
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
   const denied = toolDenial(name, m.role)
   if (denied) return fail(denied)
+  const schema = toolSchema(name)
+  const a: any = coerceArgs(schema, raw)
+  // only an absent field: an empty string is a value the model chose. This is what keeps a worker
+  // from being started with no task at all.
+  const missing = (schema?.required ?? []).filter((k) => a[k] == null)
+  if (missing.length) return fail(`Missing ${missing.join(', ')}.`)
   const lead = m.role === 'lead' ? m : m.leadId ? s.members[m.leadId] : undefined
   const team = () => Object.values(s.members).filter((x) => x.leadId === (lead?.id ?? m.id) && x.status !== 'closed')
 
