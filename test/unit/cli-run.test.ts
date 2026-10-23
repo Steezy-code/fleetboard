@@ -64,7 +64,7 @@ test('a prompt far over the command-line limit reaches claude whole (through std
   assert.deepEqual(lastPrint().args, [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-mode', 'default',
-    '--allowedTools', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)'
+    '--allowedTools', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log --oneline -n 40)', 'Bash(git ls-files:*)', 'Bash(git status:*)'
   ])
 })
 
@@ -73,7 +73,7 @@ test('a run allowed to change files says so in full, and only when asked', async
   assert.deepEqual(lastPrint().args, [
     '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-mode', 'acceptEdits',
-    '--allowedTools', 'Bash', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(git ls-files:*)', 'Bash(git status:*)', 'Edit', 'Write'
+    '--allowedTools', 'Bash', 'Read', 'Grep', 'Glob', 'LS', 'Bash(git log --oneline -n 40)', 'Bash(git ls-files:*)', 'Bash(git status:*)', 'Edit', 'Write'
   ])
 })
 

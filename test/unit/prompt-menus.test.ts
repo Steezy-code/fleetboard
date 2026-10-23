@@ -208,3 +208,18 @@ test('Codex: a numbered list typed in the composer is typing, not a menu', async
 test('Codex: a numbered list the user sent, echoed above the reply, is not a menu', async () => {
   assert.equal(detectPrompt(withList(await viewAt('codex-session.cast', 'idle: after reply'), '› say hi')), null)
 })
+
+test('an option that changes the default permission mode for every session is never a button', () => {
+  const card = approvalFor({
+    reason: 'numbered-menu',
+    kind: 'menu',
+    lines: [],
+    question: 'Do you want to proceed?',
+    options: [
+      { label: 'Yes', selected: true },
+      { label: 'Yes, set auto mode as my default permission mode', selected: false },
+      { label: 'No', selected: false }
+    ]
+  })
+  assert.deepEqual(card?.options.map((o) => o.label), ['Allow once', 'Deny'])
+})
