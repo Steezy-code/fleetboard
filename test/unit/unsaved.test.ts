@@ -25,3 +25,19 @@ test('nothing unsaved: no question; something unsaved: asked, and the answer dec
   setUnsaved('skill', null)
   assert.equal(await mayDropUnsaved('Quit'), true, 'saved again: no question')
 })
+
+test('closing the project asks first, and a no keeps it open', async () => {
+  ipc.handle('store:saveProject', () => {})
+  ipc.handle('store:projects', () => [])
+  const project = { schema: 1, id: 'p', name: 'p', path: '/tmp/p', activeWorkspaceId: 'w', lastOpened: 0, extras: {}, workspaces: [{ id: 'w', name: 'W', nodes: [], groups: [], wires: [], ink: [], camera: { x: 0, y: 0, zoom: 1 }, extras: {} }] }
+  useApp.setState({ project: project as never, confirms: [] } as never)
+  setUnsaved('code', 'parser.ts')
+  const closing = useApp.getState().closeProject()
+  await new Promise((r) => setTimeout(r, 0))
+  const c = useApp.getState().confirms[0] as { title: string; resolve: (ok: boolean) => void }
+  assert.equal(c.title, 'Close the project without saving parser.ts?')
+  c.resolve(false)
+  await closing
+  assert.ok(useApp.getState().project, 'still open')
+  setUnsaved('code', null)
+})
