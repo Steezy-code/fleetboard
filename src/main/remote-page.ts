@@ -61,10 +61,18 @@ a.btn { display: inline-flex; align-items: center; text-decoration: none; }
 
 export const PAGE_JS = `'use strict'
 ;(function () {
+  // the secret comes in the link's #fragment: kept for this tab only, and taken out of the address
+  // bar, history and synced tabs, where it would outlive the visit
   var token = location.hash.slice(1)
+  try {
+    if (token) sessionStorage.setItem('fb.token', token)
+    else token = sessionStorage.getItem('fb.token') || ''
+  } catch (e) {}
+  if (location.hash) history.replaceState(null, '', location.pathname)
   var main = document.getElementById('main')
   var busy = false
   var timer = null
+  var dead = false
 
   function el(tag, cls, text) {
     var e = document.createElement(tag)
@@ -201,7 +209,9 @@ export const PAGE_JS = `'use strict'
       return
     }
     api('/api/state').then(function (s) {
-      if (s.httpStatus === 401) { main.textContent = ''; main.appendChild(el('p', 'empty', 'This link is no longer valid. Get a new one in Fleetboard (Settings → Phone Inbox).')); return }
+      // a link that no longer works stops asking: every try counts against this address
+      if (s.httpStatus === 401) { dead = true; clearTimeout(timer); main.textContent = ''; main.appendChild(el('p', 'empty', 'This link is no longer valid. Get a new one in Fleetboard (Settings → Phone Inbox).')); return }
+      if (s.httpStatus === 429) { main.textContent = ''; main.appendChild(el('p', 'empty', 'Too many attempts from this address. Wait a minute.')); return }
       if (s.httpStatus !== 200) return
       if (!busy) render(s)
     }).catch(function () {
@@ -212,6 +222,7 @@ export const PAGE_JS = `'use strict'
   }
   function loop() {
     clearTimeout(timer)
+    if (dead) return
     if (!document.hidden) refresh()
     timer = setTimeout(loop, 2500)
   }
