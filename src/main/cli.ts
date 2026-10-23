@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { CliRunRequest } from '@shared/types'
-import { agentById } from '@shared/agents'
+import { agentById, readOnlyAgent } from '@shared/agents'
 import type { MainContext } from './context'
 import { loginEnv, which } from './env'
 import { profileEnv } from './profiles'
@@ -27,7 +27,8 @@ const READ_ONLY_TOOLS = ['Read', 'Grep', 'Glob', 'LS', 'Bash(git log:*)', 'Bash(
 export function register(ctx: MainContext) {
   ctx.ipc.handle('cli:run', async (_e, req: CliRunRequest) => {
     const settings = ctx.settings()
-    const agentId = req.agentId ?? settings.plannerAgent ?? 'claude'
+    // a run that names no agent is one of the planner's, which reads untrusted text: never a CLI that may write
+    const agentId = req.agentId ?? readOnlyAgent(settings.plannerAgent)
     const agent = agentById(agentId, settings.customAgents)
     if (!agent?.headless) throw new Error(`${agent?.name ?? agentId} has no headless mode`)
     const bin = await which(agent.bin)
@@ -40,7 +41,8 @@ export function register(ctx: MainContext) {
       args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
       if (req.model) args.push('--model', req.model)
       if (req.allowTools) args.push('--permission-mode', 'acceptEdits', '--allowedTools', 'Bash', ...READ_ONLY_TOOLS, 'Edit', 'Write')
-      else args.push('--allowedTools', ...READ_ONLY_TOOLS)
+      // the mode too: allowed tools add to the user's own settings, and a defaultMode of bypass would let anything run
+      else args.push('--permission-mode', 'default', '--allowedTools', ...READ_ONLY_TOOLS)
     } else {
       if (req.prompt.length > MAX_ARG_PROMPT) {
         const msg = `[This prompt is ${Math.round(req.prompt.length / 1000)} KB, too long to pass to ${agent.name} on its command line. Use Claude Code for it, or include less.]`

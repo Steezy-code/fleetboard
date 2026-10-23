@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, Palette, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
-import { AGENTS } from '@shared/agents'
+import { AGENTS, readsOnly } from '@shared/agents'
 import { invoke, on } from '../lib/api'
 import { useApp } from '../state/store'
 import { Modal, Seg, Switch } from '../ui/Modal'
@@ -87,7 +87,8 @@ export default function SettingsPanel({ section }: { section?: string }) {
   const installed = useMemo(() => new Set(agents.filter((a) => a.path).map((a) => a.id)), [agents])
   const allAgents = useMemo(() => [...AGENTS, ...settings.customAgents], [settings.customAgents])
   const installedAgents = allAgents.filter((a) => installed.has(a.id) || a.id === 'shell' || settings.customAgents.some((c) => c.id === a.id))
-  const headless = allAgents.filter((a) => a.headless && installed.has(a.id))
+  // the planner reads console output and PR comments: only a CLI whose headless run can be held to reading
+  const headless = allAgents.filter((a) => a.headless && installed.has(a.id) && readsOnly(a.id))
 
   const go = (id: string) => {
     setActive(id)
@@ -245,7 +246,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
                       {a.name}
                     </option>
                   ))}
-                  {!headless.some((a) => a.id === settings.plannerAgent) && <option value={settings.plannerAgent}>{settings.plannerAgent} (not installed)</option>}
+                  {!headless.some((a) => a.id === settings.plannerAgent) && <option value={settings.plannerAgent}>{settings.plannerAgent} ({readsOnly(settings.plannerAgent) ? 'not installed' : 'cannot run read-only: Claude Code is used'})</option>}
                 </select>
               </div>
               <div className="settings-row">

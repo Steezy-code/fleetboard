@@ -56,3 +56,16 @@ test('no agent can be given a prompt that starts with a dash', () => {
     assert.ok(args.some((x) => x.includes(hostile)), `${a.id} still passes the prompt`)
   }
 })
+
+// The planner, Oracle, loop judges and brainstorms feed a headless run console output and PR
+// comments. Only a CLI whose headless run is held to reading may be given one.
+test('the agents offered for untrusted text run read-only headless, and any other falls back to Claude Code', async () => {
+  const { readsOnly, readOnlyAgent } = await import('../../src/shared/agents')
+  const offered = AGENTS.filter((a) => a.headless && readsOnly(a.id)).map((a) => a.id)
+  assert.deepEqual(offered.sort(), ['claude', 'codex', 'gemini'])
+  const args = (id: string) => AGENTS.find((a) => a.id === id)!.headless!('x')
+  assert.deepEqual(args('codex').slice(0, 4), ['exec', '--skip-git-repo-check', '--sandbox', 'read-only'])
+  assert.deepEqual(args('gemini').slice(0, 2), ['--approval-mode', 'plan'])
+  for (const id of ['aider', 'opencode', 'cursor', 'unknown', undefined]) assert.equal(readOnlyAgent(id), 'claude', String(id))
+  for (const id of offered) assert.equal(readOnlyAgent(id), id)
+})

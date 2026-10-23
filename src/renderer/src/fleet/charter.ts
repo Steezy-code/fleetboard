@@ -13,6 +13,7 @@ import { useApp } from '../state/store'
 import { setVoice, useVoice } from '../voice/thread'
 import { extractJson, invoke, runCli } from '../lib/api'
 import { currentKnowledge, recordCharterEdits, refreshKnowledge } from './knowledge'
+import { readOnlyAgent } from '@shared/agents'
 
 /**
  * The charter's JSON and the rules a model writes it by. One text, sent by Oracle inside its `team`
@@ -61,7 +62,7 @@ export async function draftCharter(request: string, procedure?: string): Promise
   if (!app.project) return coerceCharter(null, request)
   // what is already stored, not a fresh read: the draft is the wait the user sees, and the board's
   // repo was read when it opened (watchKnowledge). The gate reads again before it checks the citations.
-  const run = runCli({ prompt: draftPrompt(request, procedure, currentKnowledge()), cwd: app.project.path, agentId: app.settings.plannerAgent || undefined })
+  const run = runCli({ prompt: draftPrompt(request, procedure, currentKnowledge()), cwd: app.project.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
   // the same thinking orb and stop button a planner call gets: this one used to run with nothing on screen
   setVoice({ phase: 'thinking', cancelThinking: () => run.cancel() })
   let timer = 0

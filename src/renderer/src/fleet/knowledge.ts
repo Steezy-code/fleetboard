@@ -6,6 +6,7 @@ import type { Charter } from '@shared/charter'
 import { type RepoKnowledge, type RepoReading, charterDeltas, coerceKnowledge, coerceLearned, emptyKnowledge, knowledgeBlock, mergeFacts, withDeltas } from '@shared/knowledge'
 import { useApp } from '../state/store'
 import { extractJson, invoke, runCli } from '../lib/api'
+import { readOnlyAgent } from '@shared/agents'
 
 /** Older than this, the next reader reads the repo again. The read is free; this only spares a busy board the churn. */
 export const READ_EVERY_MS = 5 * 60_000
@@ -134,7 +135,7 @@ export function learnKnowledge(): { promise: Promise<Learned>; cancel: () => voi
     if (cancelled) return { ok: false, added: 0, error: 'Stopped' }
     if (useApp.getState().project?.id !== p.id) return { ok: false, added: 0, error: 'The project changed, so nothing was kept' }
     const docs = r?.docs ?? []
-    run = runCli({ prompt: learnPrompt(currentKnowledge(), docs), cwd: p.path, agentId: app.settings.plannerAgent || undefined })
+    run = runCli({ prompt: learnPrompt(currentKnowledge(), docs), cwd: p.path, agentId: readOnlyAgent(app.settings.plannerAgent) })
     try {
       const res = await Promise.race([run.promise, new Promise<null>((done) => void (timer = window.setTimeout(() => done(null), LEARN_TIMEOUT_MS)))])
       if (cancelled) return { ok: false, added: 0, error: 'Stopped' }
