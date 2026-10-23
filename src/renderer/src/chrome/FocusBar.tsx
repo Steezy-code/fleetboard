@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Undo2 } from 'lucide-react'
 import { useApp } from '../state/store'
+import { Tip } from './Tip'
 import { NODE_DEFS } from '../nodes/registry'
 import { agentColor, agentLabel } from '../engine/consoles'
 
@@ -16,6 +17,7 @@ export function FocusBar() {
   const index = consoles.findIndex((n) => n.id === id)
   const name = isConsole ? node.data.name : node.title ?? NODE_DEFS[node.type]?.label ?? 'Tile'
   return (
+    <>
     <div className="focus-bar" onPointerDown={(e) => e.stopPropagation()}>
       {isConsole && consoles.length > 1 && (
         <button className="icon-btn sm" title="Previous console (Ctrl+Shift+←)" onClick={() => app.cycleFocus(-1)}>
@@ -39,5 +41,12 @@ export function FocusBar() {
         <Undo2 size={13} /> Back to board
       </button>
     </div>
+    <div className="focus-tip">
+      <Tip id="focus">
+        This tile now has the whole screen at true size. {isConsole && consoles.length > 1 ? <><span className="kbd">Ctrl</span>+<span className="kbd">Shift</span>+<span className="kbd">←</span>/<span className="kbd">→</span> hops between consoles; </> : null}
+        <span className="kbd">Ctrl</span>+<span className="kbd">Shift</span>+<span className="kbd">F</span> or a click on the dimmed board goes back to where you were.
+      </Tip>
+    </div>
+    </>
   )
 }

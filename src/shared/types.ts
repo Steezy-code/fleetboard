@@ -319,3 +319,11 @@ export interface Recovery {
 
 /** fs:write with a base: refused when the file no longer holds it (current: what it holds now, null if gone) */
 export type WriteResult = { ok: true } | { ok: false; reason: 'changed'; current: string | null }
+
+/** A first goal for a board, read from its repo (main/starter.ts) */
+export interface GoalIdea {
+  /** goes into the command bar as written */
+  text: string
+  /** why this one, in a few words */
+  why: string
+}
