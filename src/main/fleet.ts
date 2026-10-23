@@ -572,6 +572,7 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   s.ready = null
   s.tasks = []
   s.charter = charter
+  if (isRepo) s.repoPrefix = (await git(opts.projectPath, ['rev-parse', '--show-prefix'])).out || undefined
   // a new charter's check starts its own history: the last team's runs measured a different job
   stopCheck(s.projectId)
   delete s.check
@@ -627,17 +628,17 @@ export async function ignoredInTheWay(cwd: string, incoming: string[]): Promise<
 }
 
 /** The files among `touched` an exclusion covers, each named with the rule it hit. */
-const excludedHits = (touched: string[], wontTouch: string[] | undefined, how: string) =>
+const excludedHits = (touched: string[], wontTouch: string[] | undefined, prefix: string | undefined, how: string) =>
   touched.flatMap((f) => {
-    const rule = excludedBy(f, wontTouch)
+    const rule = excludedBy(f, wontTouch, prefix)
     return rule ? [`${f} (${how} "${rule}")`] : []
   })
 
 const andMore = (hits: string[]) => (hits.length > 5 ? `, and ${hits.length - 5} more` : '')
 
 /** Why a worker's branch cannot be merged: it changed files the charter's won't-touch list rules out. Null when it can. */
-export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined): string | null {
-  const hits = excludedHits(touched, wontTouch, 'excluded by')
+export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined, prefix?: string): string | null {
+  const hits = excludedHits(touched, wontTouch, prefix, 'excluded by')
   if (!hits.length) return null
   return `Not merged: ${worker} changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}, which the user ruled out. Ask ${worker} to revert ${hits.length === 1 ? 'it' : 'them'} with fleet_send, then merge again.`
 }
@@ -648,8 +649,8 @@ export function excludedRefusal(worker: string, touched: string[], wontTouch: st
  * /api/merge (remote.ts) — so the card hiding its Merge button is the courtesy and this is the rule.
  * Both clients show it after "Merge failed:", so it does not say that itself.
  */
-export function excludedMergeRefusal(touched: string[], wontTouch: string[] | undefined): string | null {
-  const hits = excludedHits(touched, wontTouch, 'ruled out by')
+export function excludedMergeRefusal(touched: string[], wontTouch: string[] | undefined, prefix?: string): string | null {
+  const hits = excludedHits(touched, wontTouch, prefix, 'ruled out by')
   if (!hits.length) return null
   return `this work changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}. Tell the Lead to put ${hits.length === 1 ? 'it' : 'them'} back, or discard the team's work.`
 }
@@ -990,7 +991,7 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       if (wontTouch?.length) {
         const d = await wouldTouch(m.cwd, at)
         if (!d.ok) return fail(`Not merged: ${w.name}'s changes could not be checked against what the user ruled out: ${d.error}`)
-        const refusal = excludedRefusal(w.name, d.files, wontTouch)
+        const refusal = excludedRefusal(w.name, d.files, wontTouch, s.repoPrefix)
         if (refusal) return fail(refusal)
       }
       // -m, or the merge commit would be named after the sha rather than the branch it came from
@@ -1399,7 +1400,7 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       // Lead may have added to since.
       const d = await wouldTouch(s.projectPath, at)
       if (!d.ok) return { ok: false, error: `The team's changes could not be checked before merging: ${d.error}` }
-      const refusal = excludedMergeRefusal(d.files, s.charter?.wontTouch)
+      const refusal = excludedMergeRefusal(d.files, s.charter?.wontTouch, s.repoPrefix)
       if (refusal) return { ok: false, error: refusal }
       const local = await ignoredInTheWay(s.projectPath, d.files)
       if (local.length) {

@@ -59,20 +59,28 @@ const RISKS: { why: string; hit: (p: string) => boolean }[] = [
 /** git reports forward slashes; `owns` comes from an agent and may not. */
 export const norm = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '')
 
+/** A glob as a regex: `*` and `?` stay inside one folder, `**` crosses folders. */
+const globRe = (o: string) =>
+  o
+    .split(/(\*\*\/|\/\*\*$|\*\*|\*|\?)/)
+    .map((t) =>
+      t === '**/' ? '(?:.*/)?' : t === '/**' ? '(?:/.*)?' : t === '**' ? '.*' : t === '*' ? '[^/]*' : t === '?' ? '[^/]' : t.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    )
+    .join('')
+
 /**
- * Does one entry cover `f` (already `norm`ed)? An entry is either the file itself, a folder
- * containing it, or a trailing-`*` prefix.
- *
- * ponytail: exact / folder-prefix / trailing-star only, no real globbing. If agents start writing
- * `src/**\/*.ts` in owns or wontTouch, swap the body for a glob matcher — the callers don't change.
- * The two fail differently: an owns entry that matches nothing over-flags, but a wontTouch entry that
- * matches nothing excludes nothing, so a glob or a description there is held only by the worker's brief.
+ * Does one entry cover `f` (already `norm`ed)? A plain entry is the file itself or a folder holding
+ * it, from the repo root. An entry with a wildcard is a glob, matched the way .gitignore does: from
+ * the root when it has a slash, at any depth when it has none (`*.lock`), and a folder it matches
+ * covers what is inside. Case is ignored: on Windows and macOS `Docs` and `docs` are one folder.
  */
 const covers = (f: string, raw: string): boolean => {
-  const o = norm(raw)
+  // a leading slash anchors at the root, as in .gitignore, which an entry is anyway
+  const o = norm(norm(raw).replace(/^\/+/, '')).toLowerCase()
   if (!o) return false
-  if (o.endsWith('*')) return f.startsWith(o.slice(0, -1))
-  return f === o || f.startsWith(`${o}/`)
+  const file = f.toLowerCase()
+  if (!/[*?]/.test(o)) return file === o || file.startsWith(`${o}/`)
+  return new RegExp(`^${o.includes('/') ? '' : '(?:.*/)?'}${globRe(o)}(?:/.*)?$`).test(file)
 }
 
 /** Is `file` inside one of `owns`? */
@@ -82,29 +90,37 @@ export function ownedBy(file: string, owns: string[] | undefined): boolean {
 }
 
 /**
- * An exclusion in the form `covers` can match, or null for one that must not be used at all.
- * Exclusions alone go through this: `owns` is a grant, where a leading slash or a glob that matches
- * nothing only over-flags, while here it would silently protect nothing — or, for a bare `*`,
- * everything, refusing a merge over a rule the user was never shown.
+ * An exclusion `covers` may match, or null for one that must not be used at all: a pattern of
+ * wildcards alone (`*`, `**\/*`) would refuse every merge over a rule the user never saw as
+ * "everything". Normed twice: stripping the leading slash can uncover a `./` (`/./*`).
  */
 const asExclusion = (raw: string): string | null => {
-  // normed again at the end: stripping the leading slash can uncover a `./` the first pass could not
-  // see (`/./*`), and `covers` norms too — so without this the bare `*` rejected below comes back.
-  const o = norm(
-    norm(raw)
-      .replace(/^\/+/, '')
-      .replace(/\/\*\*(\/\*)?$/, '/*')
-  )
-  return o && !/^\*+$/.test(o) ? o : null
+  const o = norm(norm(raw).replace(/^\/+/, ''))
+  return o && !/^[*/?]+$/.test(o) ? o : null
 }
 
-/** The `wontTouch` entry that covers `file`, as it was written, or null. */
-export function excludedBy(file: string, wontTouch: string[] | undefined): string | null {
+/**
+ * Whether the merge gate can hold anyone to this exclusion. A description ("the auth module")
+ * matches no path, so the card says it is not enforced rather than promising what nothing checks.
+ */
+export const enforceable = (raw: string): boolean => {
+  const o = asExclusion(raw)
+  return o !== null && !(/\s/.test(o) && !/[/.*?]/.test(o))
+}
+
+/**
+ * The `wontTouch` entry that covers `file`, as it was written, or null. git names files from the
+ * repo root; a project opened at a sub-folder (`prefix`) may have its rules written from there, so
+ * an entry matching either way counts.
+ */
+export function excludedBy(file: string, wontTouch: string[] | undefined, prefix = ''): string | null {
   const f = norm(file)
+  const p = norm(prefix)
+  const inProject = p && f.startsWith(`${p}/`) ? f.slice(p.length + 1) : null
   return (
     (wontTouch ?? []).find((raw) => {
       const o = asExclusion(raw)
-      return o !== null && covers(f, o)
+      return o !== null && (covers(f, o) || (inProject !== null && covers(inProject, o)))
     }) ?? null
   )
 }
@@ -153,7 +169,7 @@ export function reviewReady(s: FleetState): MergeReview | null {
   const flags: FileFlag[] = []
   for (const f of r.files) {
     const outside = granted.length > 0 && !ownedBy(f, granted)
-    const excluded = excludedBy(f, s.charter?.wontTouch)
+    const excluded = excludedBy(f, s.charter?.wontTouch, s.repoPrefix)
     const rule = RISKS.find((x) => x.hit(norm(f)))
     if (excluded || outside || rule) flags.push({ path: f, outside, ...(excluded ? { excluded } : {}), ...(rule ? { why: rule.why } : {}) })
   }

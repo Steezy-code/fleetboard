@@ -97,6 +97,8 @@ export interface FleetState {
   charter?: Charter
   /** the charter's done-when, run in the Lead's worktree as the work lands: progress, not part of what was agreed */
   check?: DoneWhenCheck
+  /** where the project sits inside its repo (`apps/web/`), when it is opened at a sub-folder */
+  repoPrefix?: string
 }
 
 /**
