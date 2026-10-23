@@ -3,6 +3,7 @@ import path from 'node:path'
 import type { MainContext } from './context'
 import { which } from './env'
 import { readRegularFile } from './paths'
+import { allowed } from './roots'
 import { ghEnv, run, git as runGit, type GitOpts, type RunOut } from './run'
 
 // Git card / GitHub panel IPC. Every handler resolves to { ok: true, ... } or { ok: false, error }.
@@ -89,8 +90,13 @@ function cleanErr(r: RunOut, fallback = 'git failed') {
 
 const fail = (error: string) => ({ ok: false as const, error })
 
+/**
+ * A folder git may run in: one that exists, inside the folders Fleetboard may use (roots.ts), as the
+ * filesystem handlers already require. git here carries the user's credentials and can push, commit
+ * and check out, and a git card's folder comes from the board file.
+ */
 function validCwd(cwd: string) {
-  return typeof cwd === 'string' && cwd.length > 0 && fs.existsSync(cwd)
+  return typeof cwd === 'string' && cwd.length > 0 && allowed(cwd, 'git') && fs.existsSync(cwd)
 }
 
 const CODE_FOR: Record<string, string> = { M: 'M', T: 'M', A: 'A', D: 'D', R: 'R', C: 'C', U: 'U' }
