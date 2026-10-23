@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   BookOpen,
   Bot,
+  BookMarked,
   Brain,
   Calendar,
   CheckCheck,
@@ -163,6 +164,9 @@ export function RightRail() {
             </button>
             <button className="menu-item" onClick={() => open('memory')}>
               <Brain size={14} className="ic" /> Memory
+            </button>
+            <button className="menu-item" onClick={() => open('knowledge')}>
+              <BookMarked size={14} className="ic" /> Repo knowledge
             </button>
             <button className="menu-item" onClick={() => open('skills')}>
               <Wand2 size={14} className="ic" /> Skills
