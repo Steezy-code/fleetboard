@@ -33,6 +33,9 @@ export async function loginEnv(): Promise<Record<string, string>> {
   base.COLORTERM = 'truecolor'
   base.TERM_PROGRAM = 'Fleetboard'
   delete base.ELECTRON_RUN_AS_NODE
+  // the app's own dev and test switches: never a console's
+  delete base.ELECTRON_RENDERER_URL
+  delete base.FLEETBOARD_DEVTOOLS
   delete base.ELECTRON_NO_ATTACH_CONSOLE
   cached = base
   return base
