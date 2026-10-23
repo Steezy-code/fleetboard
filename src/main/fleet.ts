@@ -533,6 +533,13 @@ export function leadRestartNote(o: { how: string; team: string; task: string; ch
 
 export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
   const s = state(opts.projectId, opts.projectPath)
+  // A project has one team: the charter, tasks and Ready card below are the new one's. A team left
+  // running would go on merging under the new charter's exclusions, and a finished one would lose its
+  // Merge and Discard, so it is closed here, its branch kept.
+  for (const old of Object.values(s.members).filter((m) => m.role === 'lead' && m.status !== 'closed')) {
+    await dismissTeam(s, old, 'keep')
+    if (old.branch) trouble(s, `${old.name}'s team was closed to start the new one. Its work is kept on the branch ${old.branch}.`, 'info')
+  }
   const id = uid('con')
   const agentId = opts.agentId ?? 'claude'
   const charter = trustedCharter(opts.charter, opts.goal)
@@ -547,11 +554,10 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
     cwd = await createWorktree(opts.projectPath, opts.projectPath, opts.projectId, `${slug}-lead`, branch)
     base = (await git(cwd, ['rev-parse', 'HEAD'])).out
   }
-  const leads = Object.values(s.members).filter((m) => m.role === 'lead' && m.status !== 'closed').length
   const m: FleetMember = {
     id,
     role: 'lead',
-    name: leads ? `Lead ${leads + 1}` : 'Lead',
+    name: 'Lead',
     agentId,
     projectId: opts.projectId,
     task: title,
@@ -1402,6 +1408,13 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       }
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
+      // The card shows what the team did since it started. On a branch without that starting point the
+      // merge would also bring in every commit between the two, which the card never showed.
+      if (lead.base && !(await git(s.projectPath, ['merge-base', '--is-ancestor', lead.base, 'HEAD'])).ok) {
+        const extra = Number((await git(s.projectPath, ['rev-list', '--count', `HEAD..${lead.base}`])).out) || 0
+        const more = extra ? ` ${extra} commit${extra === 1 ? '' : 's'} the team started from` : ' history the team started from'
+        return { ok: false, error: `Not merged: ${current.out} does not have the commit the team started from, so merging would also bring in${more}, which the card does not show. Check out the branch the team started on, or merge ${lead.branch} yourself.` }
+      }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
       const busy = await unfinishedOperation(s.projectPath)
       if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then merge again; the work stays on ${lead.branch}.` }
