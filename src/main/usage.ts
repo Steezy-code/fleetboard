@@ -721,13 +721,25 @@ export const projectSlug = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
  */
 export async function spentIn(cwds: string[]): Promise<Record<string, Tot | null>> {
   await scan(false)
+  // The folder Claude Code filed each log under: the first one below its projects root. Not the log's
+  // own folder, which for a subagent's log is <session>/subagents, a third of what a member spends.
+  const claudeRoots = roots()
+    .filter((r) => r.agent === 'claude')
+    .map((r) => r.dir + path.sep)
+  const byFolder = new Map<string, FileEntry[]>()
+  for (const [file, f] of cache) {
+    if (f.agent !== 'claude') continue
+    const root = claudeRoots.find((r) => file.startsWith(r))
+    if (!root) continue
+    const folder = file.slice(root.length).split(path.sep)[0]!
+    byFolder.set(folder, [...(byFolder.get(folder) ?? []), f])
+  }
   const out: Record<string, Tot | null> = {}
   for (const cwd of cwds) {
-    const slug = projectSlug(cwd)
+    const files = byFolder.get(folderFor(cwd, [...byFolder.keys()]) ?? '') ?? []
     const seen = new Set<string>()
     let tot: Tot | null = null
-    for (const [file, f] of cache) {
-      if (f.agent !== 'claude' || path.basename(path.dirname(file)) !== slug) continue
+    for (const f of files) {
       for (const e of f.events) {
         // resumed sessions replay their history into a new file; count each message once
         if (e[7] !== ':') {
@@ -741,6 +753,19 @@ export async function spentIn(cwds: string[]): Promise<Record<string, Tot | null
   }
   return out
 }
+
+/**
+ * Claude Code's folder for a cwd: its slug, or for a slug over 200 characters the first 200, a dash
+ * and a hash of its own. The hash is not reproduced here, so a long one is taken only when exactly
+ * one folder starts that way; sibling worktrees share the prefix, and a guess would count another's.
+ */
+function folderFor(cwd: string, folders: string[]): string | null {
+  const slug = projectSlug(cwd)
+  if (slug.length <= SLUG_MAX) return slug
+  const like = folders.filter((f) => f.startsWith(`${slug.slice(0, SLUG_MAX)}-`))
+  return like.length === 1 ? like[0]! : null
+}
+const SLUG_MAX = 200
 
 export function register(ctx: MainContext) {
   emit = ctx.emit
