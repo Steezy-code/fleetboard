@@ -223,3 +223,20 @@ test('an option that changes the default permission mode for every session is ne
   })
   assert.deepEqual(card?.options.map((o) => o.label), ['Allow once', 'Deny'])
 })
+
+test('a permission whose dialog cannot be read offers no Allow, only the refusal', () => {
+  // its opening rule and command scrolled above what is read: allowing would be allowing blind
+  const card = approvalFor({
+    reason: 'numbered-menu',
+    kind: 'menu',
+    lines: [],
+    question: 'Do you want to proceed?',
+    options: [
+      { label: 'Yes', selected: true },
+      { label: "Yes, and don't ask again for this command", selected: false },
+      { label: 'No', selected: false }
+    ]
+  })
+  assert.deepEqual(card?.options.map((o) => o.tone), ['deny'])
+  assert.match(card?.detail ?? '', /Open the console/)
+})
