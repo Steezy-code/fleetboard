@@ -240,6 +240,7 @@ const roleFor = (r?: string): Role | undefined => {
 export const PANEL_ALIASES: Record<string, { name: string; drawer?: boolean }> = {
   missionmap: { name: 'missionMap' }, map: { name: 'missionMap' }, mission: { name: 'missionMap' },
   loops: { name: 'loops' }, loop: { name: 'loops' }, memory: { name: 'memory' }, memories: { name: 'memory' },
+  knowledge: { name: 'knowledge' }, repoknowledge: { name: 'knowledge' },
   documents: { name: 'documents' }, document: { name: 'documents' }, docs: { name: 'documents' }, documentsstudio: { name: 'documents' },
   diagrams: { name: 'diagrams' }, diagram: { name: 'diagrams' }, code: { name: 'code' }, codestudio: { name: 'code' }, files: { name: 'code' },
   markdown: { name: 'markdown' }, vault: { name: 'markdown' }, notes: { name: 'markdown' },
