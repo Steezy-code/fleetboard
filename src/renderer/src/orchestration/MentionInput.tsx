@@ -49,7 +49,7 @@ export function MentionInput({
   }, [all, query])
 
   const sync = (text: string, caret: number) => {
-    const m = /(^|\s)@([\w.\-]*)$/.exec(text.slice(0, caret))
+    const m = /(^|\s)@([\w.-]*)$/.exec(text.slice(0, caret))
     setQuery(m?.[2] ?? null)
     setHi(0)
   }
@@ -57,7 +57,7 @@ export function MentionInput({
   const pick = (s: Suggestion) => {
     const el = ref.current!
     const caret = el.selectionStart ?? value.length
-    const before = value.slice(0, caret).replace(/@([\w.\-]*)$/, `${s.token} `)
+    const before = value.slice(0, caret).replace(/@([\w.-]*)$/, `${s.token} `)
     const next = before + value.slice(caret).replace(/^\s+/, '')
     setValue(next)
     setQuery(null)

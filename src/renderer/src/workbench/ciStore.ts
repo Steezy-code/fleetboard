@@ -3,8 +3,9 @@ import { create } from 'zustand'
 import { invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { sendToConsole, spawnConsoles } from '../engine/consoles'
+import { maySpendOn } from '../engine/guards'
 import { ownerOf, refreshFeedback, setBranchAgent, useFeedback } from './prFeedback'
-import type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
+import type { CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
 export type { CiCheck, CiPr, CiRun, CiState, CiStatus } from '../../../main/ci'
 
@@ -170,6 +171,9 @@ export async function fixCi(item: CiItem, opts: { auto?: boolean } = {}): Promis
   const status = useCi.getState().status
   const path = useCi.getState().path
   if (!app.project || !status?.ok || !path) return null
+  // Automatic only: when the user presses Fix it themselves, that is their call to make. Spawning an
+  // agent is the most expensive thing this app does on its own.
+  if (opts.auto && !maySpendOn(app.settings.plannerAgent, 'sending an agent at a CI failure')) return null
   const busy = fixerFor(item.key)
   if (busy) {
     if (!opts.auto) app.focusItem(busy)

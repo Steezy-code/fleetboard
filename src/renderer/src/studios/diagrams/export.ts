@@ -1,6 +1,8 @@
-import { pairs, pairsRound } from '@shared/seq'
+import { pairsRound } from '@shared/seq'
 import type { InkItem } from '@shared/types'
 import { TITLE_SIZE } from './toInk'
+// the same curve the board draws ink with: it was written out a second time here, to the character
+import { inkPath as smoothOpen } from '../../board/ink/geometry'
 
 // Export an ink figure: SVG (hand-drawn look reproduced with seeded jitter) → PNG via an offscreen
 // canvas, and a native .excalidraw scene with bound text and arrow bindings.
@@ -119,16 +121,6 @@ function roughEllipse(cx: number, cy: number, rx: number, ry: number, rand: () =
 }
 
 // the same shape as geometry.ts's inkPath, for the figure the exporter draws rather than the board
-function smoothOpen(points: Pt[]) {
-  const first = points[0]
-  const last = points[points.length - 1]
-  if (!first || !last) return ''
-  if (points.length < 3) return `M${points.map((p) => p.join(',')).join(' L')}`
-  let d = `M${first[0]},${first[1]}`
-  for (const [[x, y], [nx, ny]] of pairs(points.slice(1))) d += ` Q${x},${y} ${(x + nx) / 2},${(y + ny) / 2}`
-  return `${d} L${last[0]},${last[1]}`
-}
-
 const FONT = `'Geist Variable', 'Inter', 'Helvetica Neue', Arial, sans-serif`
 const SERIF = `'Fraunces Variable', Georgia, 'Times New Roman', serif`
 

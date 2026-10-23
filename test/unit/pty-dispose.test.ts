@@ -12,18 +12,44 @@ process.env.FLEETBOARD_HOME = path.join(dir, 'fb')
 const { PtyManager } = await import('../../src/main/pty')
 const { DEFAULT_SETTINGS } = await import('../../src/shared/types')
 
+const read = (file: string) => {
+  try {
+    return fs.readFileSync(file, 'utf8')
+  } catch {
+    return '' // not there (yet)
+  }
+}
 /** running (a zombie, killed but not yet reaped by its parent, does not count) */
 const alive = (pid: number) => {
-  try {
-    return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'))
-  } catch {
-    return false
-  }
+  const stat = read(`/proc/${pid}/stat`)
+  return !!stat && !/^\d+ \(.*\) Z/.test(stat)
+}
+/** Does this process really ignore the hangup? SigIgn is the ignored-signal mask; SIGHUP is bit 0. */
+const ignoresHup = (pid: number) => {
+  const mask = /^SigIgn:\s*([0-9a-f]+)$/m.exec(read(`/proc/${pid}/status`))?.[1]
+  return !!mask && (BigInt(`0x${mask}`) & 1n) === 1n
 }
 async function until(fn: () => boolean, ms: number) {
   const end = Date.now() + ms
   while (!fn() && Date.now() < end) await new Promise((r) => setTimeout(r, 50))
   return fn()
+}
+/**
+ * The pid of the job the shell put in the background, once it really ignores the hangup.
+ *
+ * `& echo $! > file` writes the pid at the fork, before the child has exec'd `nohup` or run its own
+ * `trap '' HUP` — so for a moment that pid names a process the hangup still kills. Closing the
+ * console inside that window killed the very job these tests say outlives it: one run in 120, with
+ * the child still `nohup` and its SigIgn bit clear. Waiting for the pid was never enough; this waits
+ * for the property the test depends on.
+ */
+const childFrom = async (pidFile: string) => {
+  const written = () => Number(read(pidFile).trim())
+  assert.ok(
+    await until(() => written() > 0 && ignoresHup(written()), 5000),
+    'the background job started and ignores the hangup'
+  )
+  return written()
 }
 
 test('dispose ends consoles that ignore SIGHUP, and their children, before it returns', { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async (t) => {
@@ -34,8 +60,7 @@ test('dispose ends consoles that ignore SIGHUP, and their children, before it re
   // a console whose program ignores SIGHUP and has a child that does too
   const info = await ptys.spawn({ id: 'stubborn', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: `trap '' HUP; sleep 600 & echo $! > ${pidFile}; wait` })
   const polite = await ptys.spawn({ id: 'polite', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: 'sleep 600' })
-  assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 5000), 'child started')
-  const child = Number(fs.readFileSync(pidFile, 'utf8'))
+  const child = await childFrom(pidFile)
   assert.ok(alive(info.pid) && alive(child) && alive(polite.pid))
 
   const t0 = Date.now()
@@ -51,10 +76,6 @@ function agentWithStubbornChild(name: string) {
   fs.writeFileSync(bin, `#!/bin/sh\n(trap '' HUP; exec sleep 600) & echo $! > ${pidFile}\nwait\n`, { mode: 0o755 })
   const settings = { ...DEFAULT_SETTINGS, customAgents: [{ id: name, name, bin, color: '#888', vendor: 'test' }] }
   return { pidFile, settings }
-}
-const childFrom = async (pidFile: string) => {
-  assert.ok(await until(() => fs.existsSync(pidFile) && fs.readFileSync(pidFile, 'utf8').trim() !== '', 5000), 'child started')
-  return Number(fs.readFileSync(pidFile, 'utf8'))
 }
 
 test("quitting ends what an agent CLI started even when the CLI itself took the SIGHUP and ended", { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async (t) => {

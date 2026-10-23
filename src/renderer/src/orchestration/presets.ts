@@ -56,7 +56,7 @@ function team(agents: string[], name: string, role: Role, at: { x: number; y: nu
 function tile(type: NodeType, x: number, y: number, data: Record<string, any> = {}, size?: { w: number; h: number }): string {
   const def = NODE_DEFS[type]
   const s = size ?? def?.defaultSize ?? { w: 480, h: 320 }
-  return useApp.getState().addNode({ type, x, y, w: s.w, h: s.h, data: { ...(def?.create?.() ?? {}), ...data } })
+  return useApp.getState().addNode({ type, x, y, w: s.w, h: s.h, data: { ...def?.create?.(), ...data } })
 }
 
 const C = (x: number, y: number, w = 22, h = 14, color?: string): SchemaRect => ({ x, y, w, h, kind: 'console', color })

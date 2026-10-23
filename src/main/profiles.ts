@@ -6,7 +6,6 @@ import type { Profile } from '@shared/types'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
-import { registerSkills } from './skills'
 
 // Profiles: several accounts of one CLI side by side. Each profile is its own config dir
 // (~/.fleetboard/profiles/<id>/) handed to the CLI through its config env var
@@ -115,7 +114,6 @@ function copyIfExists(from: string, to: string, copied: string[]) {
 
 export function register(ctx: MainContext) {
   const { ipc } = ctx
-  registerSkills(ctx)
 
   ipc.handle('profiles:list', (_e, agentId?: string): ProfileInfo[] =>
     listProfiles()

@@ -62,6 +62,8 @@ if (!g.window) {
     body: { appendChild() {}, classList: { add() {}, remove() {}, toggle() {} } },
     documentElement: { style: { setProperty() {} }, classList: { add() {}, remove() {}, toggle() {} } },
     activeElement: null,
+    // focused, so code that only notifies the OS when the window is in the background stays quiet
+    hasFocus: () => true,
     fonts: { ready: Promise.resolve() }
   }
   g.fb = {

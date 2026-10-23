@@ -1,5 +1,7 @@
-// Web tiles browse in their own session: sites get no camera, microphone, location or notifications;
-// the user's own dev server on localhost gets what it asks for.
+// Web tiles browse in their own session, and Electron grants whatever it is not told to refuse.
+// A site gets nothing. A page on the machine the user controls — their own dev server, running what an
+// agent last wrote — gets the microphone and notifications, and nothing else: not the camera, which
+// the app refuses even to its own window, and not location.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
@@ -28,6 +30,7 @@ before(async () => {
         results.notifications = await Notification.requestPermission().catch((e) => 'error')
         results.geolocation = await new Promise((r) => navigator.geolocation.getCurrentPosition(() => r('granted'), (e) => r(e.code === 1 ? 'denied' : 'unavailable'), { timeout: 3000 }))
         results.camera = await navigator.mediaDevices.getUserMedia({ video: true }).then(() => 'granted', (e) => e.name)
+        results.microphone = await navigator.mediaDevices.getUserMedia({ audio: true }).then(() => 'granted', (e) => e.name)
         fetch('/report', { method: 'POST', body: JSON.stringify({ host: location.hostname, results }) })
       })()
     </script>`)
@@ -43,7 +46,7 @@ after(async () => {
   server?.close()
 })
 
-test('a site in a web tile is refused; a localhost dev server is allowed', async () => {
+test('a site in a web tile gets nothing; a dev server gets the microphone and no more', async () => {
   const port = (server.address() as any).port
   for (const [i, host] of ['127.0.0.2', 'localhost'].entries()) {
     await app.eval(({ url, i }) => (window as any).__fleetboard.useApp.getState().addNode({ type: 'web', x: 100 + i * 700, y: 100, w: 640, h: 480, data: { url } }), { url: `http://${host}:${port}/`, i })
@@ -52,6 +55,22 @@ test('a site in a web tile is refused; a localhost dev server is allowed', async
   assert.equal(reports['127.0.0.2'].notifications, 'denied')
   assert.equal(reports['127.0.0.2'].geolocation, 'denied')
   assert.equal(reports['127.0.0.2'].camera, 'NotAllowedError')
+  assert.equal(reports['127.0.0.2'].microphone, 'NotAllowedError')
+
   assert.equal(reports.localhost.notifications, 'granted')
-  assert.equal(reports.localhost.camera, 'granted')
+  assert.equal(reports.localhost.microphone, 'granted', 'a dev server may record audio')
+  assert.equal(reports.localhost.camera, 'NotAllowedError', 'and never the camera, however local it is')
+  assert.equal(reports.localhost.geolocation, 'denied')
+})
+
+test('a tile URL that comes from the board file goes through the same allowlist', async () => {
+  // normalizeUrl is applied when the user types an address. A board file is not typed: agents write
+  // it, and the tile re-mounts data.url as the webview's src on every load. An external scheme there
+  // is handed to the operating system's handler for it.
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ type: 'web', x: 100, y: 700, w: 400, h: 300, data: { url: 'vscode://evil/payload' } }))
+  const src = await app.waitFor(() => app.eval(() => [...document.querySelectorAll('webview')].map((w) => w.getAttribute('src')).find((s) => s?.includes('evil')) ?? null), {
+    label: 'the tile mounted'
+  })
+  assert.doesNotMatch(src, /^vscode:/, 'not mounted as given')
+  assert.match(src, /^https:\/\/www\.google\.com\/search\?/, 'it falls through to a search, as a typed address does')
 })

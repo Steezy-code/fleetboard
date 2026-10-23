@@ -104,7 +104,7 @@ export function parseDictation(raw: string): Dictation | null {
   const mentions: string[] = []
   let rest = text
   for (;;) {
-    const m = /^@([\w.\-]+)[\s,:]*/.exec(rest)
+    const m = /^@([\w.-]+)[\s,:]*/.exec(rest)
     const name = m?.[1]
     if (!m || !name) break
     mentions.push(name)
@@ -628,7 +628,6 @@ export async function runCommand(raw: string, source: Source) {
   if (!app.project) return
   thread().add('user', text, source)
   setVoice({ transcript: text, reply: '', captionUntil: Date.now() + 8000 })
-  const t = normalize(text)
   const light = text.toLowerCase().replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim()
 
   // 1. confirmation

@@ -217,7 +217,7 @@ export function CommandInput({
   // @query right before the caret
   const query = useMemo(() => {
     if (closed) return null
-    const m = /(^|\s)@([\w.\-]*)$/.exec(text.slice(0, caret))
+    const m = /(^|\s)@([\w.-]*)$/.exec(text.slice(0, caret))
     return m?.[2] ?? null
   }, [text, caret, closed])
   const options = useMentionOptions(query)
@@ -226,7 +226,7 @@ export function CommandInput({
   useEffect(() => setSel(0), [query])
 
   const accept = (o: MentionOption) => {
-    const before = text.slice(0, caret).replace(/@([\w.\-]*)$/, `@${o.token} `)
+    const before = text.slice(0, caret).replace(/@([\w.-]*)$/, `@${o.token} `)
     const after = text.slice(caret).replace(/^\S*\s?/, '')
     const next = before + after
     setText(next)

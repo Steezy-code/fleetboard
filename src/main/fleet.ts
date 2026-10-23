@@ -2,8 +2,6 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import os from 'node:os'
-import { execFile } from 'node:child_process'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
 import { emptyFleet } from '@shared/fleet'
@@ -15,6 +13,8 @@ import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
 import { loginEnv } from './env'
+import { ghEnv, run, git as runGit } from './run'
+import { append as journal, answered } from './journal'
 import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
@@ -45,7 +45,7 @@ const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
 /** lead id → pending fleet_wait resolver */
-/** this module's timers, so they can be stopped (see initFleet / stopFleetTicks) */
+/** this module's timers, so they can be stopped (see register / stopFleetTicks) */
 const ticks: NodeJS.Timeout[] = []
 const waiters = new Map<string, (events: FleetMessage[]) => void>()
 /** ask id → pending fleet_ask_user resolver */
@@ -128,15 +128,14 @@ function findMember(s: FleetState, ref: string): FleetMember | undefined {
 
 // ---------------------------------------------------------------- git
 
-function git(cwd: string, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
-  return loginEnv().then(
-    (env) =>
-      new Promise((resolve) => {
-        execFile('git', args, { cwd, env: { ...env, GIT_TERMINAL_PROMPT: '0' }, maxBuffer: 8 * 1024 * 1024, timeout: 120_000 }, (e, out, err) =>
-          resolve({ ok: !e, out: String(out).trim(), err: String(err || e?.message || '').trim() })
-        )
-      })
-  )
+/**
+ * A merge or a worktree add can take a while, hence the long timeout. The hardened environment comes
+ * with it now: this module parses --numstat and --stat output, which LC_ALL=C exists to keep stable,
+ * and it used to set GIT_TERMINAL_PROMPT alone.
+ */
+async function git(cwd: string, args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+  const r = await runGit(cwd, args, { timeout: 120_000, maxBuffer: 8 * 1024 * 1024 })
+  return { ok: r.code === 0, out: r.stdout.trim(), err: r.stderr.trim() }
 }
 
 const slugify = (t: string) =>
@@ -187,20 +186,23 @@ export async function containedIn(projectPath: string, branch?: string, into?: s
   return (await git(projectPath, ['merge-base', '--is-ancestor', branch, into])).ok
 }
 
+/** What keepUncommitted did: there was nothing to keep, it made a rescue commit, or it could not. */
+export type Kept = 'clean' | 'rescued' | 'failed'
+
 /**
  * Commit whatever a member never committed, so its worktree can be removed without losing work.
- * Returns false when there is uncommitted work it could not save — then the worktree stays.
+ * 'failed' when there is uncommitted work it could not save — then the worktree stays.
  */
-async function keepUncommitted(s: FleetState, m: FleetMember): Promise<boolean> {
+async function keepUncommitted(s: FleetState, m: FleetMember): Promise<Kept> {
   const add = await git(m.cwd, ADD_ALL)
   if (!add.ok) {
     trouble(s, `${m.name}'s changes could not be staged (${add.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
-    return false
+    return 'failed'
   }
-  if ((await git(m.cwd, ['diff', '--cached', '--quiet'])).ok) return true // nothing of its own uncommitted
+  if ((await git(m.cwd, ['diff', '--cached', '--quiet'])).ok) return 'clean' // nothing of its own uncommitted
   if (!m.branch) {
     trouble(s, `${m.name} has uncommitted changes and no branch of its own, so its folder is kept at ${m.cwd}.`)
-    return false
+    return 'failed'
   }
   const r = await git(m.cwd, [
     'commit',
@@ -209,11 +211,23 @@ async function keepUncommitted(s: FleetState, m: FleetMember): Promise<boolean> 
   ])
   if (!r.ok) {
     trouble(s, `${m.name} has uncommitted work that could not be committed (${r.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
-    return false
+    return 'failed'
   }
   trouble(s, `${m.name} had work it never reported; it is kept as a commit on ${m.branch}.`, 'info')
-  return true
+  return 'rescued'
 }
+
+/**
+ * Whether a member's branch may still be deleted once its worktree is gone.
+ *
+ * `asked` was decided by the caller, and dismissTeam decides it with containedIn *before* any of this
+ * runs — so it can only speak for the commits that existed then. keepUncommitted may put a new commit
+ * on the branch a moment later, one the lead's branch cannot possibly contain, right after telling the
+ * user the work "is kept as a commit on <branch>". Deleting the branch there made that commit
+ * unreachable and the message a lie, so a rescue commit always keeps the branch.
+ */
+export const branchToDelete = (asked: 'merged' | 'force' | 'keep', kept: Kept): 'merged' | 'force' | 'keep' =>
+  kept === 'rescued' ? 'keep' : asked
 
 /**
  * Whether a member's worktree is its own to remove.
@@ -244,7 +258,8 @@ export function ownWorktree(
 async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merged' | 'force' | 'keep') {
   const projectPath = s.projectPath
   if (!ownWorktree(m, Object.values(s.members), treesDir)) return
-  if (!(await keepUncommitted(s, m))) return
+  const kept = await keepUncommitted(s, m)
+  if (kept === 'failed') return
   for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
     const p = path.join(m.cwd, d)
     try {
@@ -255,7 +270,14 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   }
   const rm = await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
   if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
-  if (m.branch && deleteBranch !== 'keep') await git(projectPath, ['branch', deleteBranch === 'force' ? '-D' : '-d', m.branch])
+  const how = branchToDelete(deleteBranch, kept)
+  if (m.branch && how !== 'keep') await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])
+  journal({
+    kind: 'fleet.remove',
+    text: `${m.name}'s worktree removed${m.branch ? (how === 'keep' ? `, branch ${m.branch} kept` : `, branch ${m.branch} deleted`) : ''}${kept === 'rescued' ? ' (its unreported work was committed first)' : ''}`,
+    project: projectPath,
+    detail: { member: m.name, branch: m.branch, branchDeleted: how !== 'keep', rescued: kept === 'rescued' }
+  })
 }
 
 // ---------------------------------------------------------------- prompts
@@ -429,6 +451,7 @@ function trustTick() {
       if (!trust) continue
       trustAnswered.add(m.id)
       void ctx.ptys.answer(m.id, { option: trust.label }).then((r) => {
+        if (r.ok) answered(`Fleetboard, trusting the folder for ${m.name}`, m.id, trust.label)
         if (!r.ok) trustAnswered.delete(m.id)
       })
     }
@@ -1143,7 +1166,7 @@ function memberExited(id: string, code: number | undefined, appClosing: boolean)
   post(s, { from: m.id, to: lead.id, kind: 'report', text: `(blocked) ${m.name}'s console exited${how} before it reported.${work} Start a new ${m.role} if the task still needs doing.` })
 }
 
-export async function initFleet(c: MainContext) {
+export async function register(c: MainContext) {
   ctx = c
   loadAll()
   ctx.ptys.onExit(memberExited)
@@ -1202,14 +1225,14 @@ export async function initFleet(c: MainContext) {
     const summary = s.ready.summary.trim()
     const title = ((summary.split('\n')[0] ?? '').replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
     const body = `${summary}\n\n---\nGoal: ${lead.task ?? ''}\n\nBuilt by a Fleetboard team (${lead.name} and ${Object.values(s.members).filter((x) => x.leadId === lead.id).length} helpers). ${s.ready.commits} commits, ${s.ready.files.length} files.`
-    const env = await loginEnv()
-    const r = await new Promise<{ ok: boolean; out: string; err: string }>((resolve) =>
-      execFile('gh', ['pr', 'create', '--draft', '--base', base, '--head', lead.branch!, '--title', title, '--body', body], { cwd: lead.cwd, env: { ...env, GH_PROMPT_DISABLED: '1' }, timeout: 60_000 }, (e, out, err) =>
-        resolve({ ok: !e, out: String(out).trim(), err: String(err || e?.message || '').trim() })
-      )
-    )
-    if (!r.ok) return { ok: false, error: `gh pr create failed: ${r.err.slice(0, 400)}` }
-    const url = r.out.split('\n').find((l) => l.startsWith('http')) ?? r.out
+    const r = await run('gh', ['pr', 'create', '--draft', '--base', base, '--head', lead.branch, '--title', title, '--body', body], {
+      cwd: lead.cwd,
+      env: await ghEnv(),
+      timeout: 60_000
+    })
+    if (r.code !== 0) return { ok: false, error: `gh pr create failed: ${r.stderr.trim().slice(0, 400)}` }
+    const out = r.stdout.trim()
+    const url = out.split('\n').find((l) => l.startsWith('http')) ?? out
     s.ready.prUrl = url
     changed(s)
     return { ok: true, url }
@@ -1308,6 +1331,14 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       }
       // the merge commit, so the Ready card can offer to undo it while it is still the tip
       const commit = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out.trim()
+      journal({
+        kind: 'fleet.merge',
+        text: `the team's branch ${lead.branch} was merged into ${current.out}`,
+        project: s.projectPath,
+        // which commit: the night log is where you look for a merge you did not watch, and that is
+        // the one thing that identifies it afterwards
+        detail: { branch: lead.branch, into: current.out, commit, commits: s.ready?.commits, files: s.ready?.files.length }
+      })
       await dismissTeam(s, lead, 'merged')
       return { ok: true, into: current.out, ...(commit ? { commit } : {}) }
     }
@@ -1357,6 +1388,8 @@ async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 
   // It used to be deleted with -D either way, so a worker that reported "blocked", or whose console
   // died before it reported, had its commits made unreachable — after the lead's own report had told
   // the user that work existed.
+  // This answer is about the commits that exist now; a rescue commit made during the dismissal would
+  // make it stale, which is why branchToDelete has the last word over it.
   for (const m of crew) await dismiss(s, m, (await containedIn(s.projectPath, m.branch, lead.branch)) ? 'force' : 'keep')
   await dismiss(s, lead, branch)
   s.ready = null

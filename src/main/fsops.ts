@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
-import { dirs, renameRetrying } from './paths'
+import { writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
 import { allowed, grant, outsideMessage } from './roots'
@@ -81,10 +81,12 @@ export async function tree(root: string, depth: number, filter?: (name: string) 
 /**
  * Write a file the user edits. With `base` (what the editor loaded or last saved), only while the file
  * still holds exactly that: an agent's change made meanwhile is never overwritten; the caller gets what
- * is there now (null: the file is gone). Written to a temporary file and renamed, so a crash midway
- * never leaves it half written; its permissions are kept.
+ * is there now (null: the file is gone). `base: null` means "only if it is not there" — which is what
+ * creating a file is, and is why creating one is not an exists-check followed by a write. Written
+ * through writeDurable, so neither a crash nor a power loss can leave it half written or empty; its
+ * permissions are kept.
  */
-export function writeText(file: string, content: string, base?: string): WriteResult {
+export function writeText(file: string, content: string, base?: string | null): WriteResult {
   if (base !== undefined) {
     let current: string | null = null
     try {
@@ -94,7 +96,16 @@ export function writeText(file: string, content: string, base?: string): WriteRe
     }
     if (current !== base) return { ok: false, reason: 'changed', current }
   }
-  // a symlinked file (dotfiles) is written where it points, not replaced by a plain file
+  writeResolved(file, content)
+  return { ok: true }
+}
+
+/**
+ * Write a file the user owns: through the symlink if it is one (a dotfile linked out to ~/dotfiles is
+ * written where it points, not replaced by a plain file), keeping its permissions, atomically and
+ * durably.
+ */
+function writeResolved(file: string, content: string | Uint8Array) {
   let target = file
   try {
     target = fs.realpathSync(file)
@@ -103,15 +114,9 @@ export function writeText(file: string, content: string, base?: string): WriteRe
   }
   fs.mkdirSync(path.dirname(target), { recursive: true })
   const mode = fs.statSync(target, { throwIfNoEntry: false })?.mode
+  // hidden, and beside the target: this one lands in the user's own project folder
   const tmp = path.join(path.dirname(target), `.${path.basename(target)}.fleetboard-${process.pid}-${Date.now()}.tmp`)
-  try {
-    fs.writeFileSync(tmp, content, mode !== undefined ? { mode: mode & 0o7777 } : undefined)
-    renameRetrying(tmp, target)
-  } catch (e) {
-    fs.rmSync(tmp, { force: true })
-    throw e
-  }
-  return { ok: true }
+  writeDurable(target, content, mode === undefined ? undefined : mode & 0o7777, tmp)
 }
 
 export function register(ctx: MainContext) {
@@ -147,25 +152,20 @@ export function register(ctx: MainContext) {
   ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) =>
     allowed(dir, 'fs:tree') ? tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined) : []
   )
-  ipc.handle('fs:list', (_e, dir: string) => (allowed(dir, 'fs:list') ? tree(dir, 0) : []))
   ipc.handle('fs:read', (_e, file: string) => {
     // already throws for a missing file, so callers handle a throw
     if (!allowed(file, 'fs:read')) throw new Error(outsideMessage(file))
     return fs.readFileSync(file, 'utf8')
   })
-  ipc.handle('fs:readBase64', (_e, file: string) => {
-    if (!allowed(file, 'fs:readBase64')) throw new Error(outsideMessage(file))
-    return fs.readFileSync(file).toString('base64')
-  })
-  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string }) => {
+  ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string | null }) => {
     if (!allowed(file, 'fs:write')) throw new Error(outsideMessage(file))
     return writeText(file, content, opts?.base)
   })
   ipc.handle('fs:writeBase64', (_e, file: string, b64: string) => {
     if (!allowed(file, 'fs:writeBase64')) throw new Error(outsideMessage(file))
-    // unlike writeText this replaces a symlink with a plain file; left as it was, noted for later
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, Buffer.from(b64, 'base64'))
+    // the same write as fs:write: it used to truncate the target in place, so a write that ran out of
+    // room destroyed whatever was there, and it replaced a symlink with a plain file
+    writeResolved(file, Buffer.from(b64, 'base64'))
   })
   ipc.handle('fs:exists', (_e, p: string) => allowed(p, 'fs:exists') && fs.existsSync(p))
   ipc.handle('fs:mkdir', (_e, p: string) => {
@@ -181,7 +181,6 @@ export function register(ctx: MainContext) {
       return null
     }
   })
-  ipc.handle('fs:assetsDir', () => dirs.assets)
   // openPath resolves with '' on success or an error string, so a refusal is just that string
   ipc.handle('shell:openPath', (_e, p: string) =>
     !allowed(p, 'shell:openPath') ? outsideMessage(p) : opensSafely(p) ? shell.openPath(p) : (shell.showItemInFolder(p), '')

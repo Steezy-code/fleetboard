@@ -11,7 +11,7 @@ import {
   BUCKET_LABEL,
   STATUS_TEXT,
   bucketOf,
-  fmtDuration,
+  fmtElapsed,
   goToItem,
   plural,
   statusOf,
@@ -450,7 +450,7 @@ function Details({
         <DetailRow k="Status" v={STATUS_TEXT[status]} />
         <DetailRow k="Team" v={team ? team.name : '—'} />
         <DetailRow k="Workspace" v={c.workspaceName} />
-        <DetailRow k="Uptime" v={pty && live ? fmtDuration(Date.now() - pty.startedAt) : 'not running'} />
+        <DetailRow k="Uptime" v={pty && live ? fmtElapsed(Date.now() - pty.startedAt) : 'not running'} />
         <div className="mm-actions">
           <button className="btn primary" onClick={() => goToItem(c.id, c.workspaceId)}>
             Go to the console <ArrowRight size={14} />

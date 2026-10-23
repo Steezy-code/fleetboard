@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { plural } from '../orchestration/fleet'
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -37,7 +38,6 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 const toast = (text: string, tone?: 'info' | 'warn' | 'error' | 'ok') => useApp.getState().toast(text, tone)
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 
 function defaultMessage(files: GitFile[]) {
   const [f] = files

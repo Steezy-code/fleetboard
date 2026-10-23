@@ -36,5 +36,3 @@ export function catchStrayErrors(tell: (message: string) => void) {
   process.on('uncaughtException', report('uncaught exception'))
   process.on('unhandledRejection', report('unhandled rejection'))
 }
-
-export const errorLogPath = LOG
