@@ -1,9 +1,11 @@
-import { useMemo } from 'react'
-import { ArrowRight, FolderOpen, FolderPlus, Settings, Sunrise, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { ArrowRight, Check, CircleAlert, Copy, FolderOpen, FolderPlus, RefreshCw, Settings, Sunrise, X } from 'lucide-react'
 import { AGENTS } from '@shared/agents'
 import { invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { WindowControls } from './TopBar'
+import { MAIN_AGENTS, readinessOf, type Readiness, type SignIn } from './readiness'
+import type { AgentDef } from '@shared/types'
 
 const ago = (t: number) => {
   const s = (Date.now() - t) / 1000
@@ -17,9 +19,8 @@ const ago = (t: number) => {
 export function Home() {
   const projects = useApp((s) => s.projects)
   const recent = projects[0]
-  const agents = useApp((s) => s.agents)
   const app = useApp.getState()
-  const installed = useMemo(() => AGENTS.filter((a) => agents.find((x) => x.id === a.id && x.path) && a.id !== 'shell'), [agents])
+  const ready = useReadiness().some(([, r]) => r.state === 'ready')
 
   const open = async () => {
     const dir = await invoke<string | null>('dialog:openFolder')
@@ -96,39 +97,116 @@ export function Home() {
             </div>
           </div>
           <div className="home-section">
-            <div className="label">Agents on your PATH</div>
-            <div className="agent-chips">
-              {installed.map((a) => (
-                <span key={a.id} className="agent-chip">
-                  <span className="dot" style={{ background: a.color }} />
-                  {a.name}
-                </span>
-              ))}
-              {!installed.length && <span className="muted">Scanning…</span>}
-            </div>
-            <div className="first-run">
-              <div className="fr-step">
-                <span>1</span>
-                <div>
-                  <b>Install your CLIs.</b> Sign in to Claude Code, Codex, Gemini or whichever agents you use, as usual.
-                </div>
-              </div>
-              <div className="fr-step">
-                <span>2</span>
-                <div>
-                  <b>Open a repo.</b> It becomes a board with workspaces you switch like tabs.
-                </div>
-              </div>
-              <div className="fr-step">
-                <span>3</span>
-                <div>
-                  <b>Spawn consoles.</b> Direct them by voice or keyboard, group them into teams, or leave them on a loop.
-                </div>
-              </div>
-            </div>
+            <AgentReadiness />
+            <GettingStarted ready={ready} opened={projects.length > 0} />
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+/** Each listed agent with whether it can take work now: the main ones always, any other once found. */
+function useReadiness(): [AgentDef, Readiness][] {
+  const agents = useApp((s) => s.agents)
+  const [signIns, setSignIns] = useState<Record<string, SignIn>>({})
+  useEffect(() => {
+    let live = true
+    Promise.all(MAIN_AGENTS.map((id) => invoke<SignIn>('profiles:default', id).then((s) => [id, s] as const, () => null))).then((r) => {
+      if (live) setSignIns(Object.fromEntries(r.filter((x) => x !== null)))
+    })
+    return () => {
+      live = false
+    }
+  }, [agents])
+  return useMemo(() => {
+    const scanned = agents.length > 0
+    const listed = AGENTS.filter((a) => a.id !== 'shell' && (MAIN_AGENTS.includes(a.id) || agents.some((x) => x.id === a.id && x.path)))
+    return listed.map((a) => [a, readinessOf(a, scanned ? (agents.find((x) => x.id === a.id) ?? { id: a.id, path: null }) : undefined, signIns[a.id])])
+  }, [agents, signIns])
+}
+
+const STATE_ICON = { ready: Check, signin: CircleAlert, missing: CircleAlert, scanning: RefreshCw } as const
+
+function AgentReadiness() {
+  const rows = useReadiness()
+  const [busy, setBusy] = useState(false)
+  const rescan = async () => {
+    setBusy(true)
+    await useApp.getState().refreshAgents(true)
+    setBusy(false)
+  }
+  return (
+    <>
+      <div className="label row">
+        Your agents
+        <span className="spacer" />
+        <button className="icon-btn sm" title="Look again (after installing or signing in)" onClick={rescan} disabled={busy}>
+          <RefreshCw size={13} className={busy ? 'spin' : undefined} />
+        </button>
+      </div>
+      <div className="agent-ready">
+        {rows.map(([a, r]) => {
+          const Icon = STATE_ICON[r.state]
+          return (
+            <div key={a.id} className={`ar-row ${r.state}`}>
+              <span className="dot" style={{ background: a.color }} />
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div className="ar-name">
+                  {a.name}
+                  <Icon size={13} className="ar-icon" />
+                </div>
+                <div className="ar-detail">{r.state === 'scanning' ? 'Looking…' : r.detail}</div>
+                {r.state === 'signin' && <Hint text="Sign in once, in a terminal:" command={r.command} />}
+                {r.state === 'missing' && MAIN_AGENTS.includes(a.id) && (r.command ? <Hint text="Install it with:" command={r.command} /> : null)}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}
+
+function Hint({ text, command }: { text: string; command: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div className="ar-hint">
+      <span>{text}</span>
+      <code className="mono">{command}</code>
+      <button
+        className="icon-btn xs"
+        title="Copy"
+        onClick={() =>
+          navigator.clipboard.writeText(command).then(
+            () => setCopied(true),
+            () => undefined
+          )
+        }
+      >
+        {copied ? <Check size={11} /> : <Copy size={11} />}
+      </button>
+    </div>
+  )
+}
+
+/** The three things between installing Fleetboard and a team at work, ticked off as they happen. */
+function GettingStarted({ ready, opened }: { ready: boolean; opened: boolean }) {
+  const steps = [
+    { done: ready, title: 'Sign in to an agent.', body: 'Any one of the above. Fleetboard uses the subscriptions you already have.' },
+    { done: opened, title: 'Open a repo.', body: 'It becomes a board, with a few goals to start from taken from the repo itself.' },
+    { done: false, title: 'Give it a goal.', body: 'Type what you want in the bar. A Lead plans it, workers build it in their own branches, and nothing lands in your checkout until you merge it.' }
+  ]
+  return (
+    <div className="first-run">
+      {steps.map((s, i) => (
+        <div key={i} className={`fr-step ${s.done ? 'done' : ''}`}>
+          <span>{s.done ? <Check size={12} /> : i + 1}</span>
+          <div>
+            <b>{s.title}</b> {s.body}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
 import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM, focusRect } from '../state/store'
 import { NodeFrame, removeWithHooks } from './NodeFrame'
 import { GroupFrame } from './GroupFrame'
@@ -421,15 +422,31 @@ function loadImageSize(path: string): Promise<{ w: number; h: number }> {
   })
 }
 
+/**
+ * An empty board offers a first goal taken from the repo (goalIdeas.ts): one click puts it in the
+ * command bar, where Enter starts a team on it. Building a board by hand is still there, second.
+ */
 function EmptyBoard() {
   const app = useApp.getState()
+  const ideas = useGoalIdeas()
   return (
     <div className="empty-board">
       <div className="empty-title">
-        An empty board. <em>Put some agents on it.</em>
+        An empty board. <em>Give it a goal.</em>
       </div>
+      {ideas.length > 0 && (
+        <div className="eb-ideas">
+          {ideas.map((g) => (
+            <button key={g.text} className="eb-idea" onClick={() => offerGoal(g.text)}>
+              <span className="eb-idea-text">{g.text}</span>
+              <span className="eb-idea-why">{g.why}</span>
+            </button>
+          ))}
+          <div className="dim eb-note">Pick one to put it in the bar, or type your own. A Lead plans it and workers build it in their own branches.</div>
+        </div>
+      )}
       <div className="row" style={{ justifyContent: 'center', gap: 8 }}>
-        <button className="btn primary" onClick={() => app.openPanel('composer')}>
+        <button className={`btn ${ideas.length ? '' : 'primary'}`} onClick={() => app.openPanel('composer')}>
           Compose a team
         </button>
         <button className="btn" onClick={() => app.openPanel('presets')}>

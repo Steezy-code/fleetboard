@@ -126,6 +126,47 @@
   font-family: var(--serif);
   color: var(--text);
 }
+/* first goals from the repo (goalIdeas.ts): the main way off an empty board */
+.eb-ideas {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: min(560px, calc(100vw - 48px));
+  margin: 0 auto 18px;
+}
+.eb-idea {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, transform 0.12s;
+}
+.eb-idea:hover {
+  border-color: var(--accent-line);
+  transform: translateY(-1px);
+}
+.eb-idea-text {
+  flex: 1;
+  min-width: 0;
+}
+.eb-idea-why {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.eb-note {
+  margin-top: 4px;
+  font-size: 12px;
+}
 
 /* ---------- nodes ---------- */
 .node {
@@ -576,6 +617,23 @@
   color: var(--text-2);
   font-weight: 500;
 }
+.try-idea {
+  max-width: 420px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.try-idea:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
 .command-bar {
   position: relative;
   display: flex;
@@ -899,6 +957,91 @@
   color: var(--text);
   font-weight: 600;
 }
+.fr-step.done {
+  color: var(--dim);
+}
+.fr-step.done b {
+  color: var(--text-2);
+}
+.fr-step.done > span {
+  border-color: color-mix(in srgb, var(--ok) 60%, transparent);
+  color: var(--ok);
+}
+/* each agent with whether it can take work now (readiness.ts), and the one step that fixes it */
+.home-section .label.row {
+  display: flex;
+  align-items: center;
+}
+.agent-ready {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ar-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 85%, transparent);
+}
+.ar-row > .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 6px;
+  flex: none;
+}
+.ar-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ar-row.ready .ar-icon {
+  color: var(--ok);
+}
+.ar-row.signin .ar-icon {
+  color: var(--warn-text);
+}
+.ar-row.missing .ar-icon,
+.ar-row.scanning .ar-icon {
+  color: var(--dim);
+}
+.ar-row.missing .ar-name {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.ar-detail {
+  font-size: 12px;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ar-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.ar-hint code {
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 11.5px;
+}
+.ar-hint .icon-btn.xs {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+}
 .modal-bare {
   flex: 1;
   min-height: 0;
@@ -1197,4 +1340,42 @@
   gap: 8px;
   align-items: flex-start;
   max-width: 320px;
+}
+
+/* a one-time explanation where the thing happens (chrome/Tip.tsx) */
+.tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 6px 6px 10px;
+  border-radius: 9px;
+  border: 1px dashed var(--accent-line);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.tip-icon {
+  flex: none;
+  color: var(--accent);
+}
+.tip-text {
+  flex: 1;
+  min-width: 0;
+}
+.tip-text b {
+  color: var(--text);
+  font-weight: 600;
+}
+.inbox-tray > .tip {
+  margin: 0 10px 8px;
+}
+/* under the focused tile's own header, which keeps its buttons */
+.focus-tip {
+  position: absolute;
+  top: 104px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 510;
+  width: min(560px, calc(100vw - 32px));
 }
