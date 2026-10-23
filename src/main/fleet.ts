@@ -617,6 +617,21 @@ async function wouldTouch(cwd: string, commit: string): Promise<{ ok: true; file
   return { ok: true, files: d.out.split('\0').filter(Boolean) }
 }
 
+/**
+ * Files the merge would bring in that the user already has here, untracked and ignored: a real .env
+ * where the team's branch adds a template. git treats ignored files as expendable and overwrites them
+ * on a merge without a word, which is the one way a merge could touch the user's own work; so they
+ * are found first and the merge is refused.
+ */
+export async function ignoredInTheWay(cwd: string, incoming: string[]): Promise<string[]> {
+  const top = (await git(cwd, ['rev-parse', '--show-toplevel'])).out
+  const present = top ? incoming.filter((f) => fs.existsSync(path.join(top, f))) : []
+  if (!present.length) return []
+  // check-ignore answers only for paths that are ignored and not tracked; exit 1 means none are
+  const r = await runGit(top, ['check-ignore', '-z', '--stdin'], { input: present.join('\0') + '\0', timeout: 30_000, gitOpts: NO_HOOKS })
+  return r.code === 0 ? r.stdout.split('\0').filter(Boolean) : []
+}
+
 /** The files among `touched` an exclusion covers, each named with the rule it hit. */
 const excludedHits = (touched: string[], wontTouch: string[] | undefined, how: string) =>
   touched.flatMap((f) => {
@@ -1352,29 +1367,35 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       // function every client reaches: the Ready card, and the phone's /api/merge. Checked against
       // what the merge would actually bring in, not the file list the card was drawn from, which the
       // Lead may have added to since.
-      const wontTouch = s.charter?.wontTouch
-      if (wontTouch?.length) {
-        const d = await wouldTouch(s.projectPath, at)
-        if (!d.ok) return { ok: false, error: `The team's changes could not be checked against what you ruled out: ${d.error}` }
-        const refusal = excludedMergeRefusal(d.files, wontTouch)
-        if (refusal) return { ok: false, error: refusal }
+      const d = await wouldTouch(s.projectPath, at)
+      if (!d.ok) return { ok: false, error: `The team's changes could not be checked before merging: ${d.error}` }
+      const refusal = excludedMergeRefusal(d.files, s.charter?.wontTouch)
+      if (refusal) return { ok: false, error: refusal }
+      const local = await ignoredInTheWay(s.projectPath, d.files)
+      if (local.length) {
+        const list = `${local.slice(0, 5).join(', ')}${local.length > 5 ? `, and ${local.length - 5} more` : ''}`
+        return { ok: false, error: `Not merged: the team's work brings in ${list}, which you have here as ${local.length === 1 ? 'a file' : 'files'} git ignores, so the merge would overwrite ${local.length === 1 ? 'it' : 'them'} without asking. Move ${local.length === 1 ? 'it' : 'them'} aside, then merge again; the work stays on ${lead.branch}.` }
       }
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
       const busy = await unfinishedOperation(s.projectPath)
       if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then merge again; the work stays on ${lead.branch}.` }
+      const before = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out
       const r = await git(s.projectPath, ['merge', '--no-ff', '-m', `Merge ${lead.branch}: ${lead.task?.slice(0, 60) ?? ''}`, at])
       if (!r.ok) {
         // undo only a merge this started (a conflict); a merge git refused to start left nothing to undo
         if (await unfinishedOperation(s.projectPath)) await git(s.projectPath, ['merge', '--abort'])
         return { ok: false, error: r.err.slice(0, 600) || r.out.slice(0, 600) }
       }
-      // the merge commit, so the Ready card can offer to undo it while it is still the tip
-      const commit = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out.trim()
+      // the merge commit, so the Ready card can offer to undo it while it is still the tip; none when
+      // the work was already in ("Already up to date" makes no commit, and HEAD is then the user's
+      // own, which an Undo would revert)
+      const after = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out.trim()
+      const commit = after && after !== before ? after : ''
       journal({
         kind: 'fleet.merge',
-        text: `the team's branch ${lead.branch} was merged into ${current.out}`,
+        text: commit ? `the team's branch ${lead.branch} was merged into ${current.out}` : `the team's branch ${lead.branch} was already in ${current.out}`,
         project: s.projectPath,
         // which commit: the night log is where you look for a merge you did not watch, and that is
         // the one thing that identifies it afterwards
@@ -1405,6 +1426,9 @@ export async function revertMerge(projectId: string, commit: string): Promise<{ 
   const busy = await unfinishedOperation(s.projectPath)
   if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then undo the merge.` }
   const head = (await git(s.projectPath, ['rev-parse', 'HEAD'])).out.trim()
+  // only a merge: "revert -m 1" of an ordinary commit would undo the user's own work
+  const parents = (await git(s.projectPath, ['rev-list', '--parents', '-n', '1', commit])).out.split(' ').length - 1
+  if (parents < 2) return { ok: false, error: 'That commit is not a merge, so there is no merge to undo.' }
   if (head !== commit) return { ok: false, error: 'Your checkout has moved on since that merge, so undoing it here would bury the commits made since. Revert it yourself.' }
   const r = await git(s.projectPath, ['revert', '-m', '1', '--no-edit', commit])
   if (!r.ok) {
