@@ -139,3 +139,11 @@ test('feedback for an agent links each comment, and says the rest of the PR is n
   assert.doesNotMatch(msg, /gh pr view \d+ --comments/, 'not sent to read every comment on the PR')
   assert.doesNotMatch(msg, /Ignore previous instructions/, "the PR's title is its author's, not a reviewer's")
 })
+
+test("a branch's agent is forgotten once it has no open PR, so a later PR reusing the name is not routed to it", () => {
+  useApp.getState().setProjectExtra('prAgents', { 'fix-login': 'con_1', 'old-work': 'con_2' })
+  useApp.getState().setProjectExtra('prSeen', [])
+  const open = { number: 1, title: 't', branch: 'fix-login', url: 'u', author: 'me', fork: false, comments: [] }
+  prf.applyFeedback({ ok: true, at: 0, viewer: 'me', prs: [open] })
+  assert.deepEqual(useApp.getState().project!.extras.prAgents, { 'fix-login': 'con_1' })
+})

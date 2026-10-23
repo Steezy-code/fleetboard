@@ -114,6 +114,13 @@ export function setBranchAgent(branch: string, consoleId: string) {
   useApp.getState().setProjectExtra('prAgents', { ...extras().prAgents, [branch]: consoleId })
 }
 
+/** Forget the agents of branches with no open PR: a later PR reusing the name is someone else's work. */
+function pruneBranchAgents(open: Set<string>) {
+  const agents: Record<string, string> = extras().prAgents ?? {}
+  const kept = Object.fromEntries(Object.entries(agents).filter(([branch]) => open.has(branch)))
+  if (Object.keys(kept).length !== Object.keys(agents).length) useApp.getState().setProjectExtra('prAgents', Object.keys(kept).length ? kept : undefined)
+}
+
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 
 /**
@@ -179,13 +186,16 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
     return owner.id
   }
   const current = useCi.getState().status
-  const here = current?.ok && current.branch === pr.branch
+  // a fork's branch is the stranger's, whatever it is called: never "the branch my checkout is on"
+  const here = current?.ok && current.branch === pr.branch && !pr.fork
   const prompt =
     msg +
     '\n\n' +
-    (here
-      ? 'You are in my checkout, already on that branch.'
-      : `Don't touch my current checkout${current?.ok ? ` (it is on ${current.branch})` : ''}: add a git worktree for ${pr.branch} in a temporary folder, work and push from there, then remove the worktree.`)
+    (pr.fork
+      ? `This pull request comes from a fork, so its branch is not ours to push to. Don't touch my current checkout: check it out with gh pr checkout ${pr.number} in a temporary git worktree, try your changes there, then reply on the PR with what you suggest, and remove the worktree.`
+      : here
+        ? 'You are in my checkout, already on that branch.'
+        : `Don't touch my current checkout${current?.ok ? ` (it is on ${current.branch})` : ''}: add a git worktree for ${pr.branch} in a temporary folder, work and push from there, then remove the worktree.`)
   // a new agent is the most expensive thing this does on its own, as for a CI fixer
   if (opts.auto && !maySpendOn(app.settings.defaultAgent, 'sending an agent at review comments')) return null
   const taken = allConsoles().map((c) => c.data.name as string)
@@ -195,7 +205,8 @@ export async function routeFeedback(pr: PrFeedback, opts: { list?: PrComment[]; 
   // the console would inherit the global auto-approve setting
   const [id] = spawnConsoles({ names: [name], initialPrompt: prompt, autoApprove: false })
   if (!id) return null
-  setBranchAgent(pr.branch, id)
+  // a fork's branch name is the stranger's: never what routes later comments to this agent
+  if (!pr.fork) setBranchAgent(pr.branch, id)
   markSent(pr, list)
   if (opts.auto) journal('pr.route', `${list.length} review comment${list.length === 1 ? '' : 's'} on PR #${pr.number}, so ${name} was started on them`, { pr: pr.number, consoleId: id, comments: list.map((c) => c.id) })
   app.toast(opts.auto ? `New review comments on PR #${pr.number}, so ${name} is on them` : `${name} is on it`, 'info')
@@ -218,6 +229,8 @@ export function applyFeedback(result: PrFeedbackResult) {
   const fresh = result.prs.map((pr) => ({ pr, list: pr.comments.filter((c) => !seen.has(c.id)) })).filter((x) => x.list.length)
   keepOnly('prSeen', current, fresh.flatMap((x) => x.list.map((c) => c.id)))
   keepOnly('prSent', current)
+  // the query reads the 20 most recently updated open PRs: with 20 back, a quieter one may be missing
+  if (result.prs.length < 20) pruneBranchAgents(new Set(result.prs.filter((p) => !p.fork).map((p) => p.branch)))
   if (!fresh.length) return
   for (const { pr, list } of fresh) {
     const who = [...new Set(list.map((c) => '@' + c.author))].join(', ')
