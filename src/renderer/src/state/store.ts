@@ -10,12 +10,14 @@ import type {
   NodeType,
   Project,
   ProjectMeta,
+  PtyInfo,
   Settings,
   Workspace
 } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
-import { invoke, uid } from '../lib/api'
+import { errorText, invoke, uid } from '../lib/api'
 import { baseName } from '../workbench/paths'
+import { mayDropUnsaved } from '../lib/unsaved'
 
 /**
  * Per-window memory that outlives the page (a crash, a reload) but not the app: sessionStorage belongs
@@ -77,6 +79,8 @@ interface AppState {
   statuses: Record<string, ConsoleStatus>
   /** consoles with a live process in the main process */
   live: Record<string, boolean>
+  /** the live ones whose process was started with auto-approval: what they do now, not the setting */
+  approving: Record<string, boolean>
   /** node shown full-window (maximize button) */
   focusedNode: string | null
   panel: PanelState | null
@@ -94,7 +98,7 @@ interface AppState {
   setSettings: (patch: Partial<Settings>) => Promise<void>
   refreshAgents: (force?: boolean) => Promise<void>
   openProject: (path: string) => Promise<void>
-  closeProject: () => void
+  closeProject: () => Promise<void>
 
   // workspaces
   addWorkspace: (name?: string) => string
@@ -154,7 +158,7 @@ interface AppState {
   toast: (text: string, tone?: Toast['tone'], action?: Toast['action']) => void
   confirm: (req: Omit<ConfirmRequest, 'id' | 'resolve'>) => Promise<boolean>
   setStatus: (id: string, s: ConsoleStatus) => void
-  setLive: (id: string, live: boolean) => void
+  setLive: (id: string, live: boolean, autoApproves?: boolean) => void
 }
 
 export const newWorkspace = (name: string): Workspace => ({
@@ -256,8 +260,6 @@ function clearFocusReturn(w: Workspace): Workspace {
   return { ...w, camera: saved, extras }
 }
 
-const removeNodesNow = (ids: string[]) => (useApp.getState() as any)._removeNodes(ids)
-
 let saveTimer: number | undefined
 let saveWarnedAt = 0
 /**
@@ -279,7 +281,7 @@ function scheduleSave(p: Project | null) {
         console.error('saving the board failed', e)
         if (Date.now() - saveWarnedAt < 30_000) return
         saveWarnedAt = Date.now()
-        useApp.getState().toast(`Could not save the board: ${String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`, 'warn')
+        useApp.getState().toast(`Could not save the board: ${errorText(e)}`, 'warn')
       }),
     350
   )
@@ -330,6 +332,7 @@ export const useApp = create<AppState>((set, get) => {
     selection: [],
     statuses: {},
     live: {},
+    approving: {},
     focusedNode: null,
     panel: null,
     drawer: null,
@@ -342,9 +345,10 @@ export const useApp = create<AppState>((set, get) => {
       const [settings, projects] = await Promise.all([invoke<Settings>('store:settings'), invoke<ProjectMeta[]>('store:projects')])
       set({ settings: { ...DEFAULT_SETTINGS, ...settings }, projects })
       get().refreshAgents()
-      const live = await invoke<{ id: string; status: ConsoleStatus }[]>('pty:list')
+      const live = await invoke<PtyInfo[]>('pty:list')
       set({
         live: Object.fromEntries(live.map((l) => [l.id, true])),
+        approving: Object.fromEntries(live.filter((l) => l.autoApproves).map((l) => [l.id, true])),
         statuses: Object.fromEntries(live.map((l) => [l.id, l.status]))
       })
       // the page was reloaded (after a crash, or by hand): back to the board it showed
@@ -360,12 +364,14 @@ export const useApp = create<AppState>((set, get) => {
     refreshAgents: async (force) => set({ agents: await invoke('agents:detect', force) }),
 
     openProject: async (path) => {
+      // from a playbook or by voice as well as the home screen: an editor's unsaved work goes only if the user says so
+      if (get().project && get().project!.path !== path && !(await mayDropUnsaved('Open another project'))) return
       const id = await invoke<string>('store:projectId', path)
       // null means there is no board for this folder yet. A *refusal* means there is one and this
       // build must not touch it — opening a blank board over that id would be a board that can never
       // save, so stay where we are and say why.
       const loaded = await invoke<Project | null>('store:loadProject', id).catch((e) => {
-        get().toast(String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''), 'warn')
+        get().toast(errorText(e), 'warn')
         return undefined
       })
       if (loaded === undefined) return
@@ -386,11 +392,18 @@ export const useApp = create<AppState>((set, get) => {
       project = { ...project, path, lastOpened: Date.now() }
       // quit while focused: come back at the view from before focusing
       project = { ...project, workspaces: mapWorkspaces(project, clearFocusReturn) }
-      set({ project, selection: [], panel: null, focusedNode: null })
+      // the board being replaced is saved now: its pending save would be cancelled by the new one's
+      const previous = get().project
+      if (previous && previous.id !== project.id) {
+        cancelScheduledSave()
+        void invoke('store:saveProject', previous)
+      }
+      set({ project, selection: [], panel: null, drawer: null, focusedNode: null })
       scheduleSave(project)
       windowSession.set(OPEN_PROJECT, path)
     },
-    closeProject: () => {
+    closeProject: async () => {
+      if (!(await mayDropUnsaved('Close the project'))) return
       windowSession.set(OPEN_PROJECT, null)
       restoreFocusInstantly()
       const p = get().project
@@ -475,7 +488,7 @@ export const useApp = create<AppState>((set, get) => {
       }),
     removeNodes: (ids) => {
       if (get().focusedNode && ids.includes(get().focusedNode!)) get().exitFocus()
-      removeNodesNow(ids)
+      get()._removeNodes(ids)
     },
     _removeNodes: (ids: string[]) =>
       mutateWs((ws) => {
@@ -657,12 +670,15 @@ export const useApp = create<AppState>((set, get) => {
         }))
       }),
     setStatus: (id, s) => set((st) => (st.statuses[id] === s ? st : { statuses: { ...st.statuses, [id]: s } })),
-    setLive: (id, live) =>
+    setLive: (id, live, autoApproves = false) =>
       set((st) => {
         const next = { ...st.live }
+        const approving = { ...st.approving }
         if (live) next[id] = true
         else delete next[id]
-        return { live: next }
+        if (live && autoApproves) approving[id] = true
+        else delete approving[id]
+        return { live: next, approving }
       })
   }
 })

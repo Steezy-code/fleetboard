@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useApp } from './state/store'
 import { SCHEMA_VERSION, type Recovery } from '@shared/types'
-import { fb, on, invoke } from './lib/api'
+import { errorText, fb, on, invoke } from './lib/api'
 import { wireConsoleEvents } from './engine/consoles'
 import { wireFleet } from './engine/fleet'
 import { startEngines } from './engine/engines'
@@ -43,7 +43,7 @@ export function App() {
         // a save that fails must not keep the app from quitting, nor lose the board without a word
         const failed = await invoke('store:saveProject', p).then(
           () => null,
-          (e) => String(e?.message ?? e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+          (e) => errorText(e)
         )
         if (failed) {
           const anyway = await useApp.getState().confirm({

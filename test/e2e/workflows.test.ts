@@ -44,7 +44,7 @@ test('handoff: a session is summarized by the CLI and the brief is typed into a 
   // the brief was written from the source's real transcript
   const brief = app.fakeLog((e) => e.event === 'print').at(-1)
   assert.match(brief.prompt, /Parser half done/)
-  assert.ok(brief.args.includes('--allowedTools'), 'summarizing is read-only')
+  assert.equal(brief.args[brief.args.indexOf('--tools') + 1], 'Read,Grep,Glob', 'summarizing is read-only')
   // and typed into the new console once it was ready
   const got = await app.waitFor(() => app.fakeLog((e) => e.event === 'prompt' && e.pid !== app.fakeLog((x) => x.event === 'prompt' && /build the parser/.test(x.prompt))[0]?.pid && /taking over a task/.test(e.prompt))[0], { label: 'brief delivered', timeout: 20_000 })
   assert.match(got.prompt, /\*\*Goal\*\* Finish the parser/)

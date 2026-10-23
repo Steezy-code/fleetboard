@@ -2,9 +2,11 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { pairs } from '@shared/seq'
+import { dayKey } from '@shared/time'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { listProfiles } from './profiles'
+import { userEnv } from './env'
 
 // Usage pill + token analytics, read from the CLIs' own local session logs. Nothing leaves the machine.
 //   Claude Code: <config>/projects/**/*.jsonl  — assistant lines carry message.usage
@@ -128,10 +130,11 @@ function roots(): { agent: UsageAgent; dir: string; exists: boolean }[] {
   const home = os.homedir()
   const list: { agent: UsageAgent; dir: string }[] = [
     { agent: 'claude', dir: path.join(home, '.claude', 'projects') },
-    { agent: 'codex', dir: path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions') },
+    { agent: 'codex', dir: path.join(userEnv().CODEX_HOME || path.join(home, '.codex'), 'sessions') },
     { agent: 'gemini', dir: path.join(home, '.gemini', 'tmp') }
   ]
-  if (process.env.CLAUDE_CONFIG_DIR) list.push({ agent: 'claude', dir: path.join(process.env.CLAUDE_CONFIG_DIR, 'projects') })
+  const claudeDir = userEnv().CLAUDE_CONFIG_DIR
+  if (claudeDir) list.push({ agent: 'claude', dir: path.join(claudeDir, 'projects') })
   try {
     for (const p of listProfiles()) {
       if (p.agentId === 'claude') list.push({ agent: 'claude', dir: path.join(p.dir, 'projects') })
@@ -513,11 +516,6 @@ const add = (t: Tot, e: Ev) => {
   t.cacheRead += e[5]
   t.total += e[2] + e[3] + e[4] + e[5]
 }
-const pad = (n: number) => String(n).padStart(2, '0')
-export const dayKey = (t: number) => {
-  const d = new Date(t)
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
 const startOfDay = (t: number) => {
   const d = new Date(t)
   d.setHours(0, 0, 0, 0)
@@ -725,13 +723,25 @@ export const projectSlug = (cwd: string) => cwd.replace(/[^a-zA-Z0-9]/g, '-')
  */
 export async function spentIn(cwds: string[]): Promise<Record<string, Tot | null>> {
   await scan(false)
+  // The folder Claude Code filed each log under: the first one below its projects root. Not the log's
+  // own folder, which for a subagent's log is <session>/subagents, a third of what a member spends.
+  const claudeRoots = roots()
+    .filter((r) => r.agent === 'claude')
+    .map((r) => r.dir + path.sep)
+  const byFolder = new Map<string, FileEntry[]>()
+  for (const [file, f] of cache) {
+    if (f.agent !== 'claude') continue
+    const root = claudeRoots.find((r) => file.startsWith(r))
+    if (!root) continue
+    const folder = file.slice(root.length).split(path.sep)[0]!
+    byFolder.set(folder, [...(byFolder.get(folder) ?? []), f])
+  }
   const out: Record<string, Tot | null> = {}
   for (const cwd of cwds) {
-    const slug = projectSlug(cwd)
+    const files = byFolder.get(folderFor(cwd, [...byFolder.keys()]) ?? '') ?? []
     const seen = new Set<string>()
     let tot: Tot | null = null
-    for (const [file, f] of cache) {
-      if (f.agent !== 'claude' || path.basename(path.dirname(file)) !== slug) continue
+    for (const f of files) {
       for (const e of f.events) {
         // resumed sessions replay their history into a new file; count each message once
         if (e[7] !== ':') {
@@ -745,6 +755,19 @@ export async function spentIn(cwds: string[]): Promise<Record<string, Tot | null
   }
   return out
 }
+
+/**
+ * Claude Code's folder for a cwd: its slug, or for a slug over 200 characters the first 200, a dash
+ * and a hash of its own. The hash is not reproduced here, so a long one is taken only when exactly
+ * one folder starts that way; sibling worktrees share the prefix, and a guess would count another's.
+ */
+function folderFor(cwd: string, folders: string[]): string | null {
+  const slug = projectSlug(cwd)
+  if (slug.length <= SLUG_MAX) return slug
+  const like = folders.filter((f) => f.startsWith(`${slug.slice(0, SLUG_MAX)}-`))
+  return like.length === 1 ? like[0]! : null
+}
+const SLUG_MAX = 200
 
 export function register(ctx: MainContext) {
   emit = ctx.emit

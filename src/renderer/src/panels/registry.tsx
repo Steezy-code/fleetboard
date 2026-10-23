@@ -22,10 +22,13 @@ import MarkdownStudio from '../studios/MarkdownStudio'
 import DocumentsStudio from '../studios/DocumentsStudio'
 import DiagramsStudio from '../studios/DiagramsStudio'
 import { FleetDiffPanel } from '../fleet/Inbox'
+import type { DrawerName, ModalName } from './names'
 
 /**
  * Modals open with useApp.openPanel(name, props); drawers (floating right-side cards) with
- * useApp.openDrawer(name, props). Each component receives the props it was opened with.
+ * useApp.openDrawer(name, props). Each component receives the props it was opened with. The names
+ * are listed in names.ts, and `satisfies` keeps the two in step: a panel missing from either side,
+ * or one only on one side, does not compile.
  */
 export const PANELS: Record<string, ComponentType<any>> = {
   spawn: SpawnPanel,
@@ -44,7 +47,7 @@ export const PANELS: Record<string, ComponentType<any>> = {
   diagrams: DiagramsStudio,
   fleetDiff: FleetDiffPanel,
   sweep: SweepPanel
-}
+} satisfies Record<ModalName, ComponentType<any>>
 
 export const DRAWERS: Record<string, ComponentType<any>> = {
   orchestrator: OrchestratorPanel,
@@ -54,4 +57,4 @@ export const DRAWERS: Record<string, ComponentType<any>> = {
   ci: CiPanel,
   chat: ChatPanel,
   journal: JournalPanel
-}
+} satisfies Record<DrawerName, ComponentType<any>>

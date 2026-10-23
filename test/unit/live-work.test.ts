@@ -14,6 +14,7 @@ import {
   farOver,
   liveDiff,
   mayRun,
+  numstat,
   overEstimate,
   stampTask,
   withRun,
@@ -86,6 +87,14 @@ test('the live diff counts each file once, tracked or new, and binaries as no li
   assert.equal(diffLabel(d), '4 files +53 −2')
   assert.equal(diffLabel(liveDiff('', [], 0)), '', 'nothing changed yet says nothing')
   assert.equal(diffLabel(liveDiff('1\t1\ta', [], 0)), '1 file +1 −1')
+})
+
+test('numstat keeps a path with a tab in it whole, and counts a binary file as no lines', () => {
+  assert.deepEqual(numstat('3\t1\ta\tb.ts\n-\t-\tlogo.png'), [
+    { path: 'a\tb.ts', add: 3, del: 1 },
+    { path: 'logo.png', add: 0, del: 0 }
+  ])
+  assert.deepEqual(numstat(''), [])
 })
 
 // ---------------------------------------------------------------- the decision log

@@ -6,6 +6,7 @@
 // every time.
 
 import { estimateOf } from './live'
+import { enforceable } from './mergeReview'
 
 export interface CharterAssumption {
   text: string
@@ -104,7 +105,8 @@ export function coerceCharter(raw: unknown, request: string, at: number = Date.n
 export function scoreConfidence(c: Pick<Charter, 'assumptions' | 'wontTouch' | 'doneWhen' | 'question'>): number {
   // no assumptions is no work shown, which is not the same as nothing assumed
   let n = c.assumptions.length ? Math.round((c.assumptions.filter((a) => a.known).length / c.assumptions.length) * 100) : 50
-  if (!c.wontTouch.length) n -= 10
+  // a rule the merge gate cannot hold anyone to (a description) is no rule
+  if (!c.wontTouch.some(enforceable)) n -= 10
   // however well the rest is known, nothing says when it is finished
   if (!c.doneWhen.trim()) n = Math.min(n, 60)
   if (c.question) n = Math.min(n, 70)

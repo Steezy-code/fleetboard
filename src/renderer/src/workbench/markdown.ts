@@ -1,7 +1,7 @@
 import { Marked, type Tokens } from 'marked'
 import hljs from 'highlight.js/lib/common'
 import { fileUrl, invoke } from '../lib/api'
-import { dirname, joinPath } from './paths'
+import { joinPath } from './paths'
 
 // Markdown + code highlighting shared by the file/doc nodes, the studios and the PDF export.
 // Output is sanitized (local repos can contain hostile HTML; the renderer has IPC access).
@@ -307,5 +307,3 @@ export function firstHeading(src: string): string | null {
   const h = m?.[1]?.trimEnd().replace(/(?:^|[ \t])#+$/, '').trimEnd()
   return h ? h.replace(/[*_`]/g, '').trim() || null : null
 }
-
-export { dirname }

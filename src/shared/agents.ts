@@ -17,6 +17,17 @@ import type { AgentDef } from './types'
  */
 export const promptArg = (p: string) => (p.startsWith('-') ? ' ' + p : p)
 
+/**
+ * The CLIs whose headless runs Fleetboard can hold to reading: Claude Code by its tool list
+ * (cli.ts), Codex by its read-only sandbox, Gemini CLI by its plan mode. The planner, Oracle, loop
+ * judges and brainstorms feed a run console output, PR comments and model replies, any of which can
+ * carry instructions; another CLI's headless mode may edit files or run commands on them.
+ */
+const READS_ONLY = new Set(['claude', 'codex', 'gemini'])
+export const readsOnly = (agentId: string | undefined) => !!agentId && READS_ONLY.has(agentId)
+/** `agentId` when its headless run reads only, else Claude Code: a planner chosen before this was enforced. */
+export const readOnlyAgent = (agentId: string | undefined) => (readsOnly(agentId) ? agentId! : 'claude')
+
 export const AGENTS: AgentDef[] = [
   {
     id: 'claude', name: 'Claude Code', vendor: 'Anthropic', bin: 'claude', color: '#d97757',
@@ -29,11 +40,11 @@ export const AGENTS: AgentDef[] = [
     id: 'codex', name: 'Codex', vendor: 'OpenAI', bin: 'codex', color: '#6b7cff',
     resumeArgs: ['resume', '--last'], yoloArgs: ['--dangerously-bypass-approvals-and-sandbox'], editsArgs: ['--sandbox', 'workspace-write', '--ask-for-approval', 'on-request'], configEnv: 'CODEX_HOME',
     session: { resume: (id) => ['resume', id] },
-    headless: (p) => ['exec', '--skip-git-repo-check', promptArg(p)], homepage: 'https://openai.com/codex/', install: 'npm i -g @openai/codex'
+    headless: (p) => ['exec', '--skip-git-repo-check', '--sandbox', 'read-only', promptArg(p)], homepage: 'https://openai.com/codex/', install: 'npm i -g @openai/codex'
   },
   {
     id: 'gemini', name: 'Gemini CLI', vendor: 'Google', bin: 'gemini', color: '#4f8df7',
-    resumeArgs: ['--resume', 'latest'], yoloArgs: ['--yolo'], editsArgs: ['--approval-mode', 'auto_edit'], headless: (p) => ['-p', promptArg(p)],
+    resumeArgs: ['--resume', 'latest'], yoloArgs: ['--yolo'], editsArgs: ['--approval-mode', 'auto_edit'], headless: (p) => ['--approval-mode', 'plan', '-p', promptArg(p)],
     session: { start: (id) => ['--session-id', id], resume: (id) => ['--resume', id] },
     homepage: 'https://github.com/google-gemini/gemini-cli', install: 'npm i -g @google/gemini-cli'
   },

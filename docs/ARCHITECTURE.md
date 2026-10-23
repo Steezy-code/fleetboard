@@ -9,8 +9,10 @@ Read `docs/RESEARCH.md` for the feature spec (what each feature must do and look
 src/shared/types.ts      data model (BoardNode, Workspace, Project, Settings, MemoryCard, Profile, ...)
 src/shared/agents.ts     AGENTS catalog (bin, resumeArgs, yoloArgs, configEnv, headless(prompt))
 src/main/                Electron main process
-  index.ts               window, core IPC (pty:*, pdf:fromHtml, png:capture, win:*), registers modules
+  index.ts               window, core IPC (pty:*, pdf:fromHtml, win:*, app:*), registers modules
   context.ts             MainContext passed to each module's register(ctx)
+  roots.ts               which paths the fs handlers, fbfile:// and git may touch: the project, what the
+                         user granted, the app's own folders
   platform.ts            Linux/Windows differences in one place: console shell (PowerShell on Windows),
                          PATHEXT lookup, npm .cmd wrappers run as node <script>, kill a process tree,
                          junctions instead of symlinks, forward-slash paths for the renderer.
@@ -45,21 +47,43 @@ src/main/                Electron main process
                          fs:write (atomic; with a base, refuses to overwrite a change made on disk meanwhile), shell:*
   agents.ts              agents:detect
   git.ts                 the git drawer: status, diffs, commits, push/pull, branches, PRs (gh)
+  ci.ts                  the CI watcher: Actions runs for the branch, open PRs' checks, failed logs and
+                         review comments, through gh
+  sweep.ts               the morning sweep: a read-only health report across all of the user's repos
+  live.ts                live team work without a model: stalls, each worker's uncommitted diff, the
+                         charter's done-when run as merged work lands
+  knowledge.ts           what a repo's own files say about its checks, owners and style (plain reads)
+  skills.ts              Claude Code skills: SKILL.md folders, personal and per project
+  starter.ts             first goals for an empty board, read from the repo (a plan, a TODO), never generated
+  activity.ts            what a console is doing, from the tool-call bullets its terminal shows
   usage.ts               token usage from the CLIs' own logs, read on from where the last read stopped
   profiles.ts            several sign-ins per CLI (its config dir per profile)
 src/shared/prompt.ts     Prompt / PromptAnswer: a question a console is waiting on, and how to answer it
 src/shared/approvals.ts  Prompt → Inbox card (title, detail, buttons), for the board and the phone
 src/shared/qr.ts, ansi.ts  QR encoder (phone link), stripAnsi for matching words in output streams
+src/shared/fleet.ts      team shapes (FleetMember, FleetState, FleetReady); charter.ts the agreed job;
+                         mergeReview.ts the Ready card's checks; live.ts and drift.ts work against the charter;
+                         knowledge.ts repo knowledge; spend.ts what a worktree cost
+src/shared/ci.ts, time.ts, seq.ts, themes.ts  failing CI conclusions, the local day key, walking a list by
+                         neighbours, the app themes
 src/preload/index.ts     window.fb = { invoke, send, on, pathForFile }
 src/renderer/src/
-  lib/api.ts             invoke(), on(), uid(), runCli(), extractJson(), fileUrl(), journal()
+  lib/api.ts             invoke(), on(), errorText(), uid(), runCli(), extractJson(), fileUrl()
+  lib/journal.ts         journal(kind, text, detail): a Night-log line for anything done unattended
+                         (main/journal.ts writes it)
   workbench/paths.ts     the renderer's path maths: joinPath, dirname, baseName, relativeTo, isInside
   state/store.ts         zustand store useApp (project, workspaces, nodes, groups, wires, ink, panels, toasts, confirm)
   engine/consoles.ts     spawnConsoles(), sendToConsole(), killConsoles(), pauseAll/resumeAll, resolveTargets(), consoleTail(), onConsoleData()
   engine/engines.ts      registerEngine(fn) — background engines started once at boot
   board/                 Board (pan/zoom/marquee/drop), NodeFrame, GroupFrame, Wires, InkLayer, BoardOverlays
   nodes/registry.tsx     NODE_DEFS: node type → component; nodes/*Node.tsx
-  panels/registry.tsx    PANELS (modals) and DRAWERS (right floating cards); panels/*Panel.tsx, studios/*Studio.tsx
+  panels/registry.tsx    PANELS (modals) and DRAWERS (right floating cards); panels/*Panel.tsx, studios/*Studio.tsx;
+                         panels/names.ts lists the names alone (no React), and the registry is checked against it
+  fleet/                 the Inbox, the charter gate, team rules, the away summary, the ambient line and the
+                         model pass at repo knowledge
+  orchestration/         the fleet model the mission map, orchestrator and loops share; board presets
+  continuity/            usage and memory: the top-bar pill, the usage drawer, memory cards
+  playbooks/             one-click presets for regular work, each starting a Lead with a written brief
   chrome/                TopBar, Rails, BottomBar, Home, Minimap, FocusBar, UsagePill, BranchBadge, CiBadge
   voice/CommandBar.tsx   bottom command bar
   features/<area>.ts     side-effect entry per feature area: registerEngine(), BOARD_OVERLAYS.push()
@@ -100,7 +124,8 @@ src/renderer/src/
   Toasts: `useApp.getState().toast(text, tone)`.
 - **Style**: dark warm palette, single red-orange accent (`var(--accent)`), Geist UI font, JetBrains Mono for
   code/consoles, Fraunces italic for display headings. Reuse classes in theme.css. Put feature CSS in
-  `src/renderer/src/styles/<area>.css` and import it from your feature entry file (`features/<area>.ts`).
+  `src/renderer/src/styles/<area>.css` and import it from your feature entry file (`features/<area>.ts`),
+  or from the panel itself when its area has no entry file (sweep, studios).
 - Do not add npm dependencies **that ship with the app**. Available: react, zustand, lucide-react,
   @xterm/*, marked, highlight.js, @huggingface/transformers, kokoro-js. A devDependency is a smaller
   promise — it is not in anyone's install — but still a promise: oxlint and the build chain are the
@@ -114,7 +139,8 @@ src/renderer/src/
   then checked against the caller's **role**: `tools/list` only decides what a member is told about.
 - **HTML from a repo, a model or a web page goes through `sanitizeHtml`** (`workbench/markdown.ts`), and a URL
   out of it or out of the board file goes through `safeUrl`. `marked` has no sanitizer of its own, so only that
-  module and `studios/docs/render.ts` may import it — `test/unit/html-safety.test.ts` enforces both rules.
+  module may import it (studios/docs/render.ts goes through renderMarkdown) — `test/unit/html-safety.test.ts`
+  enforces both rules.
 - Verify with `npm run typecheck`, `npm run lint`, `npm test` and `npm run test:e2e` (see Testing).
   `npm run lint` is oxlint, errors only; its warnings (the React Compiler rules, exhaustive-deps) are
   there to read, not to gate.
@@ -155,7 +181,7 @@ src/renderer/src/
   the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests
   and the Windows-specific e2e files on Windows. It runs on a pull request and on a push to master —
   a branch with a pull request open would otherwise run all of it twice. The Windows installer is
-  built only for master and tags, since nothing consumes it otherwise and release.yml builds it again
-  from scratch on a tag.
+  built on master as a packaging check and not kept: release.yml builds the shipped one from a
+  vX.Y.Z tag on master, after the tests pass.
 - `FB_E2E_HEADLESS=1` skips Xvfb entirely (`--ozone-platform=headless`), which is how to run the e2e
   suite on a machine without it.

@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { isFailing } from '@shared/ci'
 import type { MainContext } from './context'
 import { which } from './env'
 import { NO_HOOKS, ghEnv, git, programsInRepoConfig, run, type RunOut } from './run'
@@ -311,8 +312,6 @@ export function nextPlanItem(root: string): { file: string; item: string } | nul
   return null
 }
 
-const FAILING = new Set(['failure', 'timed_out', 'startup_failure', 'action_required'])
-
 export function score(r: SweepRepo): void {
   let s = 0
   const a: string[] = []
@@ -321,7 +320,7 @@ export function score(r: SweepRepo): void {
     s += 4
     a.push(`Couldn't read the repo: ${r.error}`)
   }
-  if (r.ci && FAILING.has(r.ci.conclusion)) {
+  if (r.ci && isFailing(r.ci.conclusion)) {
     s += 40
     a.push(`CI failing on ${r.defaultBranch ?? 'the default branch'} (${r.ci.workflowName || 'workflow'})`)
   }

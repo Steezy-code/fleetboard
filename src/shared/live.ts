@@ -75,18 +75,27 @@ export interface LiveDiff {
   at: number
 }
 
+/**
+ * `git diff --numstat` → lines added / removed per file. A binary file says "-": it is a changed file
+ * with no lines to count, so it counts as 0.
+ */
+export function numstat(out: string): { path: string; add: number; del: number }[] {
+  return out
+    .split('\n')
+    .map((l) => l.split('\t'))
+    .filter((p) => p.length >= 3)
+    .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
+}
+
 /** `git diff --numstat HEAD` plus the untracked files (with their line counts, when they could be read). */
-export function liveDiff(numstat: string, untracked: { path: string; lines: number }[], at: number): LiveDiff {
+export function liveDiff(numstatOut: string, untracked: { path: string; lines: number }[], at: number): LiveDiff {
   const paths = new Set<string>()
   let add = 0
   let del = 0
-  for (const row of numstat.split('\n')) {
-    const [a, d, ...rest] = row.split('\t')
-    if (!rest.length) continue
-    paths.add(rest.join('\t'))
-    // a binary file says "-": it is a changed file with no lines to count
-    add += Number(a) || 0
-    del += Number(d) || 0
+  for (const f of numstat(numstatOut)) {
+    paths.add(f.path)
+    add += f.add
+    del += f.del
   }
   for (const u of untracked) {
     if (paths.has(u.path)) continue

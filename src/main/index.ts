@@ -161,6 +161,21 @@ function createWindow() {
   else win.loadFile(path.join(__dirname, '../renderer/index.html'))
 }
 
+/**
+ * Stop everything that outlives a window unless told to. Headless runs and goal checks are not
+ * consoles, so dispose() never sees them: a planner run or an `npm test` goal check outlived the app,
+ * spending tokens with its output going nowhere. Both quit paths run it (app:quit destroys the last
+ * window, so window-all-closed follows), and the second gets the first's promise instead of a rerun.
+ */
+let stopping: Promise<void> | undefined
+const shutdown = () =>
+  (stopping ??= (async () => {
+    cli.killRuns()
+    goal.killGoalChecks()
+    stopFleetTicks()
+    await ptys.dispose()
+  })())
+
 function registerCore() {
   ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ipcMain.on('app:background', (_e, color: string) => {
@@ -194,15 +209,11 @@ function registerCore() {
   })
   ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
   ipcMain.handle('pty:list', () => ptys.list())
+  ipcMain.handle('pty:info', (_e, id: string) => ptys.infoOf(String(id)))
 
   ipcMain.handle('app:quit', async () => {
     quitConfirmed = true
-    // headless runs and goal checks are not consoles, so dispose() never saw them: a planner run or
-    // an `npm test` goal check outlived the app, spending tokens with its output going nowhere
-    cli.killRuns()
-    goal.killGoalChecks()
-    stopFleetTicks()
-    await ptys.dispose()
+    await shutdown()
     // the board is already saved; don't let a slow child process keep the app alive
     win?.destroy()
     win = null
@@ -234,7 +245,11 @@ function registerCore() {
   // Render HTML to a real paginated PDF (document studio, markdown export).
   ipcMain.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
     if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
-    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true } })
+    // The HTML is the renderer's, rendered markdown today: printed as a page, never run as one. No
+    // scripts, a session of its own that keeps nothing, and nowhere to navigate or open a window to.
+    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, partition: 'pdf-print' } })
+    w.webContents.on('will-navigate', (e) => e.preventDefault())
+    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
     const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
     w.destroy()
@@ -242,6 +257,13 @@ function registerCore() {
     fs.writeFileSync(outPath, pdf)
     return outPath
   })
+}
+
+// The dev server's address and the test hooks are for `electron-vite dev` and the end-to-end tests: a
+// packaged app honouring them would load its window from wherever the environment pointed.
+if (app.isPackaged) {
+  delete process.env.ELECTRON_RENDERER_URL
+  delete process.env.FLEETBOARD_DEVTOOLS
 }
 
 // A separate state folder (FLEETBOARD_HOME) is a separate Fleetboard: give it its own Electron profile
@@ -308,9 +330,6 @@ app.whenReady().then(async () => {
 })
 
 app.on('window-all-closed', async () => {
-  cli.killRuns()
-  goal.killGoalChecks()
-  stopFleetTicks()
-  await ptys.dispose()
+  await shutdown()
   app.quit()
 })

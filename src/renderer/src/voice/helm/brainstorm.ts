@@ -6,6 +6,7 @@ import { extractJson, invoke, runCli } from '../../lib/api'
 import { allConsoles, useApp } from '../../state/store'
 import { sendGoal } from '../../engine/fleet'
 import { findFreeSpot, occupied } from '../../board/place'
+import { readOnlyAgent } from '@shared/agents'
 
 export type PersonaId = 'pragmatist' | 'wildcard' | 'critic'
 export type Effort = 'S' | 'M' | 'L'
@@ -64,8 +65,8 @@ export const PERSONAS: Record<PersonaId, { name: string; brief: string }> = {
 }
 
 const ORDER: PersonaId[] = ['pragmatist', 'wildcard', 'critic']
-/** Different CLIs make for a more varied panel; these go first when installed. */
-const PREFERRED = ['claude', 'codex', 'gemini', 'opencode', 'cursor', 'copilot', 'grok', 'crush', 'droid', 'amp', 'qwen']
+/** Different CLIs make for a more varied panel. Only those whose headless run reads only: a panelist reads the board. */
+const PREFERRED = ['claude', 'codex', 'gemini']
 
 const clip = (s: unknown, n: number) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim()
@@ -74,11 +75,11 @@ const clip = (s: unknown, n: number) => {
 let seq = 0
 const ideaId = () => `i${Date.now().toString(36)}${(seq++).toString(36)}`
 
-/** Up to three installed headless CLIs, one per persona (the planner's own repeats when there are fewer). */
+/** Up to three installed CLIs that run read-only, one per persona (the planner's own repeats when there are fewer). */
 export function pickPanel(): Panelist[] {
   const app = useApp.getState()
   const installed = new Set(app.agents.filter((a) => a.path).map((a) => a.id))
-  const planner = app.settings.plannerAgent || 'claude'
+  const planner = readOnlyAgent(app.settings.plannerAgent)
   const pool = [planner, ...PREFERRED.filter((id) => id !== planner)].filter((id) => installed.has(id))
   const agents = pool.length ? pool : [planner]
   return ORDER.map((persona, i) => ({ persona, agentId: agents[i % agents.length] ?? planner, state: 'thinking' as const }))
@@ -201,7 +202,7 @@ async function run(id: string, topic: string, panel: Panelist[], project: { name
 
 async function runPanel(id: string, topic: string, panel: Panelist[], project: { name: string; path: string }) {
   const context = boardHint()
-  const planner = useApp.getState().settings.plannerAgent || 'claude'
+  const planner = readOnlyAgent(useApp.getState().settings.plannerAgent)
   const ask = async (p: Panelist): Promise<{ ideas: Idea[]; error?: string }> => {
     try {
       const res = await runCli({ prompt: panelPrompt(topic, p.persona, project, context), cwd: project.path, agentId: p.agentId }).promise
@@ -232,7 +233,7 @@ async function runPanel(id: string, topic: string, panel: Panelist[], project: {
   update(id, { status: 'merging', ideas: localRank(all.flatMap((r) => r.ideas)) })
   try {
     const app = useApp.getState()
-    const res = await runCli({ prompt: mergePrompt(topic, all), cwd: project.path, agentId: app.settings.plannerAgent || undefined }).promise
+    const res = await runCli({ prompt: mergePrompt(topic, all), cwd: project.path, agentId: readOnlyAgent(app.settings.plannerAgent) }).promise
     const merged = coerceIdeas(extractJson(res.text))
     update(id, { status: 'done', ideas: merged.length ? merged.slice(0, 10) : localRank(all.flatMap((r) => r.ideas)) })
   } catch {

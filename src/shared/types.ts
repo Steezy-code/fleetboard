@@ -164,6 +164,10 @@ export interface ConsoleData {
   launch?: 'fresh' | 'resume' | 'ask'
   /** this console's conversation, for CLIs that take one (AgentDef.session): what a resume picks up */
   sessionId?: string
+  /** typed into the console once it can take input (spawnConsoles' initialPrompt, a handoff's brief), then cleared */
+  pendingPrompt?: string
+  /** run this shell command instead of the agent CLI (a preset's dev server or watcher) */
+  command?: string
   createdAt: number
 }
 
@@ -224,6 +228,8 @@ export interface PtyInfo {
   startedAt: number
   /** the conversation id the CLI runs under, when known */
   sessionId?: string
+  /** started with its auto-approval flag, which it keeps whatever the setting says later */
+  autoApproves: boolean
 }
 
 export interface Settings {
@@ -278,8 +284,6 @@ export interface CliRunRequest {
   cwd: string
   model?: string
   profileId?: string
-  /** allow file edits / tools (default: read-only plan mode where supported) */
-  allowTools?: boolean
 }
 
 export interface MemoryCard {

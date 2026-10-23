@@ -6,7 +6,7 @@ import type { MainContext } from './context'
 import { readRegularFile, readRegularText, writeDurable } from './paths'
 import type { WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
-import { allowed, grant, outsideMessage } from './roots'
+import { allowed, grant, grantDropped, outsideMessage } from './roots'
 
 /** The most a text read hands the renderer: any source file, note or log; past this it is not a text to edit here. */
 const MAX_READ = 32 * 1024 * 1024
@@ -142,9 +142,9 @@ function writeResolved(file: string, content: string | Uint8Array) {
 export function register(ctx: MainContext) {
   const { ipc } = ctx
   // A file dropped on the board. Sent by the preload at the moment getPathForFile resolves it, which
-  // only happens for a File backed by a real file — so this cannot be used to grant an arbitrary
-  // path. Without it every image or file dragged in from outside the project would be refused.
-  ipc.on('fs:grantDropped', (_e, p: string) => grant(String(p)))
+  // only happens for a File backed by a real file, and the bridge's own send refuses this channel.
+  // Without it every image or file dragged in from outside the project would be refused.
+  ipc.on('fs:grantDropped', (_e, p: string) => grantDropped(String(p)))
 
   // a path the user picks is a path the user may use: the three dialogs are the only place that
   // intent is expressed, so they are the only place the allowed set grows (see roots.ts)
@@ -217,6 +217,9 @@ export function register(ctx: MainContext) {
  * Files the desktop would run rather than show (scripts, binaries, launchers): a link in a README
  * must not start a program. Those are revealed in the file manager instead.
  */
+/** Folders macOS opens by running them, or by installing what is inside. */
+const BUNDLE = /\.(app|prefpane|workflow|action|saver|qlgenerator|mdimporter|plugin|bundle|kext|pkg|mpkg)\/?$/i
+
 const RUNNABLE = /\.(desktop|sh|bash|zsh|fish|command|run|bin|appimage|exe|bat|cmd|com|msi|msp|ps1|psm1|vbs|vbe|js|jse|mjs|cjs|wsf|wsh|wsc|jar|deb|rpm|py|pl|rb|scpt|app|lnk|url|pif|x86_64|hta|scr|cpl|chm|msc|reg|xll|appx|msix|application|appref-ms|settingcontent-ms)$/i
 
 /**
@@ -230,7 +233,12 @@ const VIEWABLE_ON_WINDOWS = /\.(md|markdown|txt|text|log|csv|tsv|json|jsonl|ya?m
 export function opensSafely(p: string, platform: NodeJS.Platform = process.platform): boolean {
   try {
     const st = fs.statSync(p)
-    if (st.isDirectory()) return true
+    // a folder opens in the file manager, unless it is one macOS runs: an app bundle and its kin,
+    // by its own name or the name a link to it hides (statSync follows the link, and so does open)
+    if (st.isDirectory()) {
+      const real = fs.realpathSync(p)
+      return ![p, real].some((x) => RUNNABLE.test(x) || BUNDLE.test(x))
+    }
     if (!st.isFile()) return false
     if (platform === 'win32') return VIEWABLE_ON_WINDOWS.test(p)
     if (st.mode & 0o111) return false

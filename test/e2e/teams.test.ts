@@ -179,6 +179,61 @@ test('Merge on a detached HEAD is refused, and pressing it twice merges once', a
   assert.equal(git(sb, repo, 'log', '--merges', '--first-parent', '--oneline').split('\n').filter(Boolean).length, 1, 'one merge commit')
 })
 
+test("Merge is refused on a branch without the commit the team started from, which would bring in history the card never showed", async () => {
+  const sb = makeSandbox()
+  const repo = makeRepo(sb)
+  fs.writeFileSync(path.join(repo, 'later.txt'), 'on main only')
+  git(sb, repo, 'add', '-A')
+  git(sb, repo, 'commit', '-qm', 'later')
+  app = await App.launch({ sandbox: sb, scenario: TWO_WORKERS })
+  const projectId = await app.openProject(repo)
+  await app.invoke('fleet:startLead', { projectId, projectPath: repo, goal: 'add the files' })
+  await waitReady(projectId)
+  // a release branch cut before the team's starting point
+  git(sb, repo, 'checkout', '-q', '-b', 'release', 'HEAD~1')
+  const head = git(sb, repo, 'rev-parse', 'HEAD')
+  const res = await app.invoke('fleet:mergeReady', projectId)
+  assert.equal(res.ok, false)
+  assert.match(res.error, /release does not have the commit the team started from.*1 commit /)
+  assert.equal(git(sb, repo, 'rev-parse', 'HEAD'), head, 'nothing merged')
+  assert.ok((await fleet(projectId)).ready, 'the Ready card stays')
+  git(sb, repo, 'checkout', '-q', '-')
+  const again = await app.invoke('fleet:mergeReady', projectId)
+  assert.equal(again.ok, true, JSON.stringify(again))
+})
+
+test("a new team closes the last one, whose work stays on its branch", async () => {
+  const { sb, repo, projectId } = await team(TWO_WORKERS)
+  const first = await waitReady(projectId)
+  const old = (await fleet(projectId)).members[first.leadId]
+  await app!.invoke('fleet:startLead', { projectId, projectPath: repo, goal: 'something else' })
+  const s = await fleet(projectId)
+  const open = Object.values(s.members).filter((m: any) => m.status !== 'closed')
+  assert.deepEqual(open.map((m: any) => m.role), ['lead'], "only the new Lead: the old team's members are closed")
+  assert.equal(s.members[first.leadId].status, 'closed')
+  assert.ok(git(sb, repo, 'rev-parse', '--verify', `refs/heads/${old.branch}`), "the old team's branch is kept")
+  assert.ok(!fs.existsSync(old.cwd), "and its worktree is gone")
+})
+
+test("Merge merges the commit the Ready card described, not one the Lead made after it", async () => {
+  const { sb, repo, projectId } = await team(TWO_WORKERS)
+  const ready = await waitReady(projectId)
+  assert.ok(ready.head, 'the card names its commit')
+  const lead = (await fleet(projectId)).members[ready.leadId]
+  // the Lead stays on after finishing; this is a commit nobody was shown
+  fs.writeFileSync(path.join(lead.cwd, 'late.txt'), 'unseen')
+  git(sb, lead.cwd, 'add', 'late.txt')
+  git(sb, lead.cwd, 'commit', '-qm', 'late')
+  const stale = await app!.invoke('fleet:mergeReady', projectId, 'f'.repeat(40))
+  assert.equal(stale.ok, false, 'a card that has been replaced is not merged')
+  assert.match(stale.error, /changed since you looked/)
+  const res = await app!.invoke('fleet:mergeReady', projectId, ready.head)
+  assert.equal(res.ok, true, JSON.stringify(res))
+  assert.ok(fs.existsSync(path.join(repo, 'a.txt')), 'the work the card showed')
+  assert.ok(!fs.existsSync(path.join(repo, 'late.txt')), 'not the commit made after it')
+  assert.ok(git(sb, repo, 'rev-parse', '--verify', `refs/heads/${ready.branch}`), 'whose branch is kept, as -d refuses it')
+})
+
 test('two workers editing the same file: the second merge reports the conflict and the lead branch stays clean', async () => {
   const { projectId } = await team({
     lead: {
@@ -350,9 +405,11 @@ test('the fleet and hook servers refuse requests without the secret, from a brow
   assert.equal((await call(`/mcp/${secret}/${member}`, {})).status, 404, 'the old secret-in-URL shape is gone')
   assert.equal((await call(url.pathname, { ...auth, Origin: 'https://evil.example' })).status, 403, 'from a web page')
   assert.equal((await call(url.pathname, { ...auth, 'Content-Type': 'text/plain' })).status, 403, 'a no-preflight content type')
-  // the hook settings file holds no secret: it comes from each console's environment
+  // the hook settings file holds no secret, and no command line names one: the hook script reads
+  // the token from each console's environment
   const hooks = fs.readFileSync(path.join(hooksDir, 'claude-hooks.json'), 'utf8')
-  assert.ok(!hooks.includes(secret) && hooks.includes('${FB_HOOK_TOKEN}'))
+  assert.ok(!hooks.includes(secret), 'no secret in the file')
+  assert.ok(hooks.includes('fb-hook.cjs') && !hooks.includes('FB_HOOK_TOKEN'), 'the token never reaches an argv')
   assert.ok(app!.fakeLog((e) => e.event === 'hook' && e.hook === 'Stop').length > 0, 'hooks still arrive')
 })
 
@@ -377,6 +434,13 @@ test("a team console's token is good for that console only: a worker cannot call
   const big = await call(leadUrl, leadHeaders, JSON.stringify({ ...list, pad: 'x'.repeat(5 * 1024 * 1024) })).then((r) => r.status, () => 'closed')
   assert.ok(big === 413 || big === 'closed', String(big))
   assert.equal((await call(leadUrl, leadHeaders)).status, 200)
+
+  // once the team is closed, its tokens act for nobody, and their config files are gone
+  await app!.invoke('fleet:discard', projectId)
+  const status = { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'fleet_status', arguments: {} } }
+  const after = await (await call(leadUrl, leadHeaders, status)).json()
+  assert.match(JSON.stringify(after), /left its team/)
+  assert.ok(!fs.existsSync(path.join(sb.fbHome, 'hooks', `mcp-${lead.id}.json`)))
 })
 
 test('the Inbox tray on the command bar: a question shows its trade-offs and is answered with a number key; finished work shows files and checks', async () => {

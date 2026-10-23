@@ -5,7 +5,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyFleet, type FleetMember, type FleetReady, type FleetState } from '../../src/shared/fleet'
 import { coerceCharter } from '../../src/shared/charter'
-import { excludedBy, ownedBy, reviewReady, stalled } from '../../src/shared/mergeReview'
+import { closeOnly, excludedBy, ownedBy, reviewReady, stalled } from '../../src/shared/mergeReview'
 
 const member = (over: Partial<FleetMember> & { id: string; name: string }): FleetMember => ({
   role: 'worker',
@@ -161,6 +161,15 @@ test('reviewers carry no claim and own nothing', () => {
   )
 })
 
+test('closeOnly: no branch, no commits, or an open PR leave nothing to merge into the checkout', () => {
+  assert.equal(closeOnly({ branch: 'fleet/x', commits: 3 }), false)
+  assert.equal(closeOnly({ branch: '', commits: 3 }), true)
+  assert.equal(closeOnly({ branch: 'fleet/x', commits: 0 }), true)
+  // the board and the phone both read this: once the work went to a PR, merging it here would delete
+  // the branch the PR is built on
+  assert.equal(closeOnly({ branch: 'fleet/x', commits: 3, prUrl: 'https://github.com/o/r/pull/7' }), true)
+})
+
 test('no Ready card, nothing to review', () => {
   assert.equal(reviewReady(emptyFleet('p', '/repo')), null)
 })
@@ -187,6 +196,33 @@ test('an exclusion matches a file, a folder and a star prefix, and nothing outsi
   assert.equal(excludedBy('src/mainframe/x.ts', ['src/main/']), null)
   assert.equal(excludedBy('src/main-old/x.ts', ['src/main']), null)
   assert.equal(excludedBy('src/main/pty.ts', ['src/main/pty.tsx']), null)
+})
+
+// A glob the card shows as ruled out has to rule something out: these used to match nothing, so the
+// merge gate let the change through while the card said it was protected.
+test('a glob excludes what it names, at any depth when it has no slash', () => {
+  assert.equal(excludedBy('yarn.lock', ['*.lock']), '*.lock')
+  assert.equal(excludedBy('packages/a/yarn.lock', ['*.lock']), '*.lock')
+  assert.equal(excludedBy('packages/a/yarn.lock', ['**/*.lock']), '**/*.lock')
+  assert.equal(excludedBy('src/a/b/x', ['src/**/x']), 'src/**/x')
+  assert.equal(excludedBy('src/x', ['src/**/x']), 'src/**/x', '** may be no folder at all')
+  assert.equal(excludedBy('docs/x', ['src/**/x']), null)
+  assert.equal(excludedBy('src/a/x.ts', ['src/*.ts']), null, '* stays inside one folder')
+  assert.equal(excludedBy('src/gen/x.ts', ['src/g?n']), 'src/g?n', 'a folder a glob matches covers its contents')
+  assert.equal(excludedBy('a.lockfile', ['*.lock']), null)
+  assert.equal(excludedBy('a+b.txt', ['a+b.*']), 'a+b.*', 'regex characters in a name are literal')
+})
+
+test('an exclusion ignores case, as Windows and macOS do', () => {
+  assert.equal(excludedBy('Docs/readme.md', ['docs']), 'docs')
+  assert.equal(excludedBy('src/App.tsx', ['src/*.TSX']), 'src/*.TSX')
+})
+
+test('a project opened at a sub-folder may write its exclusions from there', () => {
+  // git names files from the repo root; the charter was drafted looking at apps/web
+  assert.equal(excludedBy('apps/web/src/x.ts', ['src'], 'apps/web/'), 'src')
+  assert.equal(excludedBy('apps/web/src/x.ts', ['apps/web/src'], 'apps/web/'), 'apps/web/src', 'or from the root')
+  assert.equal(excludedBy('apps/api/src/x.ts', ['src'], 'apps/web/'), null, 'not a sibling project')
 })
 
 test('the exclusion that matched comes back as it was written, whichever entry it was', () => {
@@ -217,16 +253,16 @@ test('an exclusion that is nothing but a wildcard excludes nothing at all', () =
   assert.equal(excludedBy('src/a.ts', ['*', 'src']), 'src', 'a real entry beside it still matches')
 })
 
-// None of the above is `owns`: a grant that matches nothing only over-flags, which is the safe way
-// round, and "everything" there plausibly means everything. Changing it would change which files the
-// review calls out of scope.
-test('ownedBy reads the same strings exactly as it did', () => {
+// `owns` is matched the same way, wildcards alone included: a grant that matches too much only
+// under-flags, and "everything" there plausibly means everything.
+test('ownedBy reads globs and a leading slash as an exclusion does, and * as everything', () => {
   assert.equal(ownedBy('src/a.ts', ['*']), true)
   assert.equal(ownedBy('package.json', ['*']), true)
-  assert.equal(ownedBy('src/renderer/a.ts', ['/src/renderer']), false)
-  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**']), false)
-  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**/*']), false)
-  assert.equal(ownedBy('src/renderer/a.ts', ['**']), false)
+  assert.equal(ownedBy('src/renderer/a.ts', ['/src/renderer']), true)
+  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**']), true)
+  assert.equal(ownedBy('src/renderer/a.ts', ['src/renderer/**/*']), true)
+  assert.equal(ownedBy('src/renderer/a.ts', ['**']), true)
+  assert.equal(ownedBy('docs/a.md', ['src/**']), false)
 })
 
 test('an excluded file is flagged with its exclusion and blocks the review', () => {
@@ -302,3 +338,8 @@ test('a member an hour old but still printing is not stalled: silence is what co
   assert.deepEqual(stalled(s, 60 * 60000), [])
 })
 
+
+test('brackets are part of the name, as in a Next.js route, not a character class', () => {
+  assert.equal(excludedBy('app/[id]/page.tsx', ['app/[id]']), 'app/[id]')
+  assert.equal(excludedBy('app/a/page.tsx', ['app/[ab]']), null)
+})

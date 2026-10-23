@@ -32,6 +32,8 @@ interface Session {
   startedAt: number
   /** the CLI turned on bracketed paste (ESC[?2004h) */
   bracketed: boolean
+  /** started with its auto-approval flag: it keeps it whatever the setting says later */
+  autoApproves: boolean
   /** the conversation the CLI runs under, when known (AgentDef.session, or Claude's SessionStart hook) */
   sessionId?: string
   /** a CLI that picks its own id (Codex): where to look for it after a turn */
@@ -90,7 +92,9 @@ export class PtyManager {
 
     const settings = this.settings()
     const agent = agentById(req.agentId, settings.customAgents)
-    const env = { ...(await loginEnv()), ...hookEnv(req.id), ...profileEnv(req.agentId, req.profileId) }
+    // the hook token only where Claude Code's hooks use it: any other process holding it could report for this console
+    const hooked = agent?.id === 'claude' && !req.command
+    const env = { ...(await loginEnv()), ...(hooked ? hookEnv(req.id) : {}), ...profileEnv(req.agentId, req.profileId) }
     env.FB_CONSOLE_ID = req.id
 
     let file: string
@@ -98,6 +102,7 @@ export class PtyManager {
     let sessionId: string | undefined
     let notice = ''
     let lost = false
+    let autoApproves = false
     if (req.command) {
       // a console started for one command (dev server, watcher); drop into a shell when it ends
       file = shellPath()
@@ -131,6 +136,7 @@ export class PtyManager {
         // else a new conversation whose id the CLI picks: found after its first turn
       } else if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
+      autoApproves = !!yolo
       if (yolo) args.push(...agent.yoloArgs!)
       else if (req.acceptEdits && agent.editsArgs && !isTeamConsole(req.id)) args.push(...agent.editsArgs)
       if (agent.id === 'claude') args.push(...claudeHookArgs(req.id))
@@ -140,7 +146,11 @@ export class PtyManager {
         args.push(...fleet.args)
         Object.assign(env, fleet.env)
       }
-      if (req.extraArgs?.length) args.push(...req.extraArgs)
+      if (req.extraArgs?.length) {
+        args.push(...req.extraArgs)
+        // the auto-approval flag typed into a console's own arguments counts as much as the setting
+        if (agent.yoloArgs?.length && agent.yoloArgs.every((f) => req.extraArgs!.includes(f))) autoApproves = true
+      }
     }
 
     // Windows: an npm wrapper (claude.cmd) runs its script with node instead
@@ -164,6 +174,7 @@ export class PtyManager {
       tracker: new StatusTracker(startedAt, agent?.id === 'claude' && !req.command && claudeHookArgs(req.id).length > 0),
       startedAt,
       bracketed: false,
+      autoApproves,
       sessionId,
       discover:
         agent?.session && !agent.session.start && !sessionId && !req.command
@@ -219,7 +230,7 @@ export class PtyManager {
   }
 
   private info(s: Session): PtyInfo {
-    return { id: s.id, pid: s.proc.pid, agentId: s.agentId, status: s.tracker.status, startedAt: s.startedAt, sessionId: s.sessionId }
+    return { id: s.id, pid: s.proc.pid, agentId: s.agentId, status: s.tracker.status, startedAt: s.startedAt, sessionId: s.sessionId, autoApproves: s.autoApproves }
   }
 
   write(id: string, data: string) {
@@ -470,6 +481,11 @@ export class PtyManager {
 
   list(): PtyInfo[] {
     return [...this.sessions.values()].map((s) => this.info(s))
+  }
+
+  infoOf(id: string): PtyInfo | null {
+    const s = this.sessions.get(id)
+    return s ? this.info(s) : null
   }
 
   /** An event from Claude Code's hooks (see hooks.ts). */

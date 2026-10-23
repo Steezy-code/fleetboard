@@ -4,11 +4,11 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import type { PtySpawnRequest } from '@shared/types'
 import type { FleetAsk, FleetMember, FleetMessage, FleetReady, FleetRole, FleetState, FleetTask } from '@shared/fleet'
-import { emptyFleet } from '@shared/fleet'
+import { LINKED_DIRS, emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
-import { estimateOf, stampTask } from '@shared/live'
+import { estimateOf, numstat, stampTask } from '@shared/live'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -20,7 +20,7 @@ import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
-import { runCheck, startLive, stopCheck, stopLive } from './live'
+import { outsideWork, runCheck, startLive, stopCheck, stopLive } from './live'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -46,16 +46,14 @@ const MAX_BODY = 4 * 1024 * 1024
 const states = new Map<string, FleetState>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
-/** lead id → pending fleet_wait resolver */
 /** this module's timers, so they can be stopped (see register / stopFleetTicks) */
 const ticks: NodeJS.Timeout[] = []
+/** lead id → pending fleet_wait resolver */
 const waiters = new Map<string, (events: FleetMessage[]) => void>()
 /** ask id → pending fleet_ask_user resolver */
 const askWaiters = new Map<string, (answer: string) => void>()
 /** request id → renderer ack for a new console node */
 const acks = new Map<string, (v: { name?: string }) => void>()
-/** lead id → commit the lead's integration branch started from */
-const baseCommit = new Map<string, string>()
 
 const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`
 const MAX_WORKERS = 4
@@ -88,7 +86,6 @@ function loadAll() {
     if (!s) continue
     states.set(s.projectId, s)
     for (const m of Object.values(s.members)) memberProject.set(m.id, s.projectId)
-    for (const m of Object.values(s.members)) if (m.role === 'lead' && (m as any).base) baseCommit.set(m.id, (m as any).base)
   }
 }
 
@@ -153,7 +150,7 @@ const slugify = (t: string) =>
 
 /** Give a worktree the repo's installed dependencies without copying them. */
 function linkHeavyDirs(projectPath: string, wt: string) {
-  for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
+  for (const d of LINKED_DIRS) {
     const src = path.join(projectPath, d)
     const dst = path.join(wt, d)
     if (fs.existsSync(src) && !fs.existsSync(dst)) {
@@ -165,7 +162,8 @@ function linkHeavyDirs(projectPath: string, wt: string) {
     }
   }
 }
-const ADD_ALL = ['add', '-A', '--', '.', ':(exclude)node_modules', ':(exclude).venv', ':(exclude)venv', ':(exclude)vendor']
+/** Stage everything a member changed, dependency folders aside. */
+const addAll = async (cwd: string) => git(cwd, ['add', '-A', '--', '.', ...(await outsideWork(cwd))])
 
 async function createWorktree(repoCwd: string, projectPath: string, projectId: string, dirName: string, branch: string) {
   const dir = path.join(treesDir, assertProjectId(projectId), dirName)
@@ -198,7 +196,7 @@ export type Kept = 'clean' | 'rescued' | 'failed'
  * 'failed' when there is uncommitted work it could not save — then the worktree stays.
  */
 async function keepUncommitted(s: FleetState, m: FleetMember): Promise<Kept> {
-  const add = await git(m.cwd, ADD_ALL)
+  const add = await addAll(m.cwd)
   if (!add.ok) {
     trouble(s, `${m.name}'s changes could not be staged (${add.err.slice(0, 160)}), so its folder is kept at ${m.cwd}.`)
     return 'failed'
@@ -264,7 +262,7 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   if (!ownWorktree(m, Object.values(s.members), treesDir)) return
   const kept = await keepUncommitted(s, m)
   if (kept === 'failed') return
-  for (const d of ['node_modules', '.venv', 'venv', 'vendor']) {
+  for (const d of LINKED_DIRS) {
     const p = path.join(m.cwd, d)
     try {
       if (fs.lstatSync(p).isSymbolicLink()) fs.rmSync(p)
@@ -275,12 +273,13 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
   const rm = await git(projectPath, ['worktree', 'remove', '--force', m.cwd])
   if (!rm.ok) return trouble(s, `${m.name}'s folder could not be removed (${rm.err.slice(0, 160)}); it is kept at ${m.cwd}.`)
   const how = branchToDelete(deleteBranch, kept)
-  if (m.branch && how !== 'keep') await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])
+  // -d refuses a branch with commits the checkout lacks (a Lead's after its Ready card): it is kept then
+  const deleted = !!m.branch && how !== 'keep' && (await git(projectPath, ['branch', how === 'force' ? '-D' : '-d', m.branch])).ok
   journal({
     kind: 'fleet.remove',
-    text: `${m.name}'s worktree removed${m.branch ? (how === 'keep' ? `, branch ${m.branch} kept` : `, branch ${m.branch} deleted`) : ''}${kept === 'rescued' ? ' (its unreported work was committed first)' : ''}`,
+    text: `${m.name}'s worktree removed${m.branch ? (deleted ? `, branch ${m.branch} deleted` : `, branch ${m.branch} kept`) : ''}${kept === 'rescued' ? ' (its unreported work was committed first)' : ''}`,
     project: projectPath,
-    detail: { member: m.name, branch: m.branch, branchDeleted: how !== 'keep', rescued: kept === 'rescued' }
+    detail: { member: m.name, branch: m.branch, branchDeleted: deleted, rescued: kept === 'rescued' }
   })
 }
 
@@ -300,6 +299,8 @@ export function leadPrompt(m: FleetMember) {
     '8. Your goal as given, and any assumptions, "Do not touch" or "Done when" that come with it, are what the user confirmed: not yours to reinterpret or widen. If the job looks wrong, ask with fleet_ask_user rather than deciding.',
     '9. When the goal is met and verified, call fleet_finish with a short summary (one change per line) and what you verified. The user then merges your branch with one click.',
     'Keep your own messages short: one-line progress updates.',
+    // agents post as the user: without the mark, Fleetboard would route the comment back as the user's own
+    'If you or a worker comment on a pull request, start the comment with 🤖.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
   ].join('\n')
 }
@@ -395,7 +396,9 @@ function post(s: FleetState, msg: Omit<FleetMessage, 'id' | 'at' | 'delivered'>)
   return full
 }
 
-const labelOf = (s: FleetState, id: string) => (id === 'user' ? 'the user' : s.members[id]?.name ?? id)
+/** Who a PR's review comments or CI failure are from: never the user, whose goal a Lead does not question. */
+const GITHUB = 'github'
+const labelOf = (s: FleetState, id: string) => (id === 'user' ? 'the user' : id === GITHUB ? 'GitHub (passed on by Fleetboard, not the user)' : (s.members[id]?.name ?? id))
 
 function render(s: FleetState, msg: FleetMessage) {
   switch (msg.kind) {
@@ -483,7 +486,7 @@ function deliverTick() {
 // ---------------------------------------------------------------- consoles
 
 /** Ask the board to add a node for a new team console, then start its process. */
-async function startConsole(s: FleetState, m: FleetMember, extra: { acceptEdits?: boolean } = {}) {
+async function startConsole(s: FleetState, m: FleetMember) {
   // before the board can mount the node and start it: this is a first start, not a restart
   startedThisRun.add(m.id)
   const reqId = uid('req')
@@ -496,7 +499,6 @@ async function startConsole(s: FleetState, m: FleetMember, extra: { acceptEdits?
     m.name = named.name
     changed(s)
   }
-  void extra // role permissions come from fleetLaunch
   await ctx.ptys.spawn({ id: m.id, agentId: m.agentId, cwd: m.cwd, cols: 100, rows: 30 })
 }
 
@@ -535,7 +537,15 @@ export function leadRestartNote(o: { how: string; team: string; task: string; ch
 }
 
 export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
+  if (!port) throw new Error('Teams are unavailable: Fleetboard could not start its local team server. The log says why.')
   const s = state(opts.projectId, opts.projectPath)
+  // A project has one team: the charter, tasks and Ready card below are the new one's. A team left
+  // running would go on merging under the new charter's exclusions, and a finished one would lose its
+  // Merge and Discard, so it is closed here, its branch kept.
+  for (const old of Object.values(s.members).filter((m) => m.role === 'lead' && m.status !== 'closed')) {
+    await dismissTeam(s, old, 'keep')
+    if (old.branch) trouble(s, `${old.name}'s team was closed to start the new one. Its work is kept on the branch ${old.branch}.`, 'info')
+  }
   const id = uid('con')
   const agentId = opts.agentId ?? 'claude'
   const charter = trustedCharter(opts.charter, opts.goal)
@@ -543,32 +553,32 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   const slug = `${slugify(title)}-${id.slice(-4)}`
   let cwd = opts.projectPath
   let branch: string | undefined
+  let base: string | undefined
   const isRepo = (await git(opts.projectPath, ['rev-parse', '--verify', 'HEAD'])).ok
   if (isRepo) {
     branch = `fleet/${slug}`
     cwd = await createWorktree(opts.projectPath, opts.projectPath, opts.projectId, `${slug}-lead`, branch)
-    const base = (await git(cwd, ['rev-parse', 'HEAD'])).out
-    baseCommit.set(id, base)
+    base = (await git(cwd, ['rev-parse', 'HEAD'])).out
   }
-  const leads = Object.values(s.members).filter((m) => m.role === 'lead' && m.status !== 'closed').length
   const m: FleetMember = {
     id,
     role: 'lead',
-    name: leads ? `Lead ${leads + 1}` : 'Lead',
+    name: 'Lead',
     agentId,
     projectId: opts.projectId,
     task: title,
     cwd,
     branch,
+    ...(base ? { base } : {}),
     status: 'working',
     createdAt: Date.now()
   }
-  ;(m as any).base = baseCommit.get(id)
   s.members[id] = m
   memberProject.set(id, s.projectId)
   s.ready = null
   s.tasks = []
   s.charter = charter
+  if (isRepo) s.repoPrefix = (await git(opts.projectPath, ['rev-parse', '--show-prefix'])).out || undefined
   // a new charter's check starts its own history: the last team's runs measured a different job
   stopCheck(s.projectId)
   delete s.check
@@ -582,16 +592,6 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
 
 // ---------------------------------------------------------------- tools
 
-type ToolDef = { name: string; description: string; inputSchema: any; roles: FleetRole[] }
-/** `git diff --numstat` → lines added / removed per file (binary files count as 0). */
-export function numstat(out: string): { path: string; add: number; del: number }[] {
-  return out
-    .split('\n')
-    .map((l) => l.split('\t'))
-    .filter((p) => p.length >= 3)
-    .map(([add, del, ...rest]) => ({ path: rest.join('\t'), add: Number(add) || 0, del: Number(del) || 0 }))
-}
-
 /**
  * The commit a branch points at now. Both gates resolve the branch once and then check and merge
  * that commit: a worker is a real CLI that stays alive for follow-ups and knows a merge comes after
@@ -599,7 +599,8 @@ export function numstat(out: string): { path: string; add: number; del: number }
  * lands, unchecked. Nothing downstream takes a branch name again.
  */
 async function commitOf(cwd: string, branch: string): Promise<string | null> {
-  const r = await git(cwd, ['rev-parse', '--verify', `${branch}^{commit}`])
+  // refs/heads/ in full, or a tag of the same name would be what is checked and merged
+  const r = await git(cwd, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`])
   const sha = r.out.trim()
   return r.ok && /^[0-9a-f]{7,64}$/.test(sha) ? sha : null
 }
@@ -633,17 +634,17 @@ export async function ignoredInTheWay(cwd: string, incoming: string[]): Promise<
 }
 
 /** The files among `touched` an exclusion covers, each named with the rule it hit. */
-const excludedHits = (touched: string[], wontTouch: string[] | undefined, how: string) =>
+const excludedHits = (touched: string[], wontTouch: string[] | undefined, prefix: string | undefined, how: string) =>
   touched.flatMap((f) => {
-    const rule = excludedBy(f, wontTouch)
+    const rule = excludedBy(f, wontTouch, prefix)
     return rule ? [`${f} (${how} "${rule}")`] : []
   })
 
 const andMore = (hits: string[]) => (hits.length > 5 ? `, and ${hits.length - 5} more` : '')
 
 /** Why a worker's branch cannot be merged: it changed files the charter's won't-touch list rules out. Null when it can. */
-export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined): string | null {
-  const hits = excludedHits(touched, wontTouch, 'excluded by')
+export function excludedRefusal(worker: string, touched: string[], wontTouch: string[] | undefined, prefix?: string): string | null {
+  const hits = excludedHits(touched, wontTouch, prefix, 'excluded by')
   if (!hits.length) return null
   return `Not merged: ${worker} changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}, which the user ruled out. Ask ${worker} to revert ${hits.length === 1 ? 'it' : 'them'} with fleet_send, then merge again.`
 }
@@ -654,14 +655,39 @@ export function excludedRefusal(worker: string, touched: string[], wontTouch: st
  * /api/merge (remote.ts) — so the card hiding its Merge button is the courtesy and this is the rule.
  * Both clients show it after "Merge failed:", so it does not say that itself.
  */
-export function excludedMergeRefusal(touched: string[], wontTouch: string[] | undefined): string | null {
-  const hits = excludedHits(touched, wontTouch, 'ruled out by')
+export function excludedMergeRefusal(touched: string[], wontTouch: string[] | undefined, prefix?: string): string | null {
+  const hits = excludedHits(touched, wontTouch, prefix, 'ruled out by')
   if (!hits.length) return null
   return `this work changed ${hits.slice(0, 5).join(', ')}${andMore(hits)}. Tell the Lead to put ${hits.length === 1 ? 'it' : 'them'} back, or discard the team's work.`
 }
 
 const str = (description: string) => ({ type: 'string', description })
 const strArr = (description: string) => ({ type: 'array', items: { type: 'string' }, description })
+
+type ToolDef = { name: string; description: string; inputSchema: any; roles: FleetRole[] }
+type ArgSchema = { properties?: Record<string, { type?: string; items?: { type?: string } }>; required?: string[] }
+
+/**
+ * A tool call's arguments, held to the tool's own schema before any case reads them. They come from a
+ * model, and inputSchema is only advertised (tools/list), never checked: a string where an array was
+ * promised has a length, so it got past every `?? []` and then threw at `owns.join` in the worker's
+ * brief, after the worker's console had started (trustedCharter coerces the charter for the same
+ * reason). A string field becomes a string, a string-list field a list of strings (a lone value a list
+ * of one), and numbers pass through, since each use already guards them. A field that is absent or
+ * null stays absent, and a key the schema does not name is dropped.
+ */
+export function coerceArgs(schema: ArgSchema | undefined, raw: unknown): Record<string, unknown> {
+  const given = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const out: Record<string, unknown> = {}
+  for (const [k, p] of Object.entries(schema?.properties ?? {})) {
+    const v = given[k]
+    if (v == null) continue
+    if (p.type === 'string') out[k] = String(v)
+    else if (p.type === 'array' && p.items?.type === 'string') out[k] = (Array.isArray(v) ? v : [v]).map((x) => String(x ?? ''))
+    else out[k] = v
+  }
+  return out
+}
 
 const TOOLS: ToolDef[] = [
   {
@@ -787,6 +813,9 @@ export function toolRoles(name: string): FleetRole[] | null {
   return TOOLS.find((t) => t.name === name)?.roles ?? null
 }
 
+/** The arguments a tool declares (see coerceArgs), or undefined for a name that is not a fleet tool. */
+export const toolSchema = (name: string): ArgSchema | undefined => TOOLS.find((t) => t.name === name)?.inputSchema
+
 /** Why `role` may not call `name`, or null when it may. Says what the caller can use instead. */
 export function toolDenial(name: string, role: FleetRole): string | null {
   const roles = toolRoles(name)
@@ -799,12 +828,20 @@ export function toolDenial(name: string, role: FleetRole): string | null {
 const text = (t: string) => ({ content: [{ type: 'text', text: t }] })
 const fail = (t: string) => ({ content: [{ type: 'text', text: t }], isError: true })
 
-async function callTool(callerId: string, name: string, a: any, signal?: AbortSignal): Promise<any> {
+async function callTool(callerId: string, name: string, raw: unknown, signal?: AbortSignal): Promise<any> {
   const found = memberOf(callerId)
   if (!found) return fail('This console is not part of a Fleetboard team.')
   const { s, m } = found
+  // its token outlives its console, and a team that was closed is not to be acted for
+  if (m.status === 'closed') return fail('This console has left its team.')
   const denied = toolDenial(name, m.role)
   if (denied) return fail(denied)
+  const schema = toolSchema(name)
+  const a: any = coerceArgs(schema, raw)
+  // only an absent field: an empty string is a value the model chose. This is what keeps a worker
+  // from being started with no task at all.
+  const missing = (schema?.required ?? []).filter((k) => a[k] == null)
+  if (missing.length) return fail(`Missing ${missing.join(', ')}.`)
   const lead = m.role === 'lead' ? m : m.leadId ? s.members[m.leadId] : undefined
   const team = () => Object.values(s.members).filter((x) => x.leadId === (lead?.id ?? m.id) && x.status !== 'closed')
 
@@ -876,7 +913,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       }
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
-      await startConsole(s, w, { acceptEdits: !reviewer })
+      await startConsole(s, w)
       post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m, s.charter?.wontTouch) })
       return text(
         `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
@@ -931,7 +968,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (!lead) return fail('You have no lead.')
       let commitNote = ''
       if (m.role === 'worker' && m.branch) {
-        const add = await git(m.cwd, ADD_ALL)
+        const add = await addAll(m.cwd)
         if (!add.ok) trouble(s, `${m.name}'s changes could not be staged: ${add.err.slice(0, 160)}. They are still in ${m.cwd}.`)
         const dirty = !(await git(m.cwd, ['diff', '--cached', '--quiet'])).ok
         if (dirty) {
@@ -962,7 +999,7 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (wontTouch?.length) {
         const d = await wouldTouch(m.cwd, at)
         if (!d.ok) return fail(`Not merged: ${w.name}'s changes could not be checked against what the user ruled out: ${d.error}`)
-        const refusal = excludedRefusal(w.name, d.files, wontTouch)
+        const refusal = excludedRefusal(w.name, d.files, wontTouch, s.repoPrefix)
         if (refusal) return fail(refusal)
       }
       // -m, or the merge commit would be named after the sha rather than the branch it came from
@@ -989,7 +1026,8 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       return text(`${w.name} dismissed.`)
     }
     case 'fleet_ask_user': {
-      const options = (a.options ?? []).map(String).slice(0, 4)
+      // trimmed as the phone trims its answer, which must equal one of them
+      const options = (a.options ?? []).map((o: unknown) => String(o).trim()).filter(Boolean).slice(0, 4)
       const notes = Array.isArray(a.notes) ? a.notes.slice(0, options.length).map((n: unknown) => String(n ?? '').slice(0, 160)) : undefined
       const rec = a.recommended == null ? -1 : options.findIndex((o: string) => o.toLowerCase() === String(a.recommended).trim().toLowerCase())
       const ask: FleetAsk = { id: uid('ask'), from: m.id, question: String(a.question), options, at: Date.now(), ...(notes?.some(Boolean) ? { notes } : {}), ...(rec >= 0 ? { recommended: rec } : {}) }
@@ -1024,12 +1062,15 @@ async function callTool(callerId: string, name: string, a: any, signal?: AbortSi
       if (!m.branch) {
         s.ready = { leadId: m.id, branch: '', summary: String(a.summary), commits: 0, files: [], at: Date.now(), ...(verified ? { verified } : {}) }
       } else {
-        const base = baseCommit.get(m.id) ?? 'HEAD~1'
-        const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..HEAD`])).out) || 0
-        const files = (await git(m.cwd, ['diff', '--name-only', `${base}..HEAD`])).out.split('\n').filter(Boolean)
-        const stat = numstat((await git(m.cwd, ['diff', '--numstat', `${base}..HEAD`])).out)
+        // one commit for everything the card says, and for what Merge later merges
+        const head = await commitOf(m.cwd, m.branch)
+        if (!head) return fail(`Your branch ${m.branch} is not a commit git can find.`)
+        const base = m.base ?? `${head}~1`
+        const commits = Number((await git(m.cwd, ['rev-list', '--count', `${base}..${head}`])).out) || 0
+        const files = (await git(m.cwd, ['diff', '--name-only', `${base}..${head}`])).out.split('\n').filter(Boolean)
+        const stat = numstat((await git(m.cwd, ['diff', '--numstat', `${base}..${head}`])).out)
         const hasRemote = (await git(m.cwd, ['remote', 'get-url', 'origin'])).ok
-        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, stat, at: Date.now(), hasRemote, ...(verified ? { verified } : {}) } as FleetReady
+        s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, head, stat, at: Date.now(), hasRemote, ...(verified ? { verified } : {}) } as FleetReady
       }
       m.status = 'reported'
       changed(s)
@@ -1049,6 +1090,8 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   await ctx.ptys.stop(m.id)
   await removeWorktree(s, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
+  // its MCP config holds its bearer token
+  fs.rmSync(mcpFile(m.id), { force: true })
   changed(s)
 }
 
@@ -1139,6 +1182,11 @@ function startServer(): Promise<number> {
     server.requestTimeout = 0
     server.headersTimeout = 0
     server.keepAliveTimeout = 600_000
+    // no loopback to listen on: the app starts without teams (port 0) rather than wait for ever
+    server.once('error', (e) => {
+      logError('fleet', `the team server could not listen, so teams cannot start: ${e.message}`)
+      resolve(0)
+    })
     server.listen(0, '127.0.0.1', () => resolve((server.address() as { port: number }).port))
   })
 }
@@ -1246,6 +1294,12 @@ export async function register(c: MainContext) {
     post(f.s, { from: 'user', to: toId, kind: 'goal', text })
     return true
   })
+  ipc.handle('fleet:fromGitHub', (_e, toId: string, text: string) => {
+    const f = memberOf(toId)
+    if (!f) return false
+    post(f.s, { from: GITHUB, to: toId, kind: 'message', text: String(text) })
+    return true
+  })
   ipc.handle('fleet:answer', (_e, askId: string, answer: string) => answerAsk(askId, answer))
   /** The user switches the charter's live check off or on. Off also ends a run in flight; on runs it now. */
   ipc.handle('fleet:checkOff', (_e, projectId: string, off: boolean) => {
@@ -1265,10 +1319,12 @@ export async function register(c: MainContext) {
     const s = states.get(projectId)
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
     if (!s || !lead?.branch) return ''
-    const base = baseCommit.get(lead.id) ?? 'HEAD~1'
-    return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..HEAD`])).out.slice(0, 400_000)
+    // what Merge would bring in: the card's commit, not whatever the Lead has committed since
+    const head = s.ready!.head ?? 'HEAD'
+    const base = lead.base ?? `${head}~1`
+    return (await git(lead.cwd, ['diff', '--stat', '-p', `${base}..${head}`])).out.slice(0, 400_000)
   })
-  ipc.handle('fleet:mergeReady', (_e, projectId: string) => mergeReady(projectId))
+  ipc.handle('fleet:mergeReady', (_e, projectId: string, head?: string) => mergeReady(projectId, typeof head === 'string' ? head : undefined))
   ipc.handle('fleet:revertMerge', (_e, projectId: string, commit: string) => revertMerge(projectId, String(commit)))
   /** Push the team's branch and open a draft PR whose description is the lead's summary. */
   ipc.handle('fleet:openPr', async (_e, projectId: string) => {
@@ -1276,7 +1332,8 @@ export async function register(c: MainContext) {
     const lead = s?.ready ? s.members[s.ready.leadId] : undefined
     if (!s?.ready || !lead?.branch) return { ok: false, error: 'Nothing to open a PR for.' }
     const base = (await git(s.projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'])).out || 'main'
-    const push = await git(lead.cwd, ['push', '-u', 'origin', lead.branch])
+    // the card's commit, as Merge would take: a commit the Lead made after finishing is not in it
+    const push = await git(lead.cwd, ['push', '-u', 'origin', `${s.ready.head ?? 'HEAD'}:refs/heads/${lead.branch}`])
     if (!push.ok) return { ok: false, error: `Push failed: ${push.err.slice(0, 400)}` }
     const summary = s.ready.summary.trim()
     const title = ((summary.split('\n')[0] ?? '').replace(/^[-*#\s]+/, '').slice(0, 72) || lead.task?.slice(0, 72) || lead.branch).replace(/\.$/, '')
@@ -1312,11 +1369,17 @@ export async function register(c: MainContext) {
 }
 
 /** The user's answer to a lead's question (the Inbox on the board or a phone). */
-export function answerAsk(askId: string, answer: string): boolean {
+/**
+ * `fromOptions`: the answer must be one the Lead offered, when it offered any (the phone has no free
+ * text). `projectId`: only a question in that project (the phone shows the open one).
+ */
+export function answerAsk(askId: string, answer: string, opts: { fromOptions?: boolean; projectId?: string } = {}): boolean {
   for (const s of states.values()) {
+    if (opts.projectId !== undefined && s.projectId !== opts.projectId) continue
     const ask = s.asks.find((a) => a.id === askId)
     if (!ask) continue
     if (ask.answer) return false
+    if (opts.fromOptions && ask.options.length && !ask.options.includes(answer)) return false
     ask.answer = answer
     const w = askWaiters.get(askId)
     if (w) {
@@ -1329,7 +1392,6 @@ export function answerAsk(askId: string, answer: string): boolean {
   return false
 }
 
-/** Merge the lead's finished branch into the user's checkout, then dismiss the team. */
 /** What the user's checkout is in the middle of (a merge, a rebase…), if anything. */
 async function unfinishedOperation(cwd: string): Promise<string | null> {
   const ops: [string, string][] = [
@@ -1349,9 +1411,17 @@ async function unfinishedOperation(cwd: string): Promise<string | null> {
 const merging = new Set<string>()
 
 /** Merge the Ready work into the user's checkout (whatever branch it is on now), then close the team. */
-export async function mergeReady(projectId: string): Promise<{ ok: boolean; into?: string; error?: string; commit?: string }> {
+/**
+ * Merge the team's work into the user's checkout. `head` is the commit of the Ready card the user
+ * confirmed: a card replaced since (the Lead finished again) is refused rather than merged unseen.
+ */
+export async function mergeReady(projectId: string, head?: string): Promise<{ ok: boolean; into?: string; error?: string; commit?: string }> {
   const s = states.get(projectId)
   if (!s?.ready) return { ok: false, error: 'Nothing is ready.' }
+  if (head !== undefined && s.ready.head && head !== s.ready.head) return { ok: false, error: 'The Ready card changed since you looked at it. Check it again, then merge.' }
+  // The board offers no Merge once a PR is open (closeOnly), but the phone's /api/merge reaches this
+  // too: merging here would delete the branch the open PR is built on, where Done keeps it.
+  if (s.ready.prUrl) return { ok: false, error: `A pull request is open for this work (${s.ready.prUrl}); merge it there, or press Done to close the team.` }
   // the desktop and the phone can both press Merge
   if (merging.has(projectId)) return { ok: false, error: 'Already merging.' }
   merging.add(projectId)
@@ -1359,9 +1429,9 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
     const lead = s.members[s.ready.leadId]
     if (!lead) return { ok: false, error: 'The team has no lead to merge from.' }
     if (lead.branch) {
-      // the commit that is checked is the commit that is merged: the Lead is still running and may
-      // commit again between the two
-      const at = await commitOf(s.projectPath, lead.branch)
+      // The commit the card describes: the Lead stays on after finishing and may commit again, which
+      // would otherwise be merged without being seen. It is also the one checked below.
+      const at = s.ready.head ?? (await commitOf(s.projectPath, lead.branch))
       if (!at) return { ok: false, error: `The team's branch ${lead.branch} is not a commit git can find, so there is nothing to merge.` }
       // What the user ruled out is enforced here rather than only on the card, because this is the
       // function every client reaches: the Ready card, and the phone's /api/merge. Checked against
@@ -1369,7 +1439,7 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       // Lead may have added to since.
       const d = await wouldTouch(s.projectPath, at)
       if (!d.ok) return { ok: false, error: `The team's changes could not be checked before merging: ${d.error}` }
-      const refusal = excludedMergeRefusal(d.files, s.charter?.wontTouch)
+      const refusal = excludedMergeRefusal(d.files, s.charter?.wontTouch, s.repoPrefix)
       if (refusal) return { ok: false, error: refusal }
       const local = await ignoredInTheWay(s.projectPath, d.files)
       if (local.length) {
@@ -1378,6 +1448,13 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
       }
       const current = await git(s.projectPath, ['symbolic-ref', '-q', '--short', 'HEAD'])
       if (!current.ok) return { ok: false, error: `Your checkout is not on a branch (detached HEAD). Check out the branch to merge into, then merge again; the work stays on ${lead.branch}.` }
+      // The card shows what the team did since it started. On a branch without that starting point the
+      // merge would also bring in every commit between the two, which the card never showed.
+      if (lead.base && !(await git(s.projectPath, ['merge-base', '--is-ancestor', lead.base, 'HEAD'])).ok) {
+        const extra = Number((await git(s.projectPath, ['rev-list', '--count', `HEAD..${lead.base}`])).out) || 0
+        const more = extra ? ` ${extra} commit${extra === 1 ? '' : 's'} the team started from` : ' history the team started from'
+        return { ok: false, error: `Not merged: ${current.out} does not have the commit the team started from, so merging would also bring in${more}, which the card does not show. Check out the branch the team started on, or merge ${lead.branch} yourself.` }
+      }
       // git would refuse anyway, and the abort below would then throw away the user's own conflict resolution
       const busy = await unfinishedOperation(s.projectPath)
       if (busy) return { ok: false, error: `Your checkout is in the middle of ${busy}. Finish or abort it, then merge again; the work stays on ${lead.branch}.` }
@@ -1420,7 +1497,7 @@ export async function mergeReady(projectId: string): Promise<{ ok: boolean; into
  * undo a merge in the middle of the user's history, so they are told to do it themselves.
  */
 export async function revertMerge(projectId: string, commit: string): Promise<{ ok: boolean; error?: string }> {
-  if (!/^[0-9a-f]{7,40}$/.test(commit)) return { ok: false, error: 'That is not a commit id.' }
+  if (!/^[0-9a-f]{7,64}$/.test(commit)) return { ok: false, error: 'That is not a commit id.' }
   const s = states.get(projectId)
   if (!s) return { ok: false, error: 'That project is not open.' }
   const busy = await unfinishedOperation(s.projectPath)
@@ -1438,7 +1515,6 @@ export async function revertMerge(projectId: string, commit: string): Promise<{ 
   return { ok: true }
 }
 
-/** A project's team state, if it has one. */
 /** Stop the team timers. Called when the app quits. */
 export function stopFleetTicks() {
   for (const t of ticks) clearInterval(t)
@@ -1446,6 +1522,7 @@ export function stopFleetTicks() {
   stopLive()
 }
 
+/** A project's team state, if it has one. */
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {

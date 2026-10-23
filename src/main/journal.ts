@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { MainContext } from './context'
 import { dirs } from './paths'
 import { logError } from './errors'
-import { dayKey } from './usage'
+import { dayKey } from '@shared/time'
 
 // What happened while nobody was watching.
 //

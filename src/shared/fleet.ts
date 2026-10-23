@@ -27,6 +27,8 @@ export interface FleetMember {
   lastOutputAt?: number
   /** a worker's uncommitted work in its worktree, sampled while it works (main/live.ts) */
   diff?: LiveDiff
+  /** a Lead's: the commit its integration branch started from, what Ready's counts and fleet:diff are measured against */
+  base?: string
 }
 
 export interface FleetTask {
@@ -72,6 +74,8 @@ export interface FleetReady {
   summary: string
   commits: number
   files: string[]
+  /** the commit the card describes, and the one Merge merges: the Lead stays on and may commit again */
+  head?: string
   /** lines added / removed per file */
   stat?: { path: string; add: number; del: number }[]
   /** what the lead checked before finishing ("typecheck and 48 tests pass"), in its words */
@@ -95,7 +99,23 @@ export interface FleetState {
   charter?: Charter
   /** the charter's done-when, run in the Lead's worktree as the work lands: progress, not part of what was agreed */
   check?: DoneWhenCheck
+  /** where the project sits inside its repo (`apps/web/`), when it is opened at a sub-folder */
+  repoPrefix?: string
 }
+
+/**
+ * Folders a worktree gets as links to the user's checkout, so a worker has the installed dependencies
+ * without a copy. Only node_modules: npm replaces the link rather than writing through it, where pip
+ * would install into the user's own .venv and outlive the team.
+ */
+export const LINKED_DIRS = ['node_modules'] as const
+
+/**
+ * Dependency folders that are never a worker's work, so staging and the live diff leave them out by
+ * name: a folder-only gitignore pattern (`node_modules/`) does not match a link. Left out only while
+ * the repo tracks nothing under them, so a committed Go or PHP vendor/ is still saved.
+ */
+export const HEAVY_DIRS = ['node_modules', '.venv', 'venv', 'vendor'] as const
 
 export const emptyFleet = (projectId: string, projectPath: string): FleetState => ({
   projectId,

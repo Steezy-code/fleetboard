@@ -4,6 +4,7 @@ import path from 'node:path'
 import type { MainContext } from './context'
 import { describeAnswer, type AnswerResult, type PromptAnswer } from '@shared/prompt'
 import { approvalFor } from '@shared/approvals'
+import { closeOnly } from '@shared/mergeReview'
 import { qrSvg } from '@shared/qr'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { newSecret, sameSecret } from './localserver'
@@ -75,14 +76,20 @@ const isPrivate = (a: string) => {
   const [x = NaN, y = NaN] = a.split('.').map(Number)
   return x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168)
 }
-/** container and VM bridges: reachable from this machine only */
-const VIRTUAL = /^(docker|br-|veth|virbr|vmnet|vboxnet|lxc|lxd|podman|cni|flannel|kube)/
+/**
+ * Container and VM bridges, reachable from this machine only, and VPN tunnels, which are not the
+ * network the phone is on. Windows names its adapters in words ("vEthernet (WSL)", "VirtualBox
+ * Host-Only Network"), Linux and macOS in short names.
+ */
+const VIRTUAL = /^(docker|br-|veth|virbr|vmnet|vboxnet|lxc|lxd|podman|cni|flannel|kube|tun|tap|wg|ppp|utun|vethernet|virtualbox|vmware|hyper-v)|\bwsl\b|\b(tap|tun|vpn|wireguard|zerotier)\b/i
+/** a physical Wi-Fi or Ethernet adapter, by Linux, macOS or Windows name */
+const PHYSICAL = /^(en|eth|wl|wlan|wi-?fi|ethernet)/i
 
 /** The addresses the phone Inbox could listen on. */
 export function findAddresses(ifaces: Ifaces = os.networkInterfaces()): { tailscale?: string; lan?: string } {
   const all = v4(ifaces)
   const tailscale = all.find((i) => isTailscale(i.name, i.address))?.address
-  const lan = all.filter((i) => isPrivate(i.address) && !VIRTUAL.test(i.name)).sort((a, b) => Number(/^(en|eth|wl)/.test(b.name)) - Number(/^(en|eth|wl)/.test(a.name)))[0]?.address
+  const lan = all.filter((i) => isPrivate(i.address) && !VIRTUAL.test(i.name)).sort((a, b) => Number(PHYSICAL.test(b.name)) - Number(PHYSICAL.test(a.name)))[0]?.address
   return { tailscale, lan }
 }
 
@@ -128,7 +135,9 @@ function recent(peer: string): number[] {
 }
 export const lockedOut = (peer: string) => recent(peer).length >= MAX_WRONG
 export function wrongSecret(peer: string) {
-  // a flood of peers must not grow this without end; the ones already counted keep being counted
+  // a flood of peers must not grow this without end: past the cap, peers whose minute is over go
+  // first, so the table never fills with stale ones and stops counting anyone new
+  if (!failures.has(peer) && failures.size >= PEERS) for (const p of failures.keys()) recent(p)
   if (!failures.has(peer) && failures.size >= PEERS) return
   failures.set(peer, [...recent(peer), Date.now()])
 }
@@ -196,7 +205,7 @@ export function remoteState() {
     consoles,
     approvals,
     asks: (fleet?.asks ?? []).filter((a) => !a.answer).map((a) => ({ id: a.id, from: memberName(a.from), question: a.question, options: a.options })),
-    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length } : null
+    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length, closeOnly: closeOnly(ready), prUrl: ready.prUrl, head: ready.head } : null
   }
 }
 
@@ -208,11 +217,13 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
   const url = new URL(req.url ?? '/', `http://${host}`)
   const api = url.pathname.startsWith('/api/')
   const peer = req.socket.remoteAddress ?? 'unknown'
-  if (api && lockedOut(peer)) return send(res, 429, { error: 'too many attempts, wait a minute' })
   const refused = checkRequest(req, host, config.token, api)
   if (refused) {
-    if (refused === 401) wrongSecret(peer)
     req.resume()
+    // a lockout slows only requests that fail: one with the secret is the user, whoever else shares
+    // its address (every client is 127.0.0.1 in "This PC" mode)
+    if (refused === 401 && lockedOut(peer)) return send(res, 429, { error: 'too many attempts, wait a minute' })
+    if (refused === 401) wrongSecret(peer)
     return send(res, refused, { error: 'refused' })
   }
   if (api) authorized(peer)
@@ -239,12 +250,15 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
     }
     if (url.pathname === '/api/ask') {
       if (typeof body.askId !== 'string' || typeof body.answer !== 'string' || !body.answer.trim()) return send(res, 400, { error: 'bad answer' })
-      const ok = answerAsk(body.askId, body.answer.trim().slice(0, 500))
+      // one of the Lead's options: the phone offers no free text, and its answer reaches the Lead as the user's
+      const ok = answerAsk(body.askId, body.answer.trim().slice(0, 500), { fromOptions: true, projectId: currentProject()?.id ?? '' })
       return send(res, ok ? 200 : 409, { ok })
     }
     if (url.pathname === '/api/merge') {
       if (typeof body.projectId !== 'string' || body.confirm !== true) return send(res, 400, { error: 'confirm the merge' })
-      return send(res, 200, await mergeReady(body.projectId))
+      // the project the phone was shown, and the card it confirmed
+      if (body.projectId !== currentProject()?.id) return send(res, 409, { ok: false, error: 'Another project is open on the computer now.' })
+      return send(res, 200, await mergeReady(body.projectId, typeof body.head === 'string' ? body.head : ''))
     }
   }
   return send(res, 404, { error: 'not found' })
@@ -284,9 +298,18 @@ async function doStart(): Promise<void> {
       const s = http.createServer((req, res) => {
         handle(req, res).catch((e) => send(res, 500, { error: String(e?.message ?? e) }))
       })
+      // anyone who can reach the port can open connections before showing a secret: each is a file
+      // descriptor in the main process, which the consoles and board saves need too
+      s.maxConnections = 32
+      s.headersTimeout = 10_000
+      s.requestTimeout = 15_000
+      s.keepAliveTimeout = 5_000
       s.once('error', reject)
       s.listen(port, address, () => {
         server = s
+        // from here an error is the running server's: say so, rather than leave it to a settled promise
+        s.off('error', reject)
+        s.on('error', (e) => (lastError = `The Inbox server failed: ${e.message}`))
         resolve((s.address() as { port: number }).port)
       })
     })
@@ -317,7 +340,11 @@ export async function followAddress(): Promise<boolean> {
   const before = `${bound?.address}:${bound?.port}:${lastError}`
   await start()
   const changed = before !== `${bound?.address}:${bound?.port}:${lastError}`
-  if (changed) ctx?.emit('remote:changed')
+  if (changed) {
+    ctx?.emit('remote:changed')
+    // and the top bar's chip, which is there so the Inbox is never on unnoticed
+    ctx?.emit('remote:status', { running: !!bound, network: config.network })
+  }
   return changed
 }
 let follower: NodeJS.Timeout | null = null
@@ -343,6 +370,8 @@ export async function register(c: MainContext) {
   c.ipc.handle('remote:status', () => remoteStatus())
   c.ipc.handle('remote:enable', async (_e, network: RemoteNetwork) => {
     if (!['tailscale', 'lan', 'local'].includes(network)) throw new Error('bad network')
+    // Wi-Fi carries the link in the clear: a link from there does not work on another network, nor one into it
+    if (network !== config.network && (network === 'lan' || config.network === 'lan')) config.token = newSecret()
     config.enabled = true
     config.network = network
     save()
@@ -351,6 +380,8 @@ export async function register(c: MainContext) {
   })
   c.ipc.handle('remote:disable', () => {
     config.enabled = false
+    // a link that crossed a network once does not work again after Off
+    config.token = newSecret()
     save()
     stop()
     return remoteStatus()

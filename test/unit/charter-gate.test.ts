@@ -5,7 +5,7 @@ import { ipc } from '../support/renderer-env'
 import { test, beforeEach, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { type Charter, FULL_CARD_BELOW, coerceCharter } from '@shared/charter'
-import { excludedBy } from '@shared/mergeReview'
+import { enforceable, excludedBy } from '@shared/mergeReview'
 
 const { useApp } = await import('@/state/store')
 const { CHARTER_FIELDS, DRAFT_TIMEOUT_MS, draftCharter, gateCharter, gateTarget, openGate, useCharter, verifyEvidence } = await import('@/fleet/charter')
@@ -84,41 +84,38 @@ test('the charter prompt fragment is the same text both producers send', async (
   assert.ok(sent[0]?.includes(CHARTER_FIELDS))
 })
 
-// What the merge gate matches is a path, a folder or a folder/* prefix. Prose or a glob matches
-// nothing there and fails open — the card would say something was protected that is not.
+// What the merge gate matches is a path, a folder or a glob. Prose matches nothing there and fails
+// open — the card would say something was protected that is not.
 test('the fragment asks for wontTouch in the forms the merge gate matches, and says what not to write', () => {
   const rule = CHARTER_FIELDS.split('\n').find((l) => l.startsWith('- wontTouch'))
   assert.ok(rule, 'the fragment has a wontTouch rule')
   for (const [entry, file] of [
     ['package.json', 'package.json'],
     ['src/renderer', 'src/renderer/App.tsx'],
-    ['src/renderer/*', 'src/renderer/App.tsx']
+    ['*.lock', 'packages/a/yarn.lock'],
+    ['src/**/*.tsx', 'src/renderer/App.tsx']
   ] as const) {
     assert.ok(rule.includes(`"${entry}"`), `the rule shows ${entry}`)
     assert.equal(excludedBy(file, [entry]), entry, `${entry} really excludes ${file}`)
   }
-  assert.match(rule, /glob/i)
   assert.match(rule, /description/i)
   assert.match(rule, /leading slash/i)
 })
 
-// The words alone would survive the sentence being turned round to endorse these forms. What makes the
-// rule protect anything is that it forbids them — and, where the matcher cannot be taught what a form
-// means, that the form really matches nothing rather than seeming to protect something.
-test('the fragment forbids the forms the merge gate cannot match, and a description really matches nothing', () => {
+// What makes the rule protect anything is that it forbids prose, and that prose really matches
+// nothing rather than seeming to protect something — and the card says so.
+test('the fragment forbids a description, which really matches nothing and is marked not enforced', () => {
   const rule = CHARTER_FIELDS.split('\n').find((l) => l.startsWith('- wontTouch'))!
   const forbidAt = rule.search(/never write/i)
   assert.ok(forbidAt >= 0, 'the rule says what never to write')
-  assert.match(rule, /match nothing/i)
-  assert.match(rule, /protect nothing/i)
-  for (const form of ['the renderer', 'src/renderer/**', 'src/**/*.tsx']) {
-    assert.ok(rule.indexOf(`"${form}"`) > forbidAt, `${form} is listed after "never write", not offered as a form to use`)
-  }
-  for (const form of ['the renderer', 'src/**/*.tsx']) assert.equal(excludedBy('src/renderer/App.tsx', [form]), null, `${form} really excludes nothing`)
-  // src/renderer/** is the form a model writes anyway, and it plainly means the folder: the matcher
-  // reads it as that prefix rather than letting the card promise a folder nothing holds anyone to
-  assert.equal(excludedBy('src/renderer/App.tsx', ['src/renderer/**']), 'src/renderer/**')
-  assert.match(rule, /single trailing \*/i, 'the only wildcard allowed is stated')
+  assert.match(rule, /match(es)? nothing/i)
+  assert.match(rule, /protects? nothing/i)
+  assert.ok(rule.indexOf('"the renderer"') > forbidAt, 'a description is listed after "never write"')
+  assert.equal(excludedBy('src/renderer/App.tsx', ['the renderer']), null)
+  assert.equal(enforceable('the renderer'), false)
+  for (const entry of ['package.json', 'src/renderer', '*.lock', 'My Notes.md']) assert.equal(enforceable(entry), true, entry)
+  // a pattern of wildcards alone would refuse every merge: it is not used, so the card says so
+  for (const entry of ['*', '**', '**/*', '/']) assert.equal(enforceable(entry), false, entry)
 })
 
 test('the fragment tells the model not to report a confidence number, and to ask at most one question', () => {

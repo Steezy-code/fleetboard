@@ -7,6 +7,7 @@ import type { MainContext } from './context'
 import { which } from './env'
 import { ghEnv, git, run } from './run'
 import { stripAnsi } from '@shared/ansi'
+import { isFailing } from '@shared/ci'
 
 export type CiState = 'passing' | 'failing' | 'running' | 'none'
 
@@ -63,7 +64,7 @@ export function runState(status: string, conclusion: string | null | undefined):
   const s = (status || '').toLowerCase()
   if (s && s !== 'completed') return 'running'
   const c = (conclusion || '').toLowerCase()
-  if (['failure', 'timed_out', 'startup_failure', 'action_required', 'error'].includes(c)) return 'failing'
+  if (isFailing(c)) return 'failing'
   if (['success', 'neutral'].includes(c)) return 'passing'
   return 'none'
 }
@@ -183,6 +184,11 @@ export interface PrComment {
    * that (see trustedAuthor in renderer/src/workbench/prFeedback.ts).
    */
   association?: string
+  /**
+   * The author can push to the repository (admin, maintain or write), asked of GitHub for a MEMBER or
+   * COLLABORATOR: an organization member or a collaborator may have read access only.
+   */
+  canWrite?: boolean
   path?: string
   line?: number | null
 }
@@ -210,13 +216,16 @@ const FEEDBACK_QUERY = `query($owner:String!,$name:String!){ viewer{login} repos
 /**
  * What a reviewer asked for, from one PR's GraphQL node: issue comments, review summaries and inline
  * comments on unresolved threads. Left out: empty bodies (a bare approval), bots' plain comments
- * (deploy previews, coverage) but not their reviews, and anything an agent wrote (AGENT_MARK).
+ * (deploy previews, coverage) but not their reviews, and what an agent wrote (AGENT_MARK). Agents
+ * post as the signed-in user, so the mark is honoured from `viewer` alone: from anyone else it would
+ * hide a comment from the user.
  */
-export function feedbackOf(pr: any): PrComment[] {
+export function feedbackOf(pr: any, viewer = ''): PrComment[] {
   const out: PrComment[] = []
   const keep = (body: string, author: any, isReview: boolean) => {
     const b = String(body ?? '').trim()
-    if (!b || b.startsWith(AGENT_MARK)) return false
+    if (!b) return false
+    if (b.startsWith(AGENT_MARK) && !!viewer && String(author?.login ?? '').toLowerCase() === viewer.toLowerCase()) return false
     if (author?.__typename === 'Bot' && !isReview) return false
     return true
   }
@@ -246,6 +255,7 @@ async function prFeedback(cwd: string): Promise<PrFeedbackResult> {
   if (r.code !== 0) return { ok: false, at, error: firstLine(r.stderr) || 'gh api failed' }
   try {
     const d = JSON.parse(r.stdout).data
+    const viewer: string = d.viewer?.login ?? ''
     const prs: PrFeedback[] = (d.repository?.pullRequests?.nodes ?? []).map((p: any) => ({
       number: p.number,
       title: p.title,
@@ -253,12 +263,32 @@ async function prFeedback(cwd: string): Promise<PrFeedbackResult> {
       url: p.url,
       author: p.author?.login ?? '',
       fork: p.isCrossRepository !== false,
-      comments: feedbackOf(p)
+      comments: feedbackOf(p, viewer)
     }))
-    return { ok: true, at, viewer: d.viewer?.login ?? '', prs }
+    await markWriters(prs.flatMap((p) => p.comments), `${owner}/${name}`, gh, cwd, env)
+    return { ok: true, at, viewer, prs }
   } catch {
     return { ok: false, at, error: 'Unexpected gh output' }
   }
+}
+
+const WRITES = new Set(['admin', 'maintain', 'write'])
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
+/** login → can push, per repository, for an hour: a poll every two minutes asks once */
+const writers = new Map<string, { can: boolean; at: number }>()
+
+/** Ask GitHub whether each MEMBER or COLLABORATOR author can push; their association alone does not say. */
+async function markWriters(comments: PrComment[], repo: string, gh: string, cwd: string, env: Record<string, string>) {
+  const logins = [...new Set(comments.filter((c) => /^(MEMBER|COLLABORATOR)$/i.test(c.association ?? '') && LOGIN.test(c.author)).map((c) => c.author))]
+  for (const login of logins.slice(0, 20)) {
+    const key = `${repo}:${login.toLowerCase()}`
+    const hit = writers.get(key)
+    if (hit && Date.now() - hit.at < 3_600_000) continue
+    const r = await exec(gh, ['api', `repos/${repo}/collaborators/${login}/permission`, '--jq', '.permission'], cwd, env)
+    // a failed lookup is not write access: the comment is shown to the user rather than routed
+    writers.set(key, { can: r.code === 0 && WRITES.has(r.stdout.trim()), at: Date.now() })
+  }
+  for (const c of comments) if (/^(MEMBER|COLLABORATOR)$/i.test(c.association ?? '')) c.canWrite = writers.get(`${repo}:${c.author.toLowerCase()}`)?.can === true
 }
 
 /** The failed steps' log, cleaned up and cut to where it failed (the cleanup steps after it are noise). */

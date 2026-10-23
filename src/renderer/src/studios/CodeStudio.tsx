@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, FilePlus2, FolderCode, FolderPlus, Loader2, Pin, RefreshCw, Save, Search, X } from 'lucide-react'
 import { Modal } from '../ui/Modal'
-import { fileUrl, invoke } from '../lib/api'
+import { errorText, fileUrl, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { CodeEditor } from '../workbench/CodeEditor'
 import { FileTree, ancestors, graft, type Creating, type TreeEntry } from '../workbench/FileTree'
@@ -91,7 +91,7 @@ export default function CodeStudio(props: { path?: string }) {
           else setDoc({ path, text, saved: text, mtime: st.mtime })
         } catch (e: any) {
           if (opening.current !== path) return
-          setDoc({ path, text: null, saved: '', error: String(e?.message ?? e), mtime: st.mtime })
+          setDoc({ path, text: null, saved: '', error: errorText(e), mtime: st.mtime })
         }
       }
       setLoadingFile(false)
@@ -162,7 +162,7 @@ export default function CodeStudio(props: { path?: string }) {
       flashSaved()
       return true
     } catch (e: any) {
-      toast(`Save failed: ${e?.message ?? e}`, 'error')
+      toast(`Save failed: ${errorText(e)}`, 'error')
       return false
     } finally {
       setSaving(false)
@@ -224,7 +224,7 @@ export default function CodeStudio(props: { path?: string }) {
       await loadTree()
       if (c.kind === 'file') open(path, true)
     } catch (e: any) {
-      toast(String(e?.message ?? e), 'error')
+      toast(errorText(e), 'error')
     }
   }
 

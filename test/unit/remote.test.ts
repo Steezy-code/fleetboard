@@ -18,6 +18,15 @@ test('picks the Tailscale address and a real LAN address, never a container brid
   // Windows names the adapter "Tailscale"; Linux calls it tailscale0
   assert.equal(findAddresses({ Tailscale: iface('100.101.102.103') }).tailscale, '100.101.102.103', 'Windows adapter name')
   assert.equal(findAddresses({ tailscale1: iface('100.101.102.104') }).tailscale, '100.101.102.104')
+  // Windows names adapters in words, and lists WSL, Hyper-V, VirtualBox and VPN ones among the rest
+  const windows = {
+    'vEthernet (WSL (Hyper-V firewall))': iface('172.29.112.1'),
+    'VirtualBox Host-Only Network': iface('192.168.56.1'),
+    'Corporate VPN': iface('10.8.0.12'),
+    'Wi-Fi': iface('192.168.1.23')
+  }
+  assert.equal(findAddresses(windows).lan, '192.168.1.23', 'the Wi-Fi, not a VM bridge or a VPN')
+  assert.equal(findAddresses({ 'VMware Network Adapter VMnet8': iface('192.168.200.1'), Ethernet: iface('192.168.1.40') }).lan, '192.168.1.40')
   // the right name with the wrong range is not it either
   assert.equal(findAddresses({ tailscale0: iface('192.168.1.5') }).tailscale, undefined, 'a tailscale0 outside the range')
 })
@@ -117,4 +126,35 @@ test('one peer guessing the secret cannot lock the user out of their own Inbox',
   // and a flood of peers cannot grow the table without end
   for (let i = 0; i < 1500; i++) wrongSecret(`10.0.${Math.floor(i / 250)}.${i % 250}`)
   assert.equal(lockedOut(attacker), true, 'the peers already being counted still are')
+})
+
+test('a full table of peers whose minute is over still counts a new guesser', async (t) => {
+  const { lockedOut, wrongSecret } = await import('../../src/main/remote')
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() })
+  for (let i = 0; i < 1000; i++) wrongSecret(`10.1.${Math.floor(i / 250)}.${i % 250}`)
+  t.mock.timers.tick(10 * 60_000)
+  for (let i = 0; i < 40; i++) wrongSecret('192.168.7.7')
+  assert.equal(lockedOut('192.168.7.7'), true)
+})
+
+test('a request with the secret is served though its address is locked out', async () => {
+  // every client is 127.0.0.1 in "This PC" mode: a page sending wrong secrets must not lock the user out
+  const { register, wrongSecret } = await import('../../src/main/remote')
+  const handlers = new Map<string, (...a: any[]) => any>()
+  await register({ ipc: { handle: (ch: string, fn: any) => handlers.set(ch, fn) }, emit: () => {}, ptys: {} } as any)
+  const st = await handlers.get('remote:enable')!({}, 'local')
+  const u = new URL(st.url)
+  for (let i = 0; i < 40; i++) wrongSecret('127.0.0.1')
+  // an empty answer: past the secret it is a 400, short of it a 401 or 429
+  const as = (secret: string) => fetch(`${u.origin}/api/ask`, { method: 'POST', headers: { Authorization: `Bearer ${secret}`, 'Content-Type': 'application/json' }, body: '{}' })
+  try {
+    assert.equal((await as('f'.repeat(48))).status, 429, 'a wrong one is slowed')
+    assert.equal((await as(u.hash.slice(1))).status, 400, 'the right one is served')
+    const off = await handlers.get('remote:disable')!({})
+    assert.equal(off.running, false)
+    const again = await handlers.get('remote:enable')!({}, 'local')
+    assert.notEqual(new URL(again.url).hash, u.hash, 'Off retires the link')
+  } finally {
+    await handlers.get('remote:disable')!({})
+  }
 })

@@ -13,6 +13,13 @@ test('no done-when caps confidence, however many assumptions are known', () => {
   assert.equal(scoreConfidence(c), 60)
 })
 
+test('a won\'t-touch written as a description counts as none: the merge gate cannot enforce it', () => {
+  const c = (wontTouch: string[]) => ({ assumptions: [{ text: 'a', known: true }], wontTouch, doneWhen: 'npm test' })
+  assert.equal(scoreConfidence(c(['src/auth'])), 100)
+  assert.equal(scoreConfidence(c(['the auth module'])), 90)
+  assert.equal(scoreConfidence(c([])), 90)
+})
+
 test('an open question keeps the card full', () => {
   const c = { assumptions: [{ text: 'a', known: true }], wontTouch: ['x'], doneWhen: 'npm test', question: { text: 'which?', options: ['a', 'b'] } }
   assert.ok(scoreConfidence(c) < 80)
