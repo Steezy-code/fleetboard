@@ -228,6 +228,8 @@ export interface PtyInfo {
   startedAt: number
   /** the conversation id the CLI runs under, when known */
   sessionId?: string
+  /** started with its auto-approval flag, which it keeps whatever the setting says later */
+  autoApproves: boolean
 }
 
 export interface Settings {

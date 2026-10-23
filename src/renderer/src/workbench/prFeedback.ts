@@ -58,11 +58,20 @@ export function trustedAuthor(c: PrComment, viewer?: string): boolean {
   return WRITE_ACCESS.has(String(c.association ?? '').toUpperCase())
 }
 
-/** A console that answers its own permission prompts must never be fed a comment automatically. */
+/**
+ * A console that answers its own permission prompts must never be fed a comment automatically.
+ * A running one is judged by how its process was started, which outlives the setting being turned
+ * off; one not running by how it would start. A Lead hands what it is given to its team, so it
+ * counts as auto-approving when any of them does. An unknown console is assumed to.
+ */
 export function autoApproves(consoleId: string): boolean {
-  const node = allConsoles().find((c) => c.id === consoleId)
-  if (!node) return false
-  return (node.data.autoApprove as boolean | undefined) ?? useApp.getState().settings.autoApprove
+  const app = useApp.getState()
+  const team = Object.values(useFleet.getState().state?.members ?? {}).filter((m) => m.leadId === consoleId && m.status !== 'closed')
+  return [consoleId, ...team.map((m) => m.id)].some((id) => {
+    if (app.live[id]) return !!app.approving[id]
+    const node = allConsoles().find((c) => c.id === id)
+    return node ? ((node.data.autoApprove as boolean | undefined) ?? app.settings.autoApprove) : true
+  })
 }
 
 /** Comments no agent has been given yet. */

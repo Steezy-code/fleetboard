@@ -10,6 +10,7 @@ import type {
   NodeType,
   Project,
   ProjectMeta,
+  PtyInfo,
   Settings,
   Workspace
 } from '@shared/types'
@@ -77,6 +78,8 @@ interface AppState {
   statuses: Record<string, ConsoleStatus>
   /** consoles with a live process in the main process */
   live: Record<string, boolean>
+  /** the live ones whose process was started with auto-approval: what they do now, not the setting */
+  approving: Record<string, boolean>
   /** node shown full-window (maximize button) */
   focusedNode: string | null
   panel: PanelState | null
@@ -154,7 +157,7 @@ interface AppState {
   toast: (text: string, tone?: Toast['tone'], action?: Toast['action']) => void
   confirm: (req: Omit<ConfirmRequest, 'id' | 'resolve'>) => Promise<boolean>
   setStatus: (id: string, s: ConsoleStatus) => void
-  setLive: (id: string, live: boolean) => void
+  setLive: (id: string, live: boolean, autoApproves?: boolean) => void
 }
 
 export const newWorkspace = (name: string): Workspace => ({
@@ -328,6 +331,7 @@ export const useApp = create<AppState>((set, get) => {
     selection: [],
     statuses: {},
     live: {},
+    approving: {},
     focusedNode: null,
     panel: null,
     drawer: null,
@@ -340,9 +344,10 @@ export const useApp = create<AppState>((set, get) => {
       const [settings, projects] = await Promise.all([invoke<Settings>('store:settings'), invoke<ProjectMeta[]>('store:projects')])
       set({ settings: { ...DEFAULT_SETTINGS, ...settings }, projects })
       get().refreshAgents()
-      const live = await invoke<{ id: string; status: ConsoleStatus }[]>('pty:list')
+      const live = await invoke<PtyInfo[]>('pty:list')
       set({
         live: Object.fromEntries(live.map((l) => [l.id, true])),
+        approving: Object.fromEntries(live.filter((l) => l.autoApproves).map((l) => [l.id, true])),
         statuses: Object.fromEntries(live.map((l) => [l.id, l.status]))
       })
       // the page was reloaded (after a crash, or by hand): back to the board it showed
@@ -655,12 +660,15 @@ export const useApp = create<AppState>((set, get) => {
         }))
       }),
     setStatus: (id, s) => set((st) => (st.statuses[id] === s ? st : { statuses: { ...st.statuses, [id]: s } })),
-    setLive: (id, live) =>
+    setLive: (id, live, autoApproves = false) =>
       set((st) => {
         const next = { ...st.live }
+        const approving = { ...st.approving }
         if (live) next[id] = true
         else delete next[id]
-        return { live: next }
+        if (live && autoApproves) approving[id] = true
+        else delete approving[id]
+        return { live: next, approving }
       })
   }
 })

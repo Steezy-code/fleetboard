@@ -150,7 +150,7 @@ export async function startConsole(node: BoardNode<ConsoleData>, cols: number, r
     extraArgs: node.data.extraArgs,
     command: node.data.command
   })
-  app.setLive(node.id, true)
+  app.setLive(node.id, true, info.autoApproves)
   app.setStatus(node.id, info.status)
   return info
 }

@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Copy, Pause, Play, RotateCcw } from 'lucide-react'
-import type { ConsoleData } from '@shared/types'
+import type { ConsoleData, PtyInfo } from '@shared/types'
 import { agentById } from '@shared/agents'
 import { CAN_PAUSE, errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
@@ -70,7 +70,10 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
       if (buffer !== null) {
         term.write(buffer)
         setPhase('running')
-        useApp.getState().setLive(node.id, true)
+        // started elsewhere, or before a reload: how it was started is the main process's to say
+        const info = await invoke<PtyInfo | null>('pty:info', node.id)
+        if (cancelled) return
+        useApp.getState().setLive(node.id, true, !!info?.autoApproves)
         // started elsewhere (a team console the fleet launched): a reopened board asks before resuming it too
         if (node.data.launch !== 'ask') useApp.getState().updateNodeData(node.id, { launch: 'ask' })
         return
@@ -197,7 +200,9 @@ export function ConsoleHeader({ node }: NodeProps<ConsoleData>) {
   const [editing, setEditing] = useState(false)
   // what it is doing, while it works: a CLI whose output does not say keeps the plain status
   const doing = useActivity((s) => (status === 'working' ? s.of[node.id] : undefined))
-  const yolo = node.data.autoApprove ?? useApp.getState().settings.autoApprove
+  // what its process was started with while it runs; what it would be started with otherwise
+  const approving = useApp((s) => (s.live[node.id] ? !!s.approving[node.id] : undefined))
+  const yolo = approving ?? node.data.autoApprove ?? useApp.getState().settings.autoApprove
   return (
     <div className={`row grow st-${status}`} style={{ gap: 7, minWidth: 0 }}>
       <span className="agent-dot" style={{ background: agentColor(node.data.agentId) }} />
