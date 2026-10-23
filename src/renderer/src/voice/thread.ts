@@ -75,6 +75,9 @@ export interface PendingPlan {
   prompt: string
   /** reply to speak after running */
   say?: string
+  /** the project it is about, and when it was asked: it does not carry over to another, or go stale */
+  projectId: string
+  at: number
 }
 
 export interface ModelLoad {
