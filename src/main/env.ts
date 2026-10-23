@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import os from 'node:os'
 import { IS_WIN, defaultShell, findExecutable, normalizePathKey } from './platform'
 
 const run = promisify(execFile)
@@ -40,7 +39,6 @@ export async function loginEnv(): Promise<Record<string, string>> {
 }
 
 export const shellPath = () => defaultShell(cached ?? process.env)
-export const home = () => os.homedir()
 
 /** `which` against the login PATH. */
 /** Where an executable is, searched on the login PATH like a shell does (no `which` program needed). */

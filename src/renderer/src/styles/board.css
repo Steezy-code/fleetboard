@@ -922,22 +922,6 @@
 .project-card:hover .pc-x {
   opacity: 1;
 }
-.agent-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.agent-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 99px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--panel) 85%, transparent);
-  font-size: 12.5px;
-}
 .first-run {
   margin-top: 26px;
   display: flex;
