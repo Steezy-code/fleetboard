@@ -161,3 +161,26 @@ test('a board from this version, or with no schema at all, still opens and saves
   store.saveProject(board(legacy, 'legacy') as never)
   assert.equal(JSON.parse(fs.readFileSync(path.join(projects, `${legacy}.json`), 'utf8')).schema, 1, 'and is stamped with this version')
 })
+
+// chmod 000 does not stop root, and Windows has no mode bits; the logic is the same on every platform
+const canLockOut = process.platform !== 'win32' && process.getuid?.() !== 0
+
+test('a board that is there but cannot be read is neither opened as new nor overwritten', { skip: !canLockOut }, async () => {
+  const id = 'ffffffffffff'
+  const file = path.join(projects, `${id}.json`)
+  store.saveProject(board(id, 'intact') as any)
+  const before = fs.readFileSync(file, 'utf8')
+  const noticesBefore = emitted.length
+  fs.chmodSync(file, 0o000)
+  try {
+    // "no board yet" (null) is what made the renderer open an empty board with this id and save it
+    await assert.rejects(ipcMain.invoke('store:loadProject', id), /could not be read \(EACCES\)/)
+    assert.throws(() => store.loadProject(id), /left untouched/)
+    assert.deepEqual(fs.readdirSync(projects).filter((f) => f.startsWith(`${id}.corrupt-`)), [], 'not set aside: it is not damaged')
+    assert.equal(emitted.length, noticesBefore, 'and no "restored from a snapshot" notice')
+  } finally {
+    fs.chmodSync(file, 0o600)
+  }
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'the file is exactly as it was')
+  assert.equal(store.loadProject(id)?.name, 'intact', 'and opens once it can be read again')
+})
