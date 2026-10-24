@@ -17,4 +17,9 @@ const chosen = files.length ? files : benchmark ? ['test/e2e/performance.test.ts
 const argv = ['--enable-source-maps', '--import', './test/support/register.mjs', '--test', `--test-concurrency=${one || benchmark ? 1 : process.env.FB_E2E_JOBS || 1}`, ...chosen]
 const env = { ...process.env, ...(benchmark ? { FB_BENCH: '1' } : {}) }
 if (process.platform === 'win32' || process.env.FB_E2E_HEADLESS === '1') run(process.execPath, argv, { env })
-else run('xvfb-run', ['-a', '-s', '-screen 0 1600x1000x24', process.execPath, ...argv], { env })
+else {
+  // xvfb-run only sets DISPLAY: from a Wayland session Electron would still open every window on the
+  // real desktop, so the Wayland variables go
+  for (const k of ['WAYLAND_DISPLAY', 'XDG_SESSION_TYPE', 'ELECTRON_OZONE_PLATFORM_HINT', 'OZONE_PLATFORM']) delete env[k]
+  run('xvfb-run', ['-a', '-s', '-screen 0 1600x1000x24', process.execPath, ...argv], { env })
+}
