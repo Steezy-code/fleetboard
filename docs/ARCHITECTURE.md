@@ -56,6 +56,7 @@ src/main/                Electron main process
   skills.ts              Claude Code skills: SKILL.md folders, personal and per project
   starter.ts             first goals for an empty board, read from the repo (a plan, a TODO), never generated
   activity.ts            what a console is doing, from the tool-call bullets its terminal shows
+  suspend.ts             pause on Windows: a console's process tree frozen through Windows' own suspend
   usage.ts               token usage from the CLIs' own logs, read on from where the last read stopped
   profiles.ts            several sign-ins per CLI (its config dir per profile)
 src/shared/prompt.ts     Prompt / PromptAnswer: a question a console is waiting on, and how to answer it

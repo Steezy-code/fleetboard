@@ -13,7 +13,8 @@ import { activityOf } from './activity'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
 import { approvalFor, commandOf, seenOf } from '@shared/approvals'
 import { RunRecord } from './orphans'
-import { CAN_PAUSE, IS_WIN, killTree, killTreeSync, launch, shellArgs, shellCommandArgs } from './platform'
+import { IS_WIN, killTree, killTreeSync, launch, shellArgs, shellCommandArgs } from './platform'
+import { suspendTree } from './suspend'
 
 /** Pause between keystrokes of an answer: TUIs read one key per input event. */
 const KEY_GAP_MS = 70
@@ -272,12 +273,14 @@ export class PtyManager {
   kill(id: string) {
     const s = this.sessions.get(id)
     if (!s) return
-    if (s.tracker.paused) this.signal(s, 'SIGCONT')
     if (IS_WIN) {
-      // no hangup to send: end the console's process tree
+      // no hangup to send: end the console's process tree. taskkill /F ends a frozen tree as well, so
+      // a paused console needs no thaw first
       killGroup(s.proc.pid)
       return
     }
+    // a stopped process cannot act on a hangup until it runs again
+    if (s.tracker.paused) this.signal(s, 'SIGCONT')
     // like closing a terminal: the whole group hangs up
     this.signal(s, 'SIGHUP')
     // then whatever ignored that: an agent CLI's group whether or not the CLI has ended (Gemini CLI; a
@@ -300,10 +303,20 @@ export class PtyManager {
     }
   }
 
+  /**
+   * Freeze or thaw the console's processes. POSIX has a signal for it; Windows has no signals but does
+   * have its own freeze, which `suspendTree` reaches through PowerShell. Either way it is the whole
+   * tree, so a shell's children stop with it.
+   */
+  private freeze(s: Session, action: 'suspend' | 'resume') {
+    if (IS_WIN) suspendTree(s.proc.pid, action)
+    else this.signal(s, action === 'suspend' ? 'SIGSTOP' : 'SIGCONT')
+  }
+
   pause(id: string) {
     const s = this.sessions.get(id)
-    if (!s || s.tracker.paused || !CAN_PAUSE) return
-    this.signal(s, 'SIGSTOP')
+    if (!s || s.tracker.paused) return
+    this.freeze(s, 'suspend')
     s.tracker.paused = true
     this.evaluate(s)
   }
@@ -311,7 +324,7 @@ export class PtyManager {
   resume(id: string) {
     const s = this.sessions.get(id)
     if (!s || !s.tracker.paused) return
-    this.signal(s, 'SIGCONT')
+    this.freeze(s, 'resume')
     s.tracker.paused = false
     this.evaluate(s)
   }

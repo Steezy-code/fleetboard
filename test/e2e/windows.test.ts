@@ -80,3 +80,36 @@ test('local images load through fbfile:///C:/…', opts, async () => {
   )
   assert.equal(loaded, 'loaded 1x1')
 })
+
+test('pausing a console really freezes it, and the tile says so', opts, async () => {
+  const a = await ready()
+  // a counter in the console's own shell: its output is the only honest proof that it stopped
+  const id = await spawn(a, 'shell', '$i = 0; while ($true) { $i++; Write-Output "TICK$i"; Start-Sleep -Milliseconds 200 }')
+  const ticks = async () => ((await tail(a, id)).match(/TICK\d+/g) ?? []).length
+  const statusOf = () => a.eval((i) => (window as any).__fleetboard.useApp.getState().statuses[i] as string, id)
+  await a.waitFor(async () => ((await ticks()) > 3 ? true : null), { timeout: 30_000, label: 'the console counting' })
+
+  await a.invoke('pty:pause', id)
+  await a.waitFor(async () => ((await statusOf()) === 'paused' ? true : null), { timeout: 20_000, label: 'the tile reads paused' })
+  // the freeze is one PowerShell call away: let it land before deciding whether it took
+  await new Promise((r) => setTimeout(r, 3000))
+  const frozen = await ticks()
+  await new Promise((r) => setTimeout(r, 2500))
+  assert.equal(await ticks(), frozen, 'a paused console prints nothing more')
+
+  await a.invoke('pty:resume', id)
+  await a.waitFor(async () => ((await ticks()) > frozen ? true : null), { timeout: 20_000, label: 'counting again after resume' })
+  assert.notEqual(await statusOf(), 'paused')
+})
+
+test('closing a paused console still ends what it started', opts, async () => {
+  const a = await ready()
+  const before = pings()
+  const id = await spawn(a, 'shell', 'ping -n 600 127.0.0.1')
+  await a.waitFor(() => pings() > before, { timeout: 30_000, label: 'ping running in the console' })
+  await a.invoke('pty:pause', id)
+  // frozen, with a child of its own mid-flight: taskkill /F has to end it anyway
+  await new Promise((r) => setTimeout(r, 3000))
+  await a.invoke('pty:kill', id)
+  await a.waitFor(() => pings() <= before, { timeout: 30_000, label: 'the frozen tree ended' })
+})
