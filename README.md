@@ -56,6 +56,8 @@ Settings shows which build you are running, and tells you when a newer release i
 
 Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1` for a pre-release) and `.github/workflows/release.yml` builds the installer and attaches it to a GitHub Release. `npm run dist:win` builds one on a Windows machine.
 
+The Windows jobs in both workflows run on a **self-hosted runner** (a hosted Windows runner bills at twice a Linux one, and self-hosted minutes are free), which only stays safe while this repo is private: on a public repo a fork's pull request would run its own code on that machine. One thing that runner needs, or every `shell: bash` step dies with `execvpe(/bin/bash) failed`: **`C:\Program Files\Git\bin` must come before `C:\Windows\System32` on its PATH**, so `bash` is Git Bash and not the WSL shim. Naming the path in the workflow instead does not work — the runner cannot parse a custom shell whose path contains spaces. Here it is done by starting the runner through a wrapper that prepends Git's bin (`run-gitbash-first.cmd` beside `run.cmd`, which the logon task points at).
+
 ## What's on the board
 
 | Area | What you get |
