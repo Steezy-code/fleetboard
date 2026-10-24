@@ -67,3 +67,23 @@ test('a one-shot run of a named agent is refused the same way', () => {
   assert.equal(maySpendOn('claude', 'judging whether a loop can stop'), false)
   assert.equal(maySpendOn('codex', 'judging whether a loop can stop'), true, 'another agent is unaffected')
 })
+
+// The budget used to default to six million tokens a session and eighty million a week — numbers
+// nobody chose, for limits that are not on this machine. Unset, there is nothing to be a share of, so
+// the ceiling cannot fire: the user sets a budget to get the gate, and the panel says so.
+test('with no budget set, nothing is gated however much has been spent', () => {
+  useUsage.setState({ budgets: { ...DEFAULT_BUDGETS } as any, limits: limits('claude', 50_000_000, 900_000_000) as any })
+  assert.equal(DEFAULT_BUDGETS.claude.session, 0, 'no invented session budget')
+  assert.equal(DEFAULT_BUDGETS.claude.week, 0, 'nor a weekly one')
+  assert.equal(atCeiling('claude'), false)
+})
+
+test('a budget the user sets gates exactly as before', () => {
+  useUsage.setState({
+    budgets: { ...DEFAULT_BUDGETS, claude: { session: 2_000_000, week: 0, ceiling: 0.9 } } as any,
+    limits: limits('claude', 1_800_000) as any
+  })
+  assert.equal(atCeiling('claude'), true, 'the session budget they set')
+  useUsage.setState({ limits: limits('claude', 1_700_000) as any })
+  assert.equal(atCeiling('claude'), false)
+})

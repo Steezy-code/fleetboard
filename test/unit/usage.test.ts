@@ -202,9 +202,11 @@ test('usage report: resumed sessions repeat history and are counted once; limit 
 
   const lim: any = await ipcMain.invoke('usage:limits', 'claude')
   assert.equal(lim.session.active, true)
-  assert.equal(lim.session.tokens, 200 + 60 + 300 + 70, 'the window opened 2 hours ago; cache reads are not counted')
+  // every token the window moved, cache reads included: they are ~97% of what agent work reads, and a
+  // "tokens used" figure without them is not a token count (each fixture line reads 1000 from cache)
+  assert.equal(lim.session.tokens, 200 + 60 + 300 + 70 + 2 * 1000, 'the window opened 2 hours ago')
   assert.ok(Math.abs(lim.session.resetsAt - (Date.now() + 3 * HOUR)) < 60_000)
-  assert.equal(lim.week.tokens, 100 + 50 + 200 + 60 + 300 + 70, 'the week opened 8 hours ago; the message a month ago is in an expired one')
+  assert.equal(lim.week.tokens, 100 + 50 + 200 + 60 + 300 + 70 + 3 * 1000, 'the week opened 8 hours ago; the message a month ago is in an expired one')
   const codex: any = await ipcMain.invoke('usage:limits', 'codex')
   assert.equal(codex.session.active, false, 'nothing recent')
 })
