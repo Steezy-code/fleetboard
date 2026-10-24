@@ -168,8 +168,8 @@ export function learnKnowledge(): { promise: Promise<Learned>; cancel: () => voi
 }
 
 /**
- * Keep what the user changed on a charter before confirming it, a field at a time. Nothing reads these
- * yet; they are kept so that learning from corrections can be designed against real ones later.
+ * Keep what the user changed on a charter before confirming it, a field at a time. `repeatedCorrections`
+ * reads them: the same change made on several goals is offered in the panel as a fact to keep.
  */
 export function recordCharterEdits(drafted: Charter, confirmed: Charter) {
   const deltas = charterDeltas(drafted, confirmed)

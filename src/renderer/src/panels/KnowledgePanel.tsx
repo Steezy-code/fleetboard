@@ -1,18 +1,22 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { BookMarked, Check, Loader2, Pencil, Plus, ScanSearch, Square, Trash2 } from 'lucide-react'
+import { BookMarked, Check, Loader2, Pencil, Plus, ScanSearch, Sparkles, Square, Trash2, X } from 'lucide-react'
 import {
   type CharterDelta,
   type KnowledgeFact,
   type Provenance,
+  type Suggestion,
   type Topic,
   PROVENANCE_LABEL,
+  REPEATED_GOALS,
   TOPICS,
   TOPIC_LABEL,
   addFact,
   coerceKnowledge,
   confirmFact,
   editFact,
-  forgetFact
+  forgetFact,
+  rememberCorrection,
+  repeatedCorrections
 } from '@shared/knowledge'
 import { useApp } from '../state/store'
 import { Modal } from '../ui/Modal'
@@ -37,6 +41,7 @@ export default function KnowledgePanel({ tab: initialTab }: { tab?: Tab }) {
   const raw = useApp((s) => s.project?.extras.knowledge)
   const plannerAgent = useApp((s) => s.settings.plannerAgent)
   const k = useMemo(() => coerceKnowledge(raw), [raw])
+  const suggestions = useMemo(() => repeatedCorrections(k), [k])
   const [tab, setTab] = useState<Tab>(initialTab ?? 'facts')
   const [adding, setAdding] = useState<{ topic: Topic; text: string } | null>(null)
   const [learning, setLearning] = useState(false)
@@ -101,7 +106,9 @@ export default function KnowledgePanel({ tab: initialTab }: { tab?: Tab }) {
           </span>
         ) : (
           <>
-            <span className="dim small grow">Kept so that a correction you make often can later become a fact. Nothing reads them yet.</span>
+            <span className="dim small grow">
+              What you change on a charter before starting it. A change you make on {REPEATED_GOALS} different goals is offered above as a fact to keep.
+            </span>
             <button
               className="btn sm ghost"
               disabled={!deltas.length}
@@ -119,12 +126,16 @@ export default function KnowledgePanel({ tab: initialTab }: { tab?: Tab }) {
         </button>
         <button className={`mem-tab ${tab === 'edits' ? 'on' : ''}`} onClick={() => setTab('edits')}>
           Your charter edits <span className="mem-count">{k.deltas.length}</span>
+          {suggestions.length > 0 && <span className="kn-dot" title={`${suggestions.length} to keep as a fact`} />}
         </button>
       </div>
 
       {tab === 'edits' ? (
         deltas.length ? (
           <div className="mem-list">
+            {suggestions.map((s) => (
+              <Suggest key={s.key} s={s} />
+            ))}
             {deltas.map((d, i) => (
               <Delta key={`${d.at}-${i}`} d={d} />
             ))}
@@ -252,6 +263,35 @@ function Fact({ f }: { f: KnowledgeFact }) {
         )}
         <button className="icon-btn sm" title="Delete — a rebuild will not bring it back" onClick={() => changeKnowledge((k) => forgetFact(k, f.key))}>
           <Trash2 size={12} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A correction made on several goals, offered as a fact. Keeping it is the user saying it is a rule
+ * here, which is what makes it citable; dismissing it is remembered as a fact they rejected, so it is
+ * never offered or asserted again.
+ */
+function Suggest({ s }: { s: Suggestion }) {
+  return (
+    <div className="mem-card kn-suggest">
+      <div className="row" style={{ alignItems: 'flex-start' }}>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div className="row" style={{ gap: 8, marginBottom: 4 }}>
+            <span className="mem-pill" style={{ color: TINT.you, borderColor: `color-mix(in srgb, ${TINT.you} 45%, transparent)`, background: `color-mix(in srgb, ${TINT.you} 12%, transparent)` }}>
+              <Sparkles size={10} /> {TOPIC_LABEL[s.topic]}
+            </span>
+            <span className="dim small">you changed this on {s.times} different goals</span>
+          </div>
+          <div className="mem-body">{s.text}</div>
+        </div>
+        <button className="btn sm primary" title="Keep it as a fact of yours, which a charter can cite" onClick={() => changeKnowledge((k) => rememberCorrection(k, s))}>
+          <Check size={12} /> Remember
+        </button>
+        <button className="btn sm ghost" title="Not a rule here — it is not offered again" onClick={() => changeKnowledge((k) => forgetFact(k, s.key))}>
+          <X size={12} /> No
         </button>
       </div>
     </div>
