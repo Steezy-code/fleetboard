@@ -76,28 +76,49 @@ export function compareVersions(a: string, b: string): number {
   return 0
 }
 
-/** What `gh release view --json …` printed. A tag is the one field it is no release without. */
-export function parseRelease(stdout: string): Release | null {
+const str = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 300) : '')
+
+/** One release as the API gives it. A tag is the one field it is no release without. */
+function oneRelease(raw: unknown): Release | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  // a draft is visible to us and to nobody else: there is nothing there for the user to download
+  if (r.draft === true) return null
+  const tag = str(r.tag_name)
+  if (!tag) return null
+  const url = str(r.html_url)
+  return {
+    tag,
+    name: str(r.name) || tag,
+    // only a github.com page, so a url from anywhere else is never handed to the OS to open
+    url: /^https:\/\/github\.com\//i.test(url) ? url : '',
+    publishedAt: str(r.published_at),
+    prerelease: r.prerelease === true
+  }
+}
+
+/**
+ * The newest release in what the API listed. `gh release view` is not usable for this: it answers with
+ * the latest release that is *not* a prerelease, and this project tags its Windows builds
+ * `v0.2.0-win.1` — so on a repo that has only published prereleases it says "release not found" and no
+ * update could ever be offered. A prerelease here is a release like any other.
+ *
+ * The highest version wins rather than whichever was published last, so a hotfix to an older line
+ * cannot tell someone on a newer build that they are behind.
+ */
+export function newestRelease(stdout: string): Release | null {
   let raw: unknown
   try {
     raw = JSON.parse(stdout)
   } catch {
     return null
   }
-  if (!raw || typeof raw !== 'object') return null
-  const r = raw as Record<string, unknown>
-  const str = (v: unknown) => (typeof v === 'string' ? v.trim().slice(0, 300) : '')
-  const tag = str(r.tagName)
-  if (!tag) return null
-  const url = str(r.url)
-  return {
-    tag,
-    name: str(r.name) || tag,
-    // only a github.com page, so a url from anywhere else is never handed to the OS to open
-    url: /^https:\/\/github\.com\//i.test(url) ? url : '',
-    publishedAt: str(r.publishedAt),
-    prerelease: r.isPrerelease === true
-  }
+  const list = Array.isArray(raw) ? raw : [raw]
+  return list.reduce<Release | null>((best, r) => {
+    const one = oneRelease(r)
+    if (!one) return best
+    return !best || compareVersions(one.tag, best.tag) > 0 ? one : best
+  }, null)
 }
 
 /**
@@ -107,7 +128,7 @@ export function parseRelease(stdout: string): Release | null {
  */
 export function interpret(current: string, r: { code: number; stdout: string; stderr: string }): UpdateCheck {
   if (r.code === 0) {
-    const latest = parseRelease(r.stdout)
+    const latest = newestRelease(r.stdout)
     return { current, latest, newer: newerRelease(current, latest) }
   }
   const msg = r.stderr.trim().split('\n')[0] ?? ''
@@ -147,8 +168,9 @@ export function register(ctx: MainContext) {
     if (cached && !force) return cached
     const gh = await which('gh')
     if (!gh) return { current, latest: null, newer: null, error: 'Install the GitHub CLI (gh) to check for a new version.' }
-    // --repo, so it asks about Fleetboard wherever it runs; home is just a folder that exists
-    const r = await run(gh, ['release', 'view', '--repo', REPO, '--json', 'tagName,name,url,publishedAt,isPrerelease'], { cwd: app.getPath('home'), env: await ghEnv(), timeout: CHECK_TIMEOUT_MS })
+    // the API rather than `gh release view`, which hides prereleases (see newestRelease). The repo is
+    // named outright, so it asks about Fleetboard wherever it runs; home is just a folder that exists
+    const r = await run(gh, ['api', `repos/${REPO}/releases?per_page=20`], { cwd: app.getPath('home'), env: await ghEnv(), timeout: CHECK_TIMEOUT_MS })
     const out = interpret(current, r)
     // only a good answer is kept: a check that failed should run again, not stick for the session
     if (!out.error) cached = out
