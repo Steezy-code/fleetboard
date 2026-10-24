@@ -1,3 +1,4 @@
+import { capabilitiesOf } from '@shared/capabilities'
 import { useEffect, useMemo, useState } from 'react'
 import { Bot, Check, Download, Minus, Plus, RefreshCw } from 'lucide-react'
 import type { Profile } from '@shared/types'
@@ -107,6 +108,7 @@ export default function SpawnPanel({ agentId: initial, count: initialCount }: { 
       <button className="btn ghost sm" style={{ marginTop: 8 }} onClick={() => setShowAll(!showAll)}>
         {showAll ? 'Only installed agents' : `All ${AGENTS.length} agents`}
       </button>
+      <div className="small muted" style={{ marginTop: 12 }} role="status"><b>{capabilitiesOf(agentId).tier}:</b> {capabilitiesOf(agentId).detail}</div>
       {selected && !installed.has(selected.id) && selected.install && (
         <div className="hint-box">
           <Download size={14} />
@@ -141,7 +143,7 @@ export default function SpawnPanel({ agentId: initial, count: initialCount }: { 
                 Starts with <code className="mono">{selected.yoloArgs.join(' ')}</code>. The agent stops asking before it edits or runs things.
               </div>
             </div>
-            <Switch on={yolo} onChange={setYolo} />
+            <Switch title="Automatically approve this console" on={yolo} onChange={setYolo} />
           </div>
         )}
       </div>

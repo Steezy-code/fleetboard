@@ -58,14 +58,14 @@ export default function CiPanel() {
               <div>Fix failures automatically</div>
               <div className="muted small">When a run turns red, start a CI fixer console with the failing log. It never weakens tests.</div>
             </div>
-            <Switch on={autoFix} onChange={setCiAutoFix} />
+            <Switch title="Fix CI failures automatically" on={autoFix} onChange={setCiAutoFix} />
           </div>
           <div className="ci-auto">
             <div className="grow">
               <div>Send review comments to the agent</div>
               <div className="muted small">New comments on a PR an agent made go straight to it (its Lead or console, or a new one in that branch). Other PRs only notify you.</div>
             </div>
-            <Switch on={autoRoute} onChange={setAutoRoute} />
+            <Switch title="Route trusted review comments automatically" on={autoRoute} onChange={setAutoRoute} />
           </div>
           <div className="dim small ci-foot">
             {status.slug} · checked {ago(new Date(status.at).toISOString())} · every {runs.some((r) => r.state === 'running') || prs.some((p) => p.state === 'running') ? '20s while running' : 'minute'}

@@ -3,9 +3,9 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Copy, Pause, Play, RotateCcw } from 'lucide-react'
-import type { ConsoleData, PtyInfo } from '@shared/types'
+import type { ConsoleData } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { errorText, invoke } from '../lib/api'
+import { request, errorText, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, onConsoleData, spawnConsoles, startConsole } from '../engine/consoles'
 import type { NodeProps } from './types'
@@ -65,22 +65,21 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
 
     let cancelled = false
     ;(async () => {
-      const buffer = await invoke<string | null>('pty:buffer', node.id)
+      const buffer = await request('pty:buffer', node.id)
       if (cancelled) return
       if (buffer !== null) {
         term.write(buffer)
         setPhase('running')
         // started elsewhere, or before a reload: how it was started is the main process's to say
-        const info = await invoke<PtyInfo | null>('pty:info', node.id)
+        const info = await request('pty:info', node.id)
         if (cancelled) return
         useApp.getState().setLive(node.id, true, !!info?.autoApproves)
         // started elsewhere (a team console the fleet launched): a reopened board asks before resuming it too
         if (node.data.launch !== 'ask') useApp.getState().updateNodeData(node.id, { launch: 'ask' })
         return
       }
-      const canResume = !!agent?.resumeArgs
       if (node.data.launch === 'resume') launch(true)
-      else if (node.data.launch === 'ask' && canResume) setPhase('ask')
+      else if (node.data.launch === 'ask') setPhase('ask')
       else launch(false)
     })()
 
@@ -161,9 +160,9 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
             <div className="row" style={{ gap: 10 }}>
               <RotateCcw size={16} color="var(--accent)" />
               <div>
-                <div style={{ fontWeight: 600 }}>Resume last conversation?</div>
+                <div style={{ fontWeight: 600 }}>{agent?.resumeArgs ? 'Resume last conversation?' : 'Start this console?'}</div>
                 <div className="muted" style={{ fontSize: 12 }}>
-                  {agentLabel(node.data.agentId)} can pick up where it left off.
+                  {agent?.resumeArgs ? `${agentLabel(node.data.agentId)} can pick up where it left off.` : 'This console waits for you to start a new session.'}
                 </div>
               </div>
             </div>
@@ -171,9 +170,7 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
               <button className="btn sm" onClick={() => launch(false)}>
                 New session
               </button>
-              <button className="btn sm primary" onClick={() => launch(true)}>
-                Resume
-              </button>
+              {agent?.resumeArgs && <button className="btn sm primary" onClick={() => launch(true)}>Resume</button>}
             </div>
           </div>
         </div>

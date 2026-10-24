@@ -1,7 +1,7 @@
 // Lead/worker teams: shared shapes between the fleet core (main) and the board (renderer).
 
 import type { Charter } from './charter'
-import type { DoneWhenCheck, LiveDiff } from './live'
+import type { CheckRun, DoneWhenCheck, LiveDiff } from './live'
 
 export type FleetRole = 'lead' | 'worker' | 'reviewer'
 
@@ -80,6 +80,8 @@ export interface FleetReady {
   stat?: { path: string; add: number; del: number }[]
   /** what the lead checked before finishing ("typecheck and 48 tests pass"), in its words */
   verified?: string
+  /** Observed evidence frozen with this Ready card, never supplied by an agent. */
+  evidence?: { command: string; run: CheckRun }
   at: number
   /** the repo has an origin remote, so the branch can become a pull request */
   hasRemote?: boolean

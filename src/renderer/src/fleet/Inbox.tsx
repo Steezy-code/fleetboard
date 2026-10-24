@@ -1,28 +1,24 @@
 import { useEffect, useState } from 'react'
-import { X } from 'lucide-react'
-import { invoke } from '../lib/api'
+import { Modal } from '../ui/Modal'
+import { invoke, errorText } from '../lib/api'
 import { useApp } from '../state/store'
 
 // The Inbox itself lives on the command bar now (InboxTray.tsx, inboxModel.ts).
 
 /** Diff of the team's branch, for the Ready card. */
-export function FleetDiffPanel({ projectId }: { projectId: string }) {
+export function FleetDiffPanel({ projectId }: { projectId?: string }) {
+  const currentId = useApp((s) => s.project?.id)
+  const id = projectId ?? currentId
   const [diff, setDiff] = useState<string | null>(null)
   useEffect(() => {
-    invoke<string>('fleet:diff', projectId).then(setDiff)
-  }, [projectId])
+    if (!id) { setDiff('Open a board to review team changes.'); return }
+    let active = true
+    setDiff(null)
+    invoke<string>('fleet:diff', id).then((text) => { if (active) setDiff(text) }, (e) => { if (active) setDiff(errorText(e)) })
+    return () => { active = false }
+  }, [id])
   return (
-    <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && useApp.getState().closePanel()}>
-      <div className="modal" style={{ width: 'min(1100px, 94vw)', height: '84vh' }}>
-        <div className="modal-head">
-          <div className="grow">
-            <div className="modal-title">Team changes</div>
-            <div className="modal-sub">Everything the team will merge into your branch.</div>
-          </div>
-          <button className="icon-btn" onClick={() => useApp.getState().closePanel()}>
-            <X size={16} />
-          </button>
-        </div>
+    <Modal title="Team changes" sub="Everything the team will merge into your branch." width="min(1100px, 94vw)" height="84vh" bare>
         <pre className="fleet-diff scrollable">
           {diff === null
             ? 'Loading…'
@@ -32,7 +28,6 @@ export function FleetDiffPanel({ projectId }: { projectId: string }) {
                 </span>
               ))}
         </pre>
-      </div>
-    </div>
+    </Modal>
   )
 }

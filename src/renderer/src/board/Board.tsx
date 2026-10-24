@@ -1,3 +1,4 @@
+import { offscreen } from './visibility'
 import { useEffect, useRef, useState } from 'react'
 import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
 import { useApp, screenToWorld, activeWs, stopCameraAnimation, MAX_ZOOM, focusRect } from '../state/store'
@@ -37,6 +38,7 @@ export function Board() {
   const ref = useRef<HTMLDivElement>(null)
   const project = useApp((s) => s.project)
   const ws = project?.workspaces.find((w) => w.id === project.activeWorkspaceId)
+  const viewport = useApp((s) => s.viewport)
   const selection = useApp((s) => s.selection)
   const focusedNode = useApp((s) => s.focusedNode)
   const tool = useApp((s) => s.tool)
@@ -256,7 +258,6 @@ export function Board() {
   }, [])
 
   // Keep the focused node filling the board when the window resizes.
-  const viewport = useApp((s) => s.viewport)
   useEffect(() => {
     const app = useApp.getState()
     const node = focusedNode ? activeWs()?.nodes.find((n) => n.id === focusedNode) : null
@@ -396,7 +397,7 @@ export function Board() {
           n.id === focusedNode ? (
             <NodeFrame key={n.id} node={n} selected={false} zoom={1} maximized />
           ) : (
-            <NodeFrame key={n.id} node={n} selected={selection.includes(n.id)} zoom={cam.zoom} hidden={hidden.has(n.id)} />
+            <NodeFrame key={n.id} node={n} selected={selection.includes(n.id)} zoom={cam.zoom} offscreen={offscreen(n, cam, viewport)} hidden={hidden.has(n.id)} />
           )
         )}
       </div>

@@ -468,7 +468,7 @@ function PushView({ cards, onBack }: { cards: MemoryCard[]; onBack: () => void }
       footer={
         <>
           <span className="muted">Press Enter after typing</span>
-          <Switch on={submit} onChange={setSubmit} />
+          <Switch title="Submit memory after typing" on={submit} onChange={setSubmit} />
           <span className="spacer" />
           <button className="btn" onClick={onBack}>
             Cancel

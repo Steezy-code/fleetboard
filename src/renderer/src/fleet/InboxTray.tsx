@@ -1,3 +1,9 @@
+import { useState } from 'react'
+import { request, errorText } from '../lib/api'
+import { useApp } from '../state/store'
+import { commandLike } from '@shared/live'
+import { useFleet } from '../engine/fleet'
+import { verificationOf } from '@shared/mergeReview'
 import { ArrowUpRight, Ban, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleCheck, CircleX, ClipboardCheck, Maximize2, MessageCircleQuestion, MessageSquareText, Minus, OctagonAlert, ShieldAlert, ShieldQuestion, TerminalSquare, TriangleAlert, X } from 'lucide-react'
 import { Fragment } from 'react'
 import { removeRule } from './teamRules'
@@ -184,12 +190,12 @@ function Review({ review, spend }: { review: MergeReview | null; spend: Record<s
         const decisions = decisionsOf(c.report).slice(0, 3)
         return (
           <Fragment key={i}>
-            <div className={`it-claim ${c.proven ? 'ok' : 'warn'}`}>
-              {c.proven ? <Check size={12} /> : <TriangleAlert size={12} />}
+            <div className={`it-claim ${c.reportedAndMerged ? 'ok' : 'warn'}`}>
+              {c.reportedAndMerged ? <Check size={12} /> : <TriangleAlert size={12} />}
               <span className="it-claim-who">{c.who}</span>
               <span className="it-claim-what">{c.doneWhen}</span>
               {spent ? <span className="it-claim-spend">{tokens(spent)}</span> : null}
-              <span className="it-claim-ev">{c.proven ? c.report?.split('\n')[0] ?? 'merged' : c.gap}</span>
+              <span className="it-claim-ev">{c.reportedAndMerged ? 'Merged · agent reported completion' : c.gap}</span>
             </div>
             {decisions.length > 0 && (
               <div className="it-claim-decisions">
@@ -327,11 +333,16 @@ function Body({ item }: { item: InboxItem }) {
             </div>
           )}
           <Review review={item.review} spend={item.spend} />
+          <div className="it-note" role="status">
+            <VerifyReady head={r.head} />
+            Fleetboard check: {({ passed: 'passed on this commit', failed: 'failed on this commit', stale: 'does not verify this commit (changed commit or worktree)', unobserved: 'no observed verification for this commit' })[verificationOf(r)]}.
+            {r.evidence && <details><summary>{r.evidence.command} · exit {r.evidence.run.code ?? 'unavailable'} · {new Date(r.evidence.run.at).toLocaleString()}</summary><code>{r.evidence.run.head}</code><pre style={{ whiteSpace: 'pre-wrap', maxHeight: 180, overflow: 'auto' }}>{r.evidence.run.tail || r.evidence.run.error || 'No output captured.'}</pre></details>}
+          </div>
           {item.review?.blocked && <div className="it-note">A file you ruled out is in this diff, so it cannot be merged from here. Read it, tell {item.who} to put the file back, or discard the work.</div>}
           <div className="it-foot">
             {r.verified && (
               <span className="it-verified">
-                <Check size={12} /> {r.verified}
+                <span>Agent-reported:</span> {r.verified}
               </span>
             )}
             <span className="spacer" />
@@ -355,4 +366,20 @@ function Body({ item }: { item: InboxItem }) {
         </div>
       ) : null
   }
+}
+
+function VerifyReady({ head }: { head?: string }) {
+  const [busy, setBusy] = useState(false)
+  const observing = useFleet((s) => !!s.state?.check?.running)
+  const command = useFleet((s) => s.state?.charter?.doneWhen)
+  if (!head || !command || !commandLike(command)) return null
+  const run = async () => {
+    const projectId = useApp.getState().project?.id
+    if (!projectId) return
+    setBusy(true)
+    try { await request('fleet:verifyReady', projectId, head) }
+    catch (e) { useApp.getState().toast(errorText(e), 'warn') }
+    finally { setBusy(false) }
+  }
+  return <button className="btn sm" disabled={busy || observing} onClick={run} title={command}>{busy || observing ? 'Checking…' : 'Run completion check'}</button>
 }

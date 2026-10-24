@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
+import { useDialog } from './useDialog'
 import { X } from 'lucide-react'
 import { useApp } from '../state/store'
 
@@ -17,16 +18,18 @@ interface ModalProps {
   bare?: boolean
 }
 
-/** Centered modal used by every panel. Closes on scrim click and Escape (handled by the board). */
+/** Centered modal used by every panel. Contains focus and closes on scrim click or Escape. */
 export function Modal({ title, sub, icon, width = 560, height, onClose, headerRight, footer, children, bodyStyle, bare }: ModalProps) {
   const close = onClose ?? useApp.getState().closePanel
+  const ref = useDialog(close)
+  const titleId = useId()
   return (
     <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && close()}>
-      <div className="modal" style={{ width, height }} onPointerDown={(e) => e.stopPropagation()}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="modal" style={{ width, height }} onPointerDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           {icon && <div className="modal-icon">{icon}</div>}
           <div className="grow">
-            <div className="modal-title">{title}</div>
+            <div id={titleId} className="modal-title">{title}</div>
             {sub && <div className="modal-sub">{sub}</div>}
           </div>
           {headerRight}
@@ -53,7 +56,7 @@ export function Drawer({ title, icon, headerRight, children, width = 380, onClos
         <span>{title}</span>
         <span className="spacer" />
         {headerRight}
-        <button className="icon-btn sm" onClick={close}>
+        <button className="icon-btn sm" aria-label="Close drawer" onClick={close}>
           <X size={14} />
         </button>
       </div>
@@ -63,14 +66,14 @@ export function Drawer({ title, icon, headerRight, children, width = 380, onClos
 }
 
 export function Switch({ on, onChange, title }: { on: boolean; onChange: (v: boolean) => void; title?: string }) {
-  return <button className={`switch ${on ? 'on' : ''}`} title={title} onClick={() => onChange(!on)} />
+  return <button className={`switch ${on ? 'on' : ''}`} role="switch" aria-checked={on} aria-label={title ?? "Toggle setting"} title={title} onClick={() => onChange(!on)} />
 }
 
 export function Seg<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: ReactNode }[]; onChange: (v: T) => void }) {
   return (
-    <div className="seg">
+    <div className="seg" role="group">
       {options.map((o) => (
-        <button key={o.value} className={o.value === value ? 'on' : ''} onClick={() => onChange(o.value)}>
+        <button key={o.value} aria-pressed={o.value === value} className={o.value === value ? 'on' : ''} onClick={() => onChange(o.value)}>
           {o.label}
         </button>
       ))}

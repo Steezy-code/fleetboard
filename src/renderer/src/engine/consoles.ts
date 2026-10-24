@@ -1,6 +1,6 @@
 import type { BoardNode, ConsoleData, Role } from '@shared/types'
 import { agentById } from '@shared/agents'
-import { invoke, on } from '../lib/api'
+import { request, on } from '../lib/api'
 import { activeWs, allConsoles, useApp } from '../state/store'
 import { findFreeSpot, occupied, viewCentre } from '../board/place'
 import { setActivity } from './activity'
@@ -136,7 +136,7 @@ export function spawnConsoles(opts: SpawnOptions = {}): string[] {
 /** Build the PTY spawn request for a console node and start it. */
 export async function startConsole(node: BoardNode<ConsoleData>, cols: number, rows: number, resume = false) {
   const app = useApp.getState()
-  const info = await invoke('pty:spawn', {
+  const info = await request('pty:spawn', {
     id: node.id,
     agentId: node.data.agentId,
     cwd: node.data.cwd,
@@ -178,16 +178,16 @@ export async function killConsoles(ids: string[], { confirm = true, remove = tru
     })
     if (!ok) return false
   }
-  await Promise.all(liveIds.map((id) => invoke('pty:kill', id)))
+  await Promise.all(liveIds.map((id) => request('pty:kill', id)))
   if (remove) app.removeNodes(ids)
   return true
 }
 
-export const pauseAll = (ids = consoleNodes().map((n) => n.id)) => Promise.all(ids.filter(isLive).map((id) => invoke('pty:pause', id)))
-export const resumeAll = (ids = consoleNodes().map((n) => n.id)) => Promise.all(ids.filter(isLive).map((id) => invoke('pty:resume', id)))
+export const pauseAll = (ids = consoleNodes().map((n) => n.id)) => Promise.all(ids.filter(isLive).map((id) => request('pty:pause', id)))
+export const resumeAll = (ids = consoleNodes().map((n) => n.id)) => Promise.all(ids.filter(isLive).map((id) => request('pty:resume', id)))
 
 /** Plain-text tail of a console's output. */
-export const consoleTail = (id: string, chars = 8000) => invoke<string>('pty:tail', id, chars)
+export const consoleTail = (id: string, chars = 8000) => request('pty:tail', id, chars)
 
 export const agentLabel = (agentId: string) => agentById(agentId, useApp.getState().settings.customAgents)?.name ?? agentId
 export const agentColor = (agentId: string) => agentById(agentId, useApp.getState().settings.customAgents)?.color ?? '#a8a29e'

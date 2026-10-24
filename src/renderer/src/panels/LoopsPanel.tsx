@@ -383,7 +383,7 @@ function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft:
                     onChange={(e) => set({ trigger: { ...t, pattern: e.target.value } })}
                   />
                   <label className="row small" style={{ marginTop: 8 }}>
-                    <Switch on={t.regex} onChange={(v) => set({ trigger: { ...t, regex: v } })} />
+                    <Switch title="Use a regular expression" on={t.regex} onChange={(v) => set({ trigger: { ...t, regex: v } })} />
                     <span className="muted">Regular expression</span>
                     {outputBad && <span style={{ color: 'var(--danger)' }}>invalid</span>}
                   </label>
@@ -436,12 +436,12 @@ function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft:
             <div className="settings-row">
               <div className="grow">After a number of runs</div>
               {s.afterRuns && <Stepper value={s.runs} min={1} max={999} onChange={(n) => setStop({ runs: n })} suffix="runs" />}
-              <Switch on={s.afterRuns} onChange={(v) => setStop({ afterRuns: v })} />
+              <Switch title="Stop after a number of runs" on={s.afterRuns} onChange={(v) => setStop({ afterRuns: v })} />
             </div>
             <div className="settings-row">
               <div className="grow">After a time limit</div>
               {s.afterTime && <Stepper value={s.minutes} min={1} max={1440} step={5} onChange={(n) => setStop({ minutes: n })} suffix="min" />}
-              <Switch on={s.afterTime} onChange={(v) => setStop({ afterTime: v })} />
+              <Switch title="Stop after a time limit" on={s.afterTime} onChange={(v) => setStop({ afterTime: v })} />
             </div>
             <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div className="row">
@@ -449,7 +449,7 @@ function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft:
                   <div>When a goal is met</div>
                   <div className="muted small">Checked before each run; the loop retires itself once it is met.</div>
                 </div>
-                <Switch on={s.goal} onChange={(v) => setStop({ goal: v })} />
+                <Switch title="Stop when a goal is met" on={s.goal} onChange={(v) => setStop({ goal: v })} />
               </div>
               {s.goal && (
                 <div className="lp-goal">
@@ -495,7 +495,7 @@ function LoopEditor({ draft, setDraft, isNew, onDone }: { draft: Loop; setDraft:
                 <div>Keep running behind other tabs</div>
                 <div className="muted small">Off: only consoles in the workspace you are looking at receive the instruction.</div>
               </div>
-              <Switch on={draft.background} onChange={(v) => set({ background: v })} />
+              <Switch title="Run loop in background" on={draft.background} onChange={(v) => set({ background: v })} />
             </div>
           </div>
         </div>

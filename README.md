@@ -2,7 +2,7 @@
 
 A visual board of real terminals for your AI coding agents. Put Claude Code, Codex, Gemini and 30 other agent CLIs on one board, then pan, zoom, group, loop and talk to them. Everything runs on your machine with the subscriptions you already have.
 
-A personal project, for Linux and Windows. See [docs/RESEARCH.md](docs/RESEARCH.md) for the feature spec — what each feature does and looks like — and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organized.
+A personal project, for Linux and Windows. See [the hardening guide](docs/HARDENING.md) for observed verification, integration support tiers, recovery, accessibility and performance checks. See [docs/RESEARCH.md](docs/RESEARCH.md) for the feature spec — what each feature does and looks like — and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organized.
 
 ## Run it
 
@@ -30,6 +30,7 @@ npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted
 #   FB_E2E_HEADLESS=1 no Xvfb needed
 #   FB_E2E_KEEP=1     keep every test's temp sandbox (a failed test's is always kept, and named in its output)
 #   npm run test:e2e:one -- test/e2e/<file>.test.ts
+FB_E2E_HEADLESS=1 npm run bench # opt-in 20/50-terminal responsiveness benchmark
 npm run test:linux # on Windows: the Linux unit + e2e suites in a container (needs Docker)
 #   npm run test:linux -- unit    the quick half
 #   26 of the 28 e2e files and 8 unit files never run on Windows; this is that ground, before CI sees it

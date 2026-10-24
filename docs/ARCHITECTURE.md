@@ -96,9 +96,10 @@ src/renderer/src/
 ## Rules
 
 - **Main-process modules** export `register(ctx: MainContext)` and use `ctx.ipc.handle('area:verb', ...)`.
+  The context wraps IPC with sender and request checks (`main/ipc.ts`); declare new channels in `shared/ipc.ts`.
   Push events with `ctx.emit(channel, ...args)`. Use `loginEnv()` from `env.ts` for child process env
   (it has the user's PATH), `which(bin)` to resolve binaries.
-- **Renderer → main**: `invoke('channel', ...args)`; events: `on('channel', cb)` (returns unsubscribe).
+- **Renderer → main**: use typed `request()` (`shared/ipc-contract.ts`) for state, process control and recovery. Other channels use `invoke('channel', ...args)`; events: `on('channel', cb)` (returns unsubscribe).
 - **Board state** goes through `useApp` actions (`addNode`, `updateNodeData`, `addGroup`, `addWire`, `addInk`, ...).
   Every mutation is persisted automatically (debounced) to `~/.fleetboard/projects/<id>.json`.
   Feature state that is not a board item: `setProjectExtra(key, value)` (per project, e.g. loops, memory)

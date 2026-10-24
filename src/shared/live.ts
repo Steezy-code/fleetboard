@@ -154,6 +154,10 @@ export interface CheckRun {
   head?: string
   error?: string
   timedOut?: boolean
+  /** Bounded terminal output captured by Fleetboard. */
+  tail?: string
+  /** The worktree was clean before and after the check, with the same HEAD. */
+  stable?: boolean
 }
 
 /** The charter's done-when, run in the Lead's worktree as the work lands. A progress field: the command itself stays the charter's. */

@@ -10,12 +10,11 @@ import type {
   NodeType,
   Project,
   ProjectMeta,
-  PtyInfo,
   Settings,
   Workspace
 } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
-import { errorText, invoke, uid } from '../lib/api'
+import { errorText, invoke, request, uid } from '../lib/api'
 import { baseName } from '../workbench/paths'
 import { mayDropUnsaved } from '../lib/unsaved'
 
@@ -105,6 +104,8 @@ interface AppState {
   switchWorkspace: (id: string) => void
   renameWorkspace: (id: string, name: string) => void
   closeWorkspace: (id: string) => void
+  /** Flush pending saves and apply a previewed board after user confirmation. */
+  recoverBoard: (token: string) => Promise<void>
   /** put back a closed workspace at the place it had (an Undo) */
   restoreWorkspace: (ws: Workspace, index: number) => void
   setProjectExtra: (key: string, value: any) => void
@@ -276,7 +277,7 @@ function scheduleSave(p: Project | null) {
   window.clearTimeout(saveTimer)
   saveTimer = window.setTimeout(
     () =>
-      invoke('store:saveProject', p).catch((e) => {
+      request('store:saveProject', p).catch((e) => {
         // a board that silently stops saving loses everything done since: say so (not on every change)
         console.error('saving the board failed', e)
         if (Date.now() - saveWarnedAt < 30_000) return
@@ -342,10 +343,10 @@ export const useApp = create<AppState>((set, get) => {
     wireFrom: null,
 
     init: async () => {
-      const [settings, projects] = await Promise.all([invoke<Settings>('store:settings'), invoke<ProjectMeta[]>('store:projects')])
+      const [settings, projects] = await Promise.all([request('store:settings'), invoke<ProjectMeta[]>('store:projects')])
       set({ settings: { ...DEFAULT_SETTINGS, ...settings }, projects })
       get().refreshAgents()
-      const live = await invoke<PtyInfo[]>('pty:list')
+      const live = await request('pty:list')
       set({
         live: Object.fromEntries(live.map((l) => [l.id, true])),
         approving: Object.fromEntries(live.filter((l) => l.autoApproves).map((l) => [l.id, true])),
@@ -358,19 +359,19 @@ export const useApp = create<AppState>((set, get) => {
         get().toast(`The window crashed and was reloaded.${live.length ? ' Your consoles kept running.' : ''}`, 'warn')
     },
     setSettings: async (patch) => {
-      const settings = await invoke<Settings>('store:setSettings', patch)
+      const settings = await request('store:setSettings', patch)
       set({ settings })
     },
-    refreshAgents: async (force) => set({ agents: await invoke('agents:detect', force) }),
+    refreshAgents: async (force) => set({ agents: await request('agents:detect', force) }),
 
     openProject: async (path) => {
       // from a playbook or by voice as well as the home screen: an editor's unsaved work goes only if the user says so
       if (get().project && get().project!.path !== path && !(await mayDropUnsaved('Open another project'))) return
-      const id = await invoke<string>('store:projectId', path)
+      const id = await request('store:projectId', path)
       // null means there is no board for this folder yet. A *refusal* means there is one and this
       // build must not touch it — opening a blank board over that id would be a board that can never
       // save, so stay where we are and say why.
-      const loaded = await invoke<Project | null>('store:loadProject', id).catch((e) => {
+      const loaded = await request('store:loadProject', id).catch((e) => {
         get().toast(errorText(e), 'warn')
         return undefined
       })
@@ -396,11 +397,23 @@ export const useApp = create<AppState>((set, get) => {
       const previous = get().project
       if (previous && previous.id !== project.id) {
         cancelScheduledSave()
-        void invoke('store:saveProject', previous)
+        void request('store:saveProject', previous)
       }
       set({ project, selection: [], panel: null, drawer: null, focusedNode: null })
       scheduleSave(project)
       windowSession.set(OPEN_PROJECT, path)
+    },
+    recoverBoard: async (token) => {
+      if (!(await mayDropUnsaved('Replace the board'))) return
+      const previous = get().project
+      if (!previous) return
+      cancelScheduledSave()
+      await request('store:saveProject', previous)
+      if (get().project !== previous) throw new Error('The board changed during recovery; preview it again')
+      cancelScheduledSave()
+      const project = await request('recovery:apply', token)
+      if (get().project?.id !== previous.id) return
+      set({ project, selection: [], focusedNode: null, panel: null, drawer: null })
     },
     closeProject: async () => {
       if (!(await mayDropUnsaved('Close the project'))) return
@@ -408,7 +421,7 @@ export const useApp = create<AppState>((set, get) => {
       restoreFocusInstantly()
       const p = get().project
       cancelScheduledSave()
-      if (p) invoke('store:saveProject', p)
+      if (p) request('store:saveProject', p)
       set({ project: null, selection: [], panel: null, drawer: null, focusedNode: null })
       invoke<ProjectMeta[]>('store:projects').then((projects) => set({ projects }))
     },

@@ -1,3 +1,4 @@
+import { capabilitiesOf } from '@shared/capabilities'
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, Check, CircleAlert, Copy, FolderOpen, FolderPlus, RefreshCw, Settings, Sunrise, X } from 'lucide-react'
 import { AGENTS } from '@shared/agents'
@@ -156,6 +157,7 @@ function AgentReadiness() {
                   {a.name}
                   <Icon size={13} className="ar-icon" />
                 </div>
+                <div className="small muted" title={capabilitiesOf(a.id).detail}>{capabilitiesOf(a.id).tier}</div>
                 <div className="ar-detail">{r.state === 'scanning' ? 'Looking…' : r.detail}</div>
                 {r.state === 'signin' && <Hint text="Sign in once, in a terminal:" command={r.command} />}
                 {r.state === 'missing' && MAIN_AGENTS.includes(a.id) && (r.command ? <Hint text="Install it with:" command={r.command} /> : null)}

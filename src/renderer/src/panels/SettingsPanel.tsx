@@ -1,3 +1,4 @@
+import { RecoverySection } from './RecoverySection'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, Palette, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
@@ -165,14 +166,14 @@ export default function SettingsPanel({ section }: { section?: string }) {
                     started after the change.
                   </div>
                 </div>
-                <Switch on={settings.autoApprove} onChange={toggleAutoApprove} />
+                <Switch title="Automatically approve agent actions" on={settings.autoApprove} onChange={toggleAutoApprove} />
               </div>
               <div className="settings-row">
                 <div className="grow">
                   <div>Confirm before closing a running console</div>
                   <div className="muted small">Closing a live console ends its session.</div>
                 </div>
-                <Switch on={settings.confirmKill} onChange={(v) => set({ confirmKill: v })} />
+                <Switch title="Confirm before closing consoles" on={settings.confirmKill} onChange={(v) => set({ confirmKill: v })} />
               </div>
             </div>
             <CustomAgents />
@@ -189,7 +190,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
                   <div>Speak replies</div>
                   <div className="muted small">Short spoken confirmations, synthesized on this machine (Kokoro).</div>
                 </div>
-                <Switch on={settings.speakReplies} onChange={(v) => set({ speakReplies: v })} />
+                <Switch title="Speak replies" on={settings.speakReplies} onChange={(v) => set({ speakReplies: v })} />
               </div>
               <div className="settings-row">
                 <div className="grow">Voice</div>
@@ -255,7 +256,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
                   <div>Oracle</div>
                   <div className="muted small">The command bar reads the whole board first, then answers or suggests the best route: a playbook, a team, or a message to an agent already on it.</div>
                 </div>
-                <Switch on={settings.helm !== false} onChange={(v) => set({ helm: v })} />
+                <Switch title="Oracle" on={settings.helm !== false} onChange={(v) => set({ helm: v })} />
               </div>
             </div>
           </section>
@@ -287,7 +288,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
                   <div>Minimap</div>
                   <div className="muted small">Overview of the board in the corner; click or drag it to move the view.</div>
                 </div>
-                <Switch on={settings.showMinimap} onChange={(v) => set({ showMinimap: v })} />
+                <Switch title="Show minimap" on={settings.showMinimap} onChange={(v) => set({ showMinimap: v })} />
               </div>
             </div>
           </section>
@@ -333,6 +334,7 @@ export default function SettingsPanel({ section }: { section?: string }) {
           {/* ---------- Data ---------- */}
           <section data-section="data">
             <h3 className="settings-h">Data</h3>
+            <RecoverySection />
             <div className="settings-rows">
               <VersionRow />
               <div className="settings-row">
@@ -527,7 +529,7 @@ function PhoneInbox() {
           <div>Answer from your phone</div>
           <div className="muted small">Approvals, the Lead's questions and Ready cards on your phone, so agents don't wait while you're away. Off until you turn it on.</div>
         </div>
-        <Switch on={st.enabled} onChange={(v) => !busy && enable(v)} />
+        <Switch title="Phone Inbox" on={st.enabled} onChange={(v) => !busy && enable(v)} />
       </div>
       <div className="settings-row">
         <div className="grow">
