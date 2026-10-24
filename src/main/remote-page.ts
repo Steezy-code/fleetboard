@@ -142,6 +142,15 @@ export const PAGE_JS = `'use strict'
       card.appendChild(who)
       if (r.goal) card.appendChild(el('div', 'title', r.goal))
       card.appendChild(el('pre', '', r.summary))
+      var verdicts = { passed: 'passed on this commit', failed: 'failed on this commit', stale: 'does not verify this commit', unobserved: 'no observed verification' }
+      card.appendChild(el('div', 'muted', 'Fleetboard check: ' + (verdicts[r.verification] || verdicts.unobserved)))
+      if (r.verified) card.appendChild(el('div', 'muted', 'Agent-reported: ' + r.verified))
+      if (r.evidence) {
+        var evidence = el('details', '')
+        evidence.appendChild(el('summary', '', r.evidence.command + ' · exit ' + r.evidence.run.code))
+        evidence.appendChild(el('pre', '', (r.evidence.run.head || '') + '\\n' + (r.evidence.run.tail || r.evidence.run.error || 'No output captured.')))
+        card.appendChild(evidence)
+      }
       if (r.branch) card.appendChild(el('div', 'muted', r.branch + ' · ' + r.commits + ' commits · ' + r.files + ' files'))
       var acts = el('div', 'actions')
       // where the board offers only Done (nothing to merge, or the work went to a PR) the phone offers no

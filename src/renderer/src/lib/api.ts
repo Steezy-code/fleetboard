@@ -1,3 +1,4 @@
+import type { IpcContract } from '@shared/ipc-contract'
 import type { FbApi } from '../../../preload/index'
 import type { CliRunRequest } from '@shared/types'
 
@@ -9,6 +10,7 @@ declare global {
 
 export const fb = window.fb
 export const invoke = <T = any>(channel: string, ...args: unknown[]) => fb.invoke(channel, ...args) as Promise<T>
+export const request = <C extends keyof IpcContract>(channel: C, ...args: IpcContract[C]['args']): Promise<IpcContract[C]['result']> => fb.invoke(channel, ...args)
 export const on = fb.on
 
 /**
@@ -40,11 +42,11 @@ export function runCli(
     onChunk?.(chunk, all)
   })
   const offAct = on('cli:activity', (id: string, line: string) => id === runId && onActivity?.(line))
-  const promise = invoke<{ code: number; text: string }>('cli:run', { ...req, runId }).finally(() => {
+  const promise = request('cli:run', { ...req, runId }).finally(() => {
     offChunk()
     offAct()
   })
-  return { runId, promise, cancel: () => invoke('cli:cancel', runId) }
+  return { runId, promise, cancel: () => request('cli:cancel', runId) }
 }
 
 /** Pull the first JSON object/array out of a model reply (tolerates ``` fences and prose). */

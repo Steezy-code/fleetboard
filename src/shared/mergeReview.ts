@@ -16,8 +16,8 @@ export interface Claim {
   /** the worker's own words on what it ran, when it got that far */
   report?: string
   /** it reported done and the lead merged it */
-  proven: boolean
-  /** why it isn't proven, for the ones that aren't */
+  reportedAndMerged: boolean
+  /** why the worker has not both reported and been merged */
   gap?: 'never reported' | 'reported but not merged' | 'still working' | 'blocked or stopped'
 }
 
@@ -42,7 +42,7 @@ export interface MergeReview {
   claims: Claim[]
   /** a file in the diff is one the charter ruled out */
   blocked: boolean
-  /** nothing is blocked, every file in the diff was inside someone's owns, and every claim is proven */
+  /** nothing is blocked, every file in the diff was inside someone's owns, and every worker has reported and been merged */
   clean: boolean
 }
 
@@ -126,7 +126,7 @@ export function excludedBy(file: string, wontTouch: string[] | undefined, prefix
 }
 
 const gapOf = (m: FleetMember): Claim['gap'] | undefined => {
-  if (m.status === 'merged') return undefined
+  if (m.status === 'merged') return m.report ? undefined : 'never reported'
   if (m.status === 'working' || m.status === 'starting') return m.report ? 'reported but not merged' : 'still working'
   if (m.status === 'reported') return 'reported but not merged'
   return m.report ? 'blocked or stopped' : 'never reported'
@@ -157,7 +157,7 @@ export function reviewReady(s: FleetState): MergeReview | null {
         cwd: m.cwd,
         doneWhen: m.doneWhen!,
         ...(m.report ? { report: m.report } : {}),
-        proven: !gap,
+        reportedAndMerged: !gap,
         ...(gap ? { gap } : {})
       }
     })
@@ -177,7 +177,7 @@ export function reviewReady(s: FleetState): MergeReview | null {
   flags.sort((a, b) => Number(!!b.excluded) - Number(!!a.excluded) || Number(b.outside) - Number(a.outside))
 
   const blocked = flags.some((f) => f.excluded)
-  return { flags, claims, blocked, clean: !blocked && !flags.some((f) => f.outside) && claims.every((c) => c.proven) }
+  return { flags, claims, blocked, clean: !blocked && !flags.some((f) => f.outside) && claims.every((c) => c.reportedAndMerged) }
 }
 
 /**
@@ -212,4 +212,12 @@ export function stalled(s: FleetState, now: number, quietMinutes = QUIET_MINUTES
     .map((m) => ({ who: m.name, consoleId: m.id, minutes: Math.floor((now - (m.lastOutputAt ?? m.createdAt)) / 60000) }))
     .filter((x) => x.minutes >= quietMinutes)
     .sort((a, b) => b.minutes - a.minutes)
+}
+
+/** Only a successful, stable check of the offered commit verifies a Ready card. */
+export function verificationOf(r: FleetReady): 'passed' | 'failed' | 'stale' | 'unobserved' {
+  const e = r.evidence
+  if (!e) return 'unobserved'
+  if (!r.head || e.run.head !== r.head || e.run.stable !== true) return 'stale'
+  return e.run.code === 0 && !e.run.timedOut && !e.run.error && !e.run.failing ? 'passed' : 'failed'
 }

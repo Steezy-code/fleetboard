@@ -1,3 +1,5 @@
+import * as recovery from './recovery'
+import { guardedIpc } from './ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell, webContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
@@ -71,7 +73,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'fbfile', privileges: { standard
 const liveContents = () => (win && !win.isDestroyed() && !win.webContents.isDestroyed() ? win.webContents : null)
 const ptys = new PtyManager(liveContents, store.getSettings)
 const ctx: MainContext = {
-  ipc: ipcMain,
+  ipc: guardedIpc(ipcMain, () => win),
   win: () => win,
   ptys,
   settings: store.getSettings,
@@ -97,7 +99,7 @@ function createWindow() {
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.cjs'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true,
       webviewTag: true,
       spellcheck: false,
@@ -178,8 +180,8 @@ const shutdown = () =>
   })())
 
 function registerCore() {
-  ipcMain.handle('pty:spawn', (_e, req) => ptys.spawn(req))
-  ipcMain.on('app:background', (_e, color: string) => {
+  ctx.ipc.handle('pty:spawn', (_e, req) => ptys.spawn(req))
+  ctx.ipc.on('app:background', (_e, color: string) => {
     if (!/^#[0-9a-f]{6}$/i.test(color)) return
     win?.setBackgroundColor(color)
     if (process.platform === 'win32') {
@@ -187,32 +189,32 @@ function registerCore() {
       if (t) win?.setTitleBarOverlay(overlayFor(t))
     }
   })
-  ipcMain.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
-  ipcMain.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.send(id, String(text), submit))
-  ipcMain.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
-  ipcMain.handle('pty:kill', (_e, id: string) => ptys.kill(id))
-  ipcMain.handle('pty:pause', (_e, id: string) => ptys.pause(id))
-  ipcMain.handle('pty:resume', (_e, id: string) => ptys.resume(id))
-  ipcMain.handle('pty:buffer', (_e, id: string) => ptys.buffer(id))
-  ipcMain.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
-  ipcMain.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
-  ipcMain.handle('pty:answer', async (_e, id: string, answer) => {
+  ctx.ipc.on('pty:write', (_e, id: string, data: string) => ptys.write(id, data))
+  ctx.ipc.on('pty:paste', (_e, id: string, text: string, submit: boolean) => ptys.send(id, String(text), submit))
+  ctx.ipc.on('pty:resize', (_e, id: string, cols: number, rows: number) => ptys.resize(id, cols, rows))
+  ctx.ipc.handle('pty:kill', (_e, id: string) => ptys.kill(id))
+  ctx.ipc.handle('pty:pause', (_e, id: string) => ptys.pause(id))
+  ctx.ipc.handle('pty:resume', (_e, id: string) => ptys.resume(id))
+  ctx.ipc.handle('pty:buffer', (_e, id: string) => ptys.buffer(id))
+  ctx.ipc.handle('pty:tail', (_e, id: string, chars?: number) => ptys.tail(id, chars))
+  ctx.ipc.handle('pty:prompt', (_e, id: string) => ptys.screen(id)?.prompt ?? null)
+  ctx.ipc.handle('pty:answer', async (_e, id: string, answer) => {
     const r = await ptys.answer(id, answer)
     if (r.ok) journal.answered('you, on the board', id, describeAnswer(answer))
     return r
   })
   // a team rule answering for you (teamRules.ts): only while the prompt asks for that very command
-  ipcMain.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string) => {
+  ctx.ipc.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string) => {
     if (typeof command !== 'string' || !command) return { ok: false, reason: 'changed' }
     const r = await ptys.answer(id, answer, command)
     if (r.ok) journal.append({ kind: 'prompt.answer', text: `Fleetboard allowed \`${command.split('\n')[0]}\` for ${String(who)}, by your rule for its team`, detail: { consoleId: id, by: 'rule', command } })
     return r
   })
-  ipcMain.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
-  ipcMain.handle('pty:list', () => ptys.list())
-  ipcMain.handle('pty:info', (_e, id: string) => ptys.infoOf(String(id)))
+  ctx.ipc.handle('pty:deliver', (_e, id: string, text: string) => ptys.deliver(id, String(text)))
+  ctx.ipc.handle('pty:list', () => ptys.list())
+  ctx.ipc.handle('pty:info', (_e, id: string) => ptys.infoOf(String(id)))
 
-  ipcMain.handle('app:quit', async () => {
+  ctx.ipc.handle('app:quit', async () => {
     quitConfirmed = true
     await shutdown()
     // the board is already saved; don't let a slow child process keep the app alive
@@ -222,29 +224,29 @@ function registerCore() {
   })
   // "I got the save-and-quit request and I am working on it": stops the watchdog above from
   // closing the window while the save, or the dialog a failed save opens, is still going.
-  ipcMain.on('app:quitAck', () => clearTimeout(quitWatchdog))
+  ctx.ipc.on('app:quitAck', () => clearTimeout(quitWatchdog))
   // the renderer's own stray errors, into the same log as the main process's
-  ipcMain.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
+  ctx.ipc.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
 
   // asked once by a page as it starts: was it reloaded after the window crashed?
-  ipcMain.handle('app:crashRecovered', () => {
+  ctx.ipc.handle('app:crashRecovered', () => {
     const was = crashRecovered
     crashRecovered = false
     return was
   })
   // how long nobody has touched this computer: the Inbox's "while you were away" (renderer away.ts).
   // 0 where the platform can't tell (some Wayland compositors), which just means focus alone decides
-  ipcMain.handle('app:idleSeconds', () => powerMonitor.getSystemIdleTime())
-  ipcMain.handle('app:paths', () => ({ root: toRendererPath(dirs.root), home: toRendererPath(app.getPath('home')), assets: toRendererPath(dirs.assets) }))
-  ipcMain.handle('win:minimize', () => win?.minimize())
-  ipcMain.handle('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
-  ipcMain.handle('win:close', () => win?.close())
-  ipcMain.handle('webview:devtools', (_e, webContentsId: number) => {
+  ctx.ipc.handle('app:idleSeconds', () => powerMonitor.getSystemIdleTime())
+  ctx.ipc.handle('app:paths', () => ({ root: toRendererPath(dirs.root), home: toRendererPath(app.getPath('home')), assets: toRendererPath(dirs.assets) }))
+  ctx.ipc.handle('win:minimize', () => win?.minimize())
+  ctx.ipc.handle('win:maximize', () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()))
+  ctx.ipc.handle('win:close', () => win?.close())
+  ctx.ipc.handle('webview:devtools', (_e, webContentsId: number) => {
     webContents.fromId(webContentsId)?.openDevTools({ mode: 'detach' })
   })
 
   // Render HTML to a real paginated PDF (document studio, markdown export).
-  ipcMain.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
+  ctx.ipc.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
     if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
     // The HTML is the renderer's, rendered markdown today: printed as a page, never run as one. No
     // scripts, a session of its own that keeps nothing, and nowhere to navigate or open a window to.
@@ -323,7 +325,7 @@ app.whenReady().then(async () => {
   registerCore()
   // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
   // be registered from inside profiles, which made its handlers appear to come from nowhere.
-  for (const m of [store, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal, update]) m.register(ctx)
+  for (const m of [store, recovery, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal, update]) m.register(ctx)
   // these two start servers, so they are awaited rather than listed
   await fleet.register(ctx)
   await remote.register(ctx)

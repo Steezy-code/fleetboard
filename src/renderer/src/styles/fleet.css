@@ -897,3 +897,8 @@
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);
 }
+
+.team-guide { position: absolute; top: 58px; right: 64px; width: 300px; max-height: 45vh; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; z-index: 25; font-size: 12px; box-shadow: 0 6px 24px #0003; }
+.team-guide ol { padding-left: 22px; margin: 8px 0; }
+.team-guide li { margin: 8px 0; color: var(--muted); }
+.team-guide li[aria-current=step] { color: var(--text); }

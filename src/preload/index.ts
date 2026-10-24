@@ -1,14 +1,22 @@
+import { INVOKE_CHANNELS, SEND_CHANNELS, EVENT_CHANNELS, validateIpc } from '../shared/ipc'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 // One generic bridge. Feature modules talk to the main process through named channels.
 const api = {
-  invoke: (channel: string, ...args: unknown[]) => ipcRenderer.invoke(channel, ...args),
+  invoke: (channel: string, ...args: unknown[]) => {
+    if (!(INVOKE_CHANNELS as readonly string[]).includes(channel)) throw new Error('Unknown invoke channel')
+    validateIpc(channel, args)
+    return ipcRenderer.invoke(channel, ...args)
+  },
   send: (channel: string, ...args: unknown[]) => {
     // only pathForFile below may say the user dropped a file: from here it would grant any path
     if (channel === 'fs:grantDropped') throw new Error('fs:grantDropped is sent by pathForFile only')
+    if (!(SEND_CHANNELS as readonly string[]).includes(channel)) throw new Error('Unknown send channel')
+    validateIpc(channel, args)
     ipcRenderer.send(channel, ...args)
   },
   on: (channel: string, cb: (...args: any[]) => void) => {
+    if (!(EVENT_CHANNELS as readonly string[]).includes(channel)) throw new Error('Unknown event channel')
     const listener = (_e: unknown, ...args: any[]) => cb(...args)
     ipcRenderer.on(channel, listener)
     return () => {

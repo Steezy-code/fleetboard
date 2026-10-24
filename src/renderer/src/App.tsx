@@ -1,7 +1,8 @@
+import { TeamGuide } from './chrome/TeamGuide'
 import { useEffect } from 'react'
 import { useApp } from './state/store'
 import { SCHEMA_VERSION, type Recovery } from '@shared/types'
-import { errorText, fb, on, invoke } from './lib/api'
+import { request, errorText, fb, on, invoke } from './lib/api'
 import { wireConsoleEvents } from './engine/consoles'
 import { wireFleet } from './engine/fleet'
 import { startEngines } from './engine/engines'
@@ -41,7 +42,7 @@ export function App() {
       const p = useApp.getState().project
       if (p) {
         // a save that fails must not keep the app from quitting, nor lose the board without a word
-        const failed = await invoke('store:saveProject', p).then(
+        const failed = await request('store:saveProject', p).then(
           () => null,
           (e) => errorText(e)
         )
@@ -129,6 +130,7 @@ export function App() {
           <FocusBar />
           {focused && <InboxTray floating />}
           <BoardOverlays />
+          <TeamGuide />
           {DrawerC && (
             <Boundary what={`The ${drawer!.name} drawer`} resetKey={drawer} actions={[{ label: 'Close', run: () => useApp.getState().closeDrawer() }]}>
               <DrawerC {...(drawer!.props ?? {})} />

@@ -1,3 +1,4 @@
+import { verificationOf } from '@shared/mergeReview'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -205,7 +206,7 @@ export function remoteState() {
     consoles,
     approvals,
     asks: (fleet?.asks ?? []).filter((a) => !a.answer).map((a) => ({ id: a.id, from: memberName(a.from), question: a.question, options: a.options })),
-    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, branch: ready.branch, commits: ready.commits, files: ready.files.length, closeOnly: closeOnly(ready), prUrl: ready.prUrl, head: ready.head } : null
+    ready: ready ? { lead: memberName(ready.leadId), goal: fleet?.members[ready.leadId]?.task ?? '', summary: ready.summary, verification: verificationOf(ready), verified: ready.verified, evidence: ready.evidence, branch: ready.branch, commits: ready.commits, files: ready.files.length, closeOnly: closeOnly(ready), prUrl: ready.prUrl, head: ready.head } : null
   }
 }
 

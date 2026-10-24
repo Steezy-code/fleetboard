@@ -1,6 +1,6 @@
 // The pre-merge review is the last thing between an agent's branch and the user's checkout, so the
 // two ways it can lie both matter: calling a diff in-scope when it reached outside the files the
-// worker was granted, and calling a claim proven when no worker ever reported it.
+// worker was granted, and calling a claim reported and merged when no worker ever reported it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { emptyFleet, type FleetMember, type FleetReady, type FleetState } from '../../src/shared/fleet'
@@ -102,12 +102,12 @@ test('a diff entirely inside the granted scope, with every claim merged, is clea
   assert.deepEqual(r.flags, [])
   assert.equal(r.clean, true)
   assert.deepEqual(
-    r.claims.map((c) => [c.who, c.proven]),
+    r.claims.map((c) => [c.who, c.reportedAndMerged]),
     [['Nadia', true]]
   )
 })
 
-test('a claim is unproven, with the reason, when the worker never got merged', () => {
+test('a claim is incomplete, with the reason, when the worker never got merged', () => {
   const s = fleet(
     [
       member({ id: 'w1', name: 'Nadia', owns: ['a'], doneWhen: 'tests pass', status: 'working' }),
@@ -342,4 +342,11 @@ test('a member an hour old but still printing is not stalled: silence is what co
 test('brackets are part of the name, as in a Next.js route, not a character class', () => {
   assert.equal(excludedBy('app/[id]/page.tsx', ['app/[id]']), 'app/[id]')
   assert.equal(excludedBy('app/a/page.tsx', ['app/[ab]']), null)
+})
+
+test('a merged status without a worker report is not labeled reported and merged', () => {
+  const s = fleet([member({ id: 'worker', name: 'Ada', doneWhen: 'npm test', status: 'merged' })], { files: [] })
+  const claim = reviewReady(s)!.claims[0]!
+  assert.equal(claim.reportedAndMerged, false)
+  assert.equal(claim.gap, 'never reported')
 })

@@ -171,9 +171,7 @@ export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'
   s.check = { ...check, running: Date.now() }
   live.changed(s)
   try {
-    const r = await runGoalCheck(lead.cwd, command, CHECK_TIMEOUT_MS, ac.signal)
-    const failing = r.code === 0 ? (failingCount(r.tail) ?? 0) : failingCount(r.tail)
-    const run: CheckRun = { at: Date.now(), code: r.code, ...(failing !== undefined ? { failing } : {}), ...(head ? { head } : {}), ...(r.error ? { error: r.error } : {}), ...(r.timedOut ? { timedOut: true } : {}) }
+    const run = await observeCheck(lead.cwd, command, head, ac.signal)
     // a new team's charter meanwhile: this answer is about a job nobody is doing any more
     if (s.check?.command !== command) return
     // stopped (dismissed, switched off): not a result, and a run started since then is not this one's to clear
@@ -184,6 +182,17 @@ export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'
     if (inflight.get(s.projectId) === ac) inflight.delete(s.projectId)
     live.changed(s)
   }
+}
+
+/** Capture process evidence independently of anything an agent reports. */
+export async function observeCheck(cwd: string, command: string, head?: string, signal?: AbortSignal): Promise<CheckRun> {
+  const before = await git(cwd, ['status', '--porcelain', '--untracked-files=normal'])
+  const r = await runGoalCheck(cwd, command, CHECK_TIMEOUT_MS, signal)
+  const after = await git(cwd, ['status', '--porcelain', '--untracked-files=normal'])
+  const endHead = await git(cwd, ['rev-parse', 'HEAD'])
+  const stable = !!head && before.code === 0 && after.code === 0 && !before.stdout.trim() && !after.stdout.trim() && endHead.code === 0 && endHead.stdout.trim() === head
+  const failing = r.code === 0 ? (failingCount(r.tail) ?? 0) : failingCount(r.tail)
+  return { at: Date.now(), code: r.code, tail: r.tail.slice(-4000), stable, ...(failing !== undefined ? { failing } : {}), ...(head ? { head } : {}), ...(r.error ? { error: r.error } : {}), ...(r.timedOut ? { timedOut: true } : {}) }
 }
 
 /** End the run in flight for a project (its team was dismissed, or the user switched the check off). */

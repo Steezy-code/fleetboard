@@ -1,4 +1,4 @@
-import { invoke } from '../lib/api'
+import { request } from '../lib/api'
 import { useApp } from '../state/store'
 
 // Closing a workspace tab. It used to delete the workspace at once whenever none of its consoles was
@@ -23,7 +23,7 @@ export async function closeWorkspaceAsking(id: string): Promise<void> {
     }))
   )
     return
-  for (const c of consoles) invoke('pty:kill', c.id)
+  for (const c of consoles) request('pty:kill', c.id)
   app.closeWorkspace(id)
   if (!ws.nodes.length && !ws.ink.length && !ws.groups.length) return
   const projectId = project.id

@@ -8,7 +8,7 @@ import { LINKED_DIRS, emptyFleet } from '@shared/fleet'
 import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
-import { estimateOf, numstat, stampTask } from '@shared/live'
+import { commandLike, estimateOf, numstat, stampTask } from '@shared/live'
 import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -20,7 +20,7 @@ import { homeOf, linkPath } from './platform'
 import { newSecret, refuse, sameSecret } from './localserver'
 import { findTask, guessTask } from './plan'
 import { geminiTeamHome, geminiTrusts, removeGeminiTeamHome } from './gemini-home'
-import { outsideWork, runCheck, startLive, stopCheck, stopLive } from './live'
+import { observeCheck, outsideWork, runCheck, startLive, stopCheck, stopLive } from './live'
 
 // Lead/worker teams. Every fleet console is connected to this local MCP server, which gives the lead
 // tools to plan, start workers, message them and merge their work, and gives workers a way to report.
@@ -44,6 +44,7 @@ const memberToken = (id: string) => crypto.createHmac('sha256', secret).update(i
 /** the most a call may send (a report or a plan is a few KB) */
 const MAX_BODY = 4 * 1024 * 1024
 const states = new Map<string, FleetState>()
+const verifications = new Map<string, AbortController>()
 /** console id → project id */
 const memberProject = new Map<string, string>()
 /** this module's timers, so they can be stopped (see register / stopFleetTicks) */
@@ -1072,6 +1073,10 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
         const hasRemote = (await git(m.cwd, ['remote', 'get-url', 'origin'])).ok
         s.ready = { leadId: m.id, branch: m.branch, summary: String(a.summary), commits, files, head, stat, at: Date.now(), hasRemote, ...(verified ? { verified } : {}) } as FleetReady
       }
+      const observed = s.check?.runs.at(-1)
+      if (s.ready && observed && s.check && s.check.command === s.charter?.doneWhen) {
+        s.ready.evidence = { command: s.check.command, run: { ...observed } }
+      }
       m.status = 'reported'
       changed(s)
       ctx.emit('fleet:ready', s.ready)
@@ -1276,6 +1281,26 @@ export async function register(c: MainContext) {
   startLive({ ctx, teams: () => states.values(), changed, trees: treesDir })
 
   const { ipc } = ctx
+  ipc.handle('fleet:verifyReady', async (_e, projectId: string, head: string) => {
+    const s = states.get(projectId)
+    const ready = s?.ready
+    const lead = ready && s?.members[ready.leadId]
+    const command = s?.charter?.doneWhen
+    if (!s || !ready || !lead || !head || ready.head !== head) throw new Error('The Ready card changed; look again')
+    if (!command || !commandLike(command)) throw new Error('The charter has no runnable completion check')
+    if (verifications.has(projectId) || s.check?.running) throw new Error('A verification is already running')
+    const currentHead = await git(lead.cwd, ['rev-parse', '--verify', 'HEAD^{commit}'])
+    if (!currentHead.ok || currentHead.out.trim() !== head) throw new Error('The integration branch changed; ask the Lead for a new Ready card')
+    const controller = new AbortController()
+    verifications.set(projectId, controller)
+    try {
+      const run = await observeCheck(lead.cwd, command, head, controller.signal)
+      if (controller.signal.aborted || s.ready !== ready) throw new Error('The Ready card changed during the check; look again')
+      ready.evidence = { command, run }
+      changed(s)
+      return ready.evidence
+    } finally { if (verifications.get(projectId) === controller) verifications.delete(projectId) }
+  })
   ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
   ipc.handle('fleet:startLead', (_e, opts) => startLead(opts))
   /** whether a team in this folder works in worktrees of its own (a repository with a commit) */
@@ -1517,6 +1542,8 @@ export async function revertMerge(projectId: string, commit: string): Promise<{ 
 
 /** Stop the team timers. Called when the app quits. */
 export function stopFleetTicks() {
+  for (const controller of verifications.values()) controller.abort()
+  verifications.clear()
   for (const t of ticks) clearInterval(t)
   ticks.length = 0
   stopLive()
@@ -1526,6 +1553,8 @@ export function stopFleetTicks() {
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
+  verifications.get(s.projectId)?.abort()
+  verifications.delete(s.projectId)
   // its worktree is about to go: a check still running in it has nothing left to check
   stopCheck(s.projectId)
   const crew = Object.values(s.members).filter((m) => m.leadId === lead.id && m.status !== 'closed')

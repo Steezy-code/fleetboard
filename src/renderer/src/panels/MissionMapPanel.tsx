@@ -3,7 +3,7 @@ import { ArrowRight, Frame, Map as MapIcon, Pause, Play, Search, Send, Spline, T
 import { pairs } from '@shared/seq'
 import type { ConsoleStatus, PtyInfo } from '@shared/types'
 import { ROLE_TINT } from '@shared/types'
-import { invoke } from '../lib/api'
+import { request, invoke } from '../lib/api'
 import { useApp } from '../state/store'
 import { agentColor, agentLabel, killConsoles, pauseAll, resumeAll } from '../engine/consoles'
 import { Modal } from '../ui/Modal'
@@ -86,7 +86,7 @@ export default function MissionMapPanel({ filter: initialFilter }: { filter?: Fi
   }, [])
 
   useEffect(() => {
-    const load = () => invoke<PtyInfo[]>('pty:list').then((l) => setPtys(Object.fromEntries(l.map((p) => [p.id, p]))))
+    const load = () => request('pty:list').then((l) => setPtys(Object.fromEntries(l.map((p) => [p.id, p]))))
     load()
     const t = window.setInterval(() => (load(), setNow(Date.now())), 4000)
     return () => window.clearInterval(t)

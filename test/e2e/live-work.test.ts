@@ -190,3 +190,17 @@ test('the Ready card shows the choices each worker says it made', async () => {
   const decisions = await app!.waitFor(async () => (await text('.it-card[data-kind="ready"] .it-claim-decisions')) || null, { label: 'decisions on the Ready card' })
   assert.deepEqual(decisions.split('\n').map((l) => l.replace(/^↳\s*/, '')), ['kept the parser pure: easier to test', 'one file over two: nothing else reads it'])
 })
+
+test('Ready verification is observed at the offered commit and stale cards cannot rerun it', async () => {
+  const { projectId, repo } = await launch({ lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }] } })
+  await app!.invoke('fleet:startLead', { projectId, projectPath: repo, goal: 'add a.txt', charter: charter('test -f a.txt') })
+  const ready = await app!.waitFor(async () => (await fleet(projectId)).ready, { label: 'Ready', timeout: 60_000 })
+  await app!.waitFor(async () => !(await fleet(projectId)).check?.running, { label: 'background check finished' })
+  const evidence = await app!.invoke('fleet:verifyReady', projectId, ready.head)
+  assert.equal(evidence.command, 'test -f a.txt')
+  assert.equal(evidence.run.head, ready.head)
+  assert.equal(evidence.run.code, 0)
+  assert.equal(evidence.run.stable, true)
+  await assert.rejects(() => app!.invoke('fleet:verifyReady', projectId, 'old'), /changed/)
+  assert.equal((await fleet(projectId)).ready.evidence.run.head, ready.head)
+})

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { create } from 'zustand'
 import { useShallow } from 'zustand/react/shallow'
-import { invoke } from '../lib/api'
+import { request, invoke } from '../lib/api'
 import { allConsoles, useApp } from '../state/store'
 import { agentLabel, consoleTail } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
@@ -149,7 +149,7 @@ export function contextBefore(tail: string, prompt: Prompt | null, n = 2): strin
 // ---------------------------------------------------------------- answers
 
 async function answerPrompt(consoleId: string, a: PromptAnswer) {
-  const res = await invoke<AnswerResult>('pty:answer', consoleId, a).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+  const res = await request('pty:answer', consoleId, a).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
   if (res.ok) return useApp.getState().setStatus(consoleId, 'working')
   useApp.getState().toast(res.reason === 'not-live' ? 'That console has stopped' : 'That question changed; nothing was sent. Check the console.', 'warn')
 }
@@ -641,7 +641,7 @@ export function useInboxWatcher() {
     const read = async () => {
       const entries = await Promise.all(
         blocked.map(async (id) => {
-          const [p, tail] = await Promise.all([invoke<Prompt | null>('pty:prompt', id).catch(() => null), consoleTail(id, 2500).catch(() => '')])
+          const [p, tail] = await Promise.all([request('pty:prompt', id).catch(() => null), consoleTail(id, 2500).catch(() => '')])
           return [id, { approval: approvalFor(p), context: contextBefore(tail, p) }] as const
         })
       )
