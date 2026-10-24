@@ -22,7 +22,11 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-24.04
+    # our own Linux machine, as the Windows job is: self-hosted minutes are free, and GitHub's hosted
+    # runners stop starting jobs when the account's billing does. The price is that this is not a clean
+    # machine every run, and the job waits for that machine to be on. `ubuntu-24.04` here instead puts
+    # it back on a hosted runner (and then the display-server step needs `sudo apt-get install -yq xvfb`).
+    runs-on: [self-hosted, linux, x64]
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +73,9 @@ jobs:
         if: always()
         run: npm audit || true
 
+      # installed once on the runner's machine, not here: the job has no sudo there. README says what.
       - name: Display server for the end-to-end tests
-        run: sudo apt-get update -q && sudo apt-get install -yq xvfb
+        run: command -v xvfb-run >/dev/null || { echo "::error::xvfb-run is not installed on this runner (see README, self-hosted runner)"; exit 1; }
 
       # Several files at a time, which is what ARCHITECTURE.md recommends and what finds races. It
       # was not possible until the leak test stopped reading collector lag as a leak.
@@ -93,8 +98,7 @@ jobs:
     # the platform layer for real: PowerShell consoles, .cmd agents, process trees, the installer.
     # On our own machine: a Windows runner bills at twice the rate of a Linux one, and this job is the
     # half that cannot be checked anywhere else. Self-hosted minutes are free, so this is the expensive
-    # half for nothing, and the Linux job stays on GitHub's runners where it is a clean environment
-    # every time. The cost is that the job waits for that machine to be on; `windows-latest` here
+    # half for nothing. The cost is that the job waits for that machine to be on; `windows-latest` here
     # instead puts it back on a hosted runner.
     runs-on: [self-hosted, windows, x64]
     timeout-minutes: 40
