@@ -224,5 +224,3 @@ export function linkPath(target: string, link: string) {
   }
 }
 
-/** Pausing a process (SIGSTOP) exists only on POSIX. */
-export const CAN_PAUSE = !IS_WIN
