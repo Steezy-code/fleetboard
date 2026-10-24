@@ -663,8 +663,12 @@ function buildReport(): UsageReport {
   return report
 }
 
-/** Billable-ish weight used for plan estimates: everything except cache reads. */
-const weight = (e: Ev) => e[2] + e[3] + e[4]
+/**
+ * Every token the window moved, cache reads included. They were left out as "not really billable", but
+ * on agent work they are about 97% of what is read — a window figure without them tracked a fortieth of
+ * the real throughput, which is why the pill never resembled what the CLI itself reports.
+ */
+const weight = (e: Ev) => e[2] + e[3] + e[4] + e[5]
 
 /**
  * Rolling-window estimate like the CLIs' plan limits: a window opens at the first message after the
