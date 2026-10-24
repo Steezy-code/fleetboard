@@ -32,14 +32,16 @@ jobs:
       contents: write # only the last step uses it (gh release create)
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
-    # `shell: bash` means "the bash that ships with Git for Windows", which the runner looks up on PATH.
-    # On a hosted runner that finds Git Bash. On ours it finds System32's bash.exe first — the WSL shim,
-    # whose only distro here is Docker Desktop's utility VM with no /bin/bash, so every bash step died
-    # with `execvpe(/bin/bash) failed` before running a line of it. Naming the shell leaves nothing to
-    # resolve, and the path is the same on a hosted Windows runner.
+    # bash for every step, not pwsh: pwsh fails a step only on its last command's exit code, so a failed
+    # build went unnoticed as long as electron-builder then found something to pack.
+    #
+    # `shell: bash` is looked up on PATH, and on a self-hosted Windows runner that can find System32's
+    # bash.exe — the WSL shim — instead of Git Bash. Naming the path here does not work: the runner
+    # cannot parse a custom shell whose path contains spaces ("Second path fragment must not be a drive
+    # or UNC name"). So the runner's own PATH has to put Git first; README says how.
     defaults:
       run:
-        shell: 'C:\Program Files\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
+        shell: bash
     steps:
       - uses: actions/checkout@v4
         with:
