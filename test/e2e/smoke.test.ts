@@ -1,6 +1,7 @@
 // Every panel, drawer, studio and kind of tile opens without an error in the app window.
 import { test, before, after } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import path from 'node:path'
 import { App, makeRepo, makeSandbox } from './harness'
 
@@ -79,4 +80,24 @@ test('a tile that cannot render its data stays inside its frame: the rest of the
   assert.equal(await app.eval(() => document.querySelectorAll('.boundary').length), 1, 'only that tile failed')
   await app.click(`[data-node-id="${bad}"] .boundary button`, 'Remove tile')
   await app.waitFor(async () => !(await app.eval((id) => !!document.querySelector(`[data-node-id="${id}"]`), bad)), { label: 'tile removed' })
+})
+
+test('the app knows which Fleetboard it is, and asks GitHub once whether there is a newer one', async () => {
+  const out = await app.invoke<{ current: string; latest: unknown; newer: unknown; error?: string }>('update:check')
+  const pkg = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '../../package.json'), 'utf8'))
+  assert.equal(out.current, pkg.version, "Fleetboard's own version, not Electron's")
+  assert.equal(out.newer, null, 'no release is newer than the build under test')
+  // whatever gh does in the sandbox — missing, signed out, no releases — the answer is usable, not a throw
+  assert.ok(out.error === undefined || typeof out.error === 'string')
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().openPanel('settings'))
+  // the check can take a few seconds (gh, over the network), and the row says so while it does
+  const shown = await app.waitFor(
+    async () => {
+      const t = (await app.texts('[data-section="data"] .settings-row')).join(' | ')
+      return t.includes('Checking for a newer release') ? '' : t
+    },
+    { label: 'the version row, settled' }
+  )
+  assert.ok(shown.includes(`Fleetboard ${out.current}`), shown)
+  await app.eval(() => (window as any).__fleetboard.useApp.getState().closePanel())
 })
