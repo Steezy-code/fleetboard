@@ -32,6 +32,14 @@ jobs:
       contents: write # only the last step uses it (gh release create)
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
+    # `shell: bash` means "the bash that ships with Git for Windows", which the runner looks up on PATH.
+    # On a hosted runner that finds Git Bash. On ours it finds System32's bash.exe first — the WSL shim,
+    # whose only distro here is Docker Desktop's utility VM with no /bin/bash, so every bash step died
+    # with `execvpe(/bin/bash) failed` before running a line of it. Naming the shell leaves nothing to
+    # resolve, and the path is the same on a hosted Windows runner.
+    defaults:
+      run:
+        shell: 'C:\Program Files\Git\bin\bash.exe --noprofile --norc -e -o pipefail {0}'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,7 +48,6 @@ jobs:
           persist-credentials: false # no token in .git/config while npm ci and the build run
 
       - name: The tag is a version tag on master
-        shell: bash
         run: |
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::$TAG is not a vX.Y.Z tag"; exit 1; }
           git merge-base --is-ancestor HEAD origin/master || { echo "::error::$TAG is not on master"; exit 1; }
@@ -55,13 +62,11 @@ jobs:
       - run: npm test
 
       - name: Version from the tag
-        shell: bash
         run: npm version --no-git-tag-version --allow-same-version "${TAG#v}"
 
       # bash -e, not pwsh: pwsh fails a step only on its last command's exit code, so a failed build
       # went unnoticed as long as electron-builder then found something to pack
       - name: Build the installer
-        shell: bash
         run: |
           npx electron-vite build
           npx electron-builder --win --x64 --publish never
@@ -70,7 +75,6 @@ jobs:
       # releases on). It fails if a release for this tag exists, so a published installer is never
       # replaced under the same name.
       - name: Publish the release
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
