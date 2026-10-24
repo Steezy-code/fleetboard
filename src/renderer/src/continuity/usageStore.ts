@@ -18,11 +18,20 @@ export interface Budget {
 }
 export type Budgets = Record<UsageAgent, Budget>
 
+/**
+ * No budget until the user sets one. The old defaults — six million tokens a session, eighty million a
+ * week, the same for all three CLIs — were invented: a plan's real limits are not on this machine (the
+ * CLIs ask their API for them at the time), so a percentage of them was a percentage of nothing.
+ * Unset, the pill shows the tokens it actually counted, and `usedPct` returns 0 so nothing is gated.
+ */
 export const DEFAULT_BUDGETS: Budgets = {
-  claude: { session: 6_000_000, week: 80_000_000, ceiling: 0.95 },
-  codex: { session: 6_000_000, week: 80_000_000, ceiling: 0.95 },
-  gemini: { session: 6_000_000, week: 80_000_000, ceiling: 0.95 }
+  claude: { session: 0, week: 0, ceiling: 0.95 },
+  codex: { session: 0, week: 0, ceiling: 0.95 },
+  gemini: { session: 0, week: 0, ceiling: 0.95 }
 }
+
+/** Whether a percentage means anything for this agent: only against a budget the user set. */
+export const hasBudget = (b: Budget | undefined, which: 'session' | 'week' = 'session') => !!b && (which === 'session' ? b.session : b.week) > 0
 
 export const USAGE_AGENT_META: Record<UsageAgent, { label: string; color: string }> = {
   claude: { label: 'Claude', color: 'var(--accent)' },

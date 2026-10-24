@@ -4,7 +4,7 @@ import { Drawer, Seg } from '../ui/Modal'
 import { Ring } from '../continuity/Ring'
 import { Heatmap } from '../continuity/Heatmap'
 import { metricOf, TokensChart, type TokenMetric } from '../continuity/TokensChart'
-import { startUsageWatch, toneColor, usedPct, USAGE_AGENT_IDS, USAGE_AGENT_META, useUsage } from '../continuity/usageStore'
+import { hasBudget, startUsageWatch, toneColor, usedPct, USAGE_AGENT_IDS, USAGE_AGENT_META, useUsage } from '../continuity/usageStore'
 import { fmtDay, fmtDuration, fmtInt, fmtReset, fmtTokens, fmtUntil, prettyModel } from '../continuity/format'
 import type { UsageAgent } from '../continuity/types'
 
@@ -91,18 +91,33 @@ function PlanCard({ agent }: { agent: UsageAgent }) {
   const [editing, setEditing] = useState(false)
   const sPct = usedPct(l, budget, 'session')
   const wPct = usedPct(l, budget, 'week')
+  // a percentage is only meaningful against a budget the user set: the plan's own limits are asked for
+  // by the CLI at the time and are nowhere on this machine
+  const budgeted = hasBudget(budget)
+  const weekBudgeted = hasBudget(budget, 'week')
   const sess = l?.session
   const week = l?.week
 
   return (
     <div className="usage-card">
       <div className="usage-ring-row">
-        <Ring pct={sPct} size={112} stroke={10} color={toneColor(sPct)}>
-          <div className="ring-pct">
-            {sess?.active ? Math.round(sPct * 100) : 0}
-            <span>%</span>
-          </div>
-          <div className="ring-sub">{sess?.active ? fmtTokens(sess.tokens) : 'idle'}</div>
+        <Ring pct={budgeted ? sPct : 0} size={112} stroke={10} color={toneColor(sPct)}>
+          {budgeted ? (
+            <>
+              <div className="ring-pct">
+                {sess?.active ? Math.round(sPct * 100) : 0}
+                <span>%</span>
+              </div>
+              <div className="ring-sub">{sess?.active ? fmtTokens(sess.tokens) : 'idle'}</div>
+            </>
+          ) : (
+            <>
+              <div className="ring-sub" style={{ fontSize: 15 }}>
+                {sess?.active ? fmtTokens(sess.tokens) : 'idle'}
+              </div>
+              <div className="ring-sub">{sess?.active ? 'tokens' : ''}</div>
+            </>
+          )}
         </Ring>
         <div className="grow">
           <div className="usage-h">Current session</div>
@@ -115,8 +130,13 @@ function PlanCard({ agent }: { agent: UsageAgent }) {
             <div className="muted small">No active 5-hour window. It opens with your next message.</div>
           )}
           <div className="usage-est">
-            <Info size={11} /> Estimate from local logs
+            <Info size={11} /> {budgeted ? 'Share of the budget you set — counted from local logs' : 'Tokens counted from local logs'}
           </div>
+          {!budgeted && (
+            <div className="dim small" style={{ marginTop: 4 }}>
+              No budget set. Your plan’s own limits are not readable here, so there is no percentage to show — set a budget below to get one, and to have Fleetboard stop its own loops before it reaches it.
+            </div>
+          )}
         </div>
       </div>
 
@@ -125,7 +145,8 @@ function PlanCard({ agent }: { agent: UsageAgent }) {
           label="Current week (all models)"
           pct={wPct}
           right={week?.active ? `Resets ${fmtReset(week.resetsAt)}` : 'not started'}
-          sub={week?.active ? `${fmtTokens(week.tokens)} of ${fmtTokens(budget.week)}` : undefined}
+          sub={week?.active ? (weekBudgeted ? `${fmtTokens(week.tokens)} of ${fmtTokens(budget.week)}` : `${fmtTokens(week.tokens)} so far`) : undefined}
+          showPct={weekBudgeted}
         />
         {week?.active &&
           week.byModel.slice(0, 4).map((m) => (
@@ -134,6 +155,7 @@ function PlanCard({ agent }: { agent: UsageAgent }) {
               label={prettyModel(m.model)}
               pct={budget.week ? m.tokens / budget.week : 0}
               right={fmtTokens(m.tokens)}
+              showPct={weekBudgeted}
               thin
             />
           ))}
@@ -147,12 +169,12 @@ function PlanCard({ agent }: { agent: UsageAgent }) {
   )
 }
 
-function UsageBar({ label, pct, right, sub, thin }: { label: string; pct: number; right?: string; sub?: string; thin?: boolean }) {
+function UsageBar({ label, pct, right, sub, thin, showPct = true }: { label: string; pct: number; right?: string; sub?: string; thin?: boolean; showPct?: boolean }) {
   return (
     <div className={`usage-bar ${thin ? 'thin' : ''}`}>
       <div className="row">
         <span className="grow">{label}</span>
-        <span className="mono small">{Math.round(pct * 100)}%</span>
+        {showPct && <span className="mono small">{Math.round(pct * 100)}%</span>}
       </div>
       <div className="bar">
         <span style={{ width: `${Math.min(100, pct * 100)}%`, background: toneColor(pct) }} />
