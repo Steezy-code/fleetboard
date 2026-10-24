@@ -82,7 +82,7 @@ jobs:
 
       - name: Screenshots of the end-to-end runs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots
           path: ${{ runner.temp }}/e2e-shots
@@ -125,7 +125,7 @@ jobs:
 
       - name: Screenshots of the end-to-end runs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-screenshots-windows
           path: ${{ runner.temp }}/e2e-shots
