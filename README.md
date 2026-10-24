@@ -30,6 +30,9 @@ npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted
 #   FB_E2E_HEADLESS=1 no Xvfb needed
 #   FB_E2E_KEEP=1     keep every test's temp sandbox (a failed test's is always kept, and named in its output)
 #   npm run test:e2e:one -- test/e2e/<file>.test.ts
+npm run test:linux # on Windows: the Linux unit + e2e suites in a container (needs Docker)
+#   npm run test:linux -- unit    the quick half
+#   26 of the 28 e2e files and 8 unit files never run on Windows; this is that ground, before CI sees it
 # by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
 #   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions,handoff}.test.ts
 #   FLEETBOARD_REAL_CODEX=$(which codex)      test/e2e/real/codex-*.test.ts   (local mock model, no account)
