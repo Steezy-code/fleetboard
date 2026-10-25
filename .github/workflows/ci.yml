@@ -22,16 +22,11 @@ permissions:
 
 jobs:
   checks:
-    # The Linux half, on our own machine. GitHub's hosted runners are billing-blocked, and this is the
-    # ground Windows cannot cover (26 of the 28 end-to-end files and 8 unit files), so it runs where it
-    # already runs for us when developing: the container behind `npm run test:linux`. Typecheck, lint
-    # and the audit are platform-independent and run natively on the runner; only the suites need Linux.
-    #
-    # ponytail: this needs Docker up in the runner's own logon session, which is the ceiling. Putting
-    # `runs-on: ubuntu-24.04` back, with npm ci / typecheck / lint / unit / xvfb / test:e2e as plain
-    # steps, is the way back the moment hosted minutes work again.
-    runs-on: [self-hosted, windows, x64]
-    timeout-minutes: 45
+    # Hosted, for the same reason the Windows job is: free on a public repository, a clean machine
+    # every run, and nothing of ours exposed to a fork's pull request. `npm run test:linux` runs this
+    # same ground in a container when developing on Windows.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
 
@@ -39,6 +34,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+
+      - name: Cache Electron download
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/electron
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install (Electron + node-pty built for it)
         run: npm ci
@@ -57,40 +58,48 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # before the suites, unlike the hosted job: the container run is the long pole, and a registry
-      # hiccup should not cost forty minutes to discover.
+      - name: Unit tests
+        run: npm test
+
+      # after the tests on purpose: this one talks to the registry, and a hiccup there must not hide
+      # whether the code is sound. A known-vulnerable dependency should fail the build rather than
+      # wait to be noticed; moderate and below are reported without failing, since several of those
+      # advisories are denial-of-service in a build tool this app does not ship.
       - name: Dependency audit
         run: npm audit --audit-level=high --omit=dev
 
-      # `|| true` would need bash; this runner's default shell is PowerShell, where `true` is not a command
       - name: Dependency audit (full, advisory only)
         if: always()
-        run: npm audit; exit 0
+        run: npm audit || true
 
-      # a pull request arrives as a detached merge commit that no branch in this clone names. The
-      # container clones from here and checks that commit out by hash, so give it a ref to arrive by.
-      - name: Name the commit under test
-        run: git branch -f ci-under-test HEAD
+      - name: Display server for the end-to-end tests
+        run: sudo apt-get update -q && sudo apt-get install -yq xvfb
 
-      # xvfb and the GTK libraries live inside the container, so none of this reaches the screen of the
-      # machine the runner is on.
-      #
-      # ponytail: the container's screenshots leave with it on --rm, so a Linux e2e failure here has no
-      # artifact to look at — the output names the sandbox it kept. Mount a volume for E2E_SHOTS when
-      # one actually matters.
-      - name: Linux unit and end-to-end tests, in a container
-        run: npm run test:linux
+      # Several files at a time, which is what ARCHITECTURE.md recommends and what finds races. It
+      # was not possible until the leak test stopped reading collector lag as a leak.
+      - name: End-to-end tests
+        run: npm run test:e2e
         env:
+          E2E_SHOTS: ${{ runner.temp }}/e2e-shots
           FB_E2E_JOBS: 3
+
+      - name: Screenshots of the end-to-end runs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-screenshots
+          path: ${{ runner.temp }}/e2e-shots
+          if-no-files-found: ignore
+          retention-days: 7
 
   windows:
     # the platform layer for real: PowerShell consoles, .cmd agents, process trees, the installer.
-    # On our own machine: a Windows runner bills at twice the rate of a Linux one, and this job is the
-    # half that cannot be checked anywhere else. Self-hosted minutes are free, so this is the expensive
-    # half for nothing, and the Linux job stays on GitHub's runners where it is a clean environment
-    # every time. The cost is that the job waits for that machine to be on; `windows-latest` here
-    # instead puts it back on a hosted runner.
-    runs-on: [self-hosted, windows, x64]
+    # On a hosted runner, which a public repository gets for nothing. A self-hosted one must not run
+    # this while the repository is public: a pull request from a fork would run its own code on that
+    # machine, and the workflow a fork's pull request runs is the one on the fork's branch, so a job
+    # asking for `[self-hosted, …]` is a job someone else can add. Free hosted minutes are most of why
+    # going public was worth it.
+    runs-on: windows-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
@@ -116,8 +125,6 @@ jobs:
         run: node --enable-source-maps --import ./test/support/register.mjs --test --test-concurrency=1 test/e2e/windows.test.ts test/e2e/smoke.test.ts
         env:
           E2E_SHOTS: ${{ runner.temp }}/e2e-shots
-          # keep the app off the screen: this runner shares a logon session with whoever is using the machine
-          FB_E2E_HEADLESS: "1"
 
       - name: Screenshots of the end-to-end runs
         if: failure()
