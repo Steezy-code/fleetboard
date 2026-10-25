@@ -48,6 +48,7 @@ export const AGENTS: AgentDef[] = [
     session: { start: (id) => ['--session-id', id], resume: (id) => ['--resume', id] },
     homepage: 'https://github.com/google-gemini/gemini-cli', install: 'npm i -g @google/gemini-cli'
   },
+  { id: 'antigravity', name: 'Antigravity CLI', vendor: 'Google', bin: 'agy', color: '#4285f4', homepage: 'https://antigravity.google/docs/getting-started', install: 'irm https://antigravity.google/cli/install.ps1 | iex' },
   { id: 'grok', name: 'Grok', vendor: 'xAI', bin: 'grok', color: '#e5e5e5', headless: (p) => ['-p', promptArg(p)], homepage: 'https://x.ai/' },
   {
     id: 'opencode', name: 'OpenCode', vendor: 'sst', bin: 'opencode', color: '#f5b740', resumeArgs: ['--continue'],
@@ -65,6 +66,7 @@ export const AGENTS: AgentDef[] = [
   { id: 'droid', name: 'Droid', vendor: 'Factory', bin: 'droid', color: '#f97316', headless: (p) => ['exec', promptArg(p)], homepage: 'https://factory.ai' },
   { id: 'crush', name: 'Crush', vendor: 'Charm', bin: 'crush', color: '#ec4899', yoloArgs: ['--yolo'], headless: (p) => ['run', promptArg(p)], homepage: 'https://github.com/charmbracelet/crush' },
   { id: 'codebuff', name: 'Codebuff', vendor: 'Codebuff', bin: 'codebuff', color: '#22c55e', homepage: 'https://www.codebuff.com' },
+  { id: 'freebuff', name: 'Freebuff', vendor: 'Codebuff', bin: 'freebuff', color: '#16a34a', resumeArgs: ['--continue'], homepage: 'https://freebuff.com', install: 'npm i -g freebuff' },
   { id: 'continue', name: 'Continue', vendor: 'Continue', bin: 'cn', color: '#e2e8f0', headless: (p) => ['-p', promptArg(p)], homepage: 'https://continue.dev' },
   { id: 'kilocode', name: 'Kilo Code', vendor: 'Kilo', bin: 'kilocode', color: '#facc15', homepage: 'https://kilocode.ai' },
   { id: 'qwen', name: 'Qwen Code', vendor: 'Alibaba', bin: 'qwen', color: '#7c3aed', yoloArgs: ['--yolo'], headless: (p) => ['-p', promptArg(p)], homepage: 'https://github.com/QwenLM/qwen-code' },
@@ -93,8 +95,8 @@ export const agentById = (id: string, custom: AgentDef[] = []): AgentDef | undef
 /** Names people say out loud for an agent, used by the voice / command parser. */
 export const AGENT_ALIASES: Record<string, string> = {
   claude: 'claude', 'claude code': 'claude', clod: 'claude', cloud: 'claude', 'cloud code': 'claude',
-  codex: 'codex', 'codecs': 'codex', 'code x': 'codex', gemini: 'gemini', 'gemini cli': 'gemini', grok: 'grok',
+  codex: 'codex', 'codecs': 'codex', 'code x': 'codex', gemini: 'gemini', 'gemini cli': 'gemini', antigravity: 'antigravity', 'antigravity cli': 'antigravity', agy: 'antigravity', grok: 'grok',
   opencode: 'opencode', 'open code': 'opencode', aider: 'aider', amp: 'amp', goose: 'goose', cline: 'cline',
-  cursor: 'cursor', copilot: 'copilot', droid: 'droid', crush: 'crush', codebuff: 'codebuff', qwen: 'qwen',
+  cursor: 'cursor', copilot: 'copilot', droid: 'droid', crush: 'crush', codebuff: 'codebuff', freebuff: 'freebuff', 'free buff': 'freebuff', qwen: 'qwen',
   kimi: 'kimi', auggie: 'auggie', shell: 'shell', terminal: 'shell', bash: 'shell'
 }
