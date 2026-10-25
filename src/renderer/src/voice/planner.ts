@@ -19,6 +19,7 @@ import {
   currentConsole,
   describe,
   findAgentIn,
+  freezeTargets,
   isPronoun,
   beginPlanRun,
   namesOf,
@@ -580,6 +581,12 @@ export async function confirmPending() {
   const p = livePending()
   if (!p) return
   setVoice({ pending: null })
+  // its steps name what was in front of the user then (freezeTargets): another workspace now is
+  // another board, and a confirm said to it is not about the plan that was described
+  if (p.workspaceId !== undefined && p.workspaceId !== useApp.getState().project?.activeWorkspaceId) {
+    reply('The board changed since I asked, so I did nothing. Say it again.')
+    return
+  }
   thread().add('system', 'Confirmed.')
   await execute(p.actions, p.say ?? '')
 }
@@ -601,7 +608,8 @@ export async function plan(actions: Action[], sayText: string, userText: string,
   const reasons = confirmReasons(actions, userText, fromPlanner)
   if (reasons.length) {
     const prompt = confirmPrompt(actions)
-    setVoice({ pending: { id: uid('plan'), actions, steps, prompt, say: sayText, projectId: useApp.getState().project?.id ?? '', at: Date.now() }, captionUntil: 0 })
+    const project = useApp.getState().project
+    setVoice({ pending: { id: uid('plan'), actions: freezeTargets(actions), steps, prompt, say: sayText, projectId: project?.id ?? '', workspaceId: project?.activeWorkspaceId, at: Date.now() }, captionUntil: 0 })
     thread().add('system', prompt)
     speak(prompt)
     return

@@ -77,6 +77,8 @@ export interface PendingPlan {
   say?: string
   /** the project it is about, and when it was asked: it does not carry over to another, or go stale */
   projectId: string
+  /** the workspace in front of the user when it was asked: its steps are pinned to what was there */
+  workspaceId?: string
   at: number
 }
 

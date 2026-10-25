@@ -32,6 +32,8 @@ import { appPermission, mediaTypesOf, webPermission } from './permissions'
 import * as journal from './journal'
 import { allowed, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
+import { definitionFingerprint } from './teamrules'
+import { teamRuleAllowed } from '@shared/approvals'
 
 let win: BrowserWindow | null = null
 
@@ -211,9 +213,21 @@ function registerCore() {
     if (r.ok) journal.answered('you, on the board', id, describeAnswer(answer))
     return r
   })
-  // a team rule answering for you (teamRules.ts): only while the prompt asks for that very command
-  ctx.ipc.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string) => {
+  // A team rule answering for you (renderer fleet/teamRules.ts), decided here rather than trusted from
+  // the renderer: only a command of a kind a rule may cover (teamRuleAllowed), only while the files
+  // that define it are as they were when the user said yes (teamrules.ts), and only while the prompt
+  // still asks for that very command (ptys.answer).
+  ctx.ipc.handle('pty:ruleFingerprint', (_e, id: string) => {
+    const cwd = ptys.cwdOf(String(id))
+    return cwd ? definitionFingerprint(cwd) : null
+  })
+  ctx.ipc.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string, fingerprint: string) => {
     if (typeof command !== 'string' || !command) return { ok: false, reason: 'changed' }
+    if (!teamRuleAllowed(command)) return { ok: false, reason: 'changed' }
+    const cwd = ptys.cwdOf(id)
+    if (!cwd) return { ok: false, reason: 'not-live' }
+    const now = definitionFingerprint(cwd)
+    if (!now || now !== fingerprint) return { ok: false, reason: 'redefined' }
     const r = await ptys.answer(id, answer, command)
     if (r.ok) journal.append({ kind: 'prompt.answer', text: `Fleetboard allowed \`${command.split('\n')[0]}\` for ${String(who)}, by your rule for its team`, detail: { consoleId: id, by: 'rule', command } })
     return r
@@ -327,18 +341,43 @@ app.whenReady().then(async () => {
     cb(ok)
   })
   web.setPermissionCheckHandler((_wc, permission, origin, details) => webPermission(permission, origin, mediaTypesOf(details)))
+  // Every step on the way to the window is guarded on its own. One that threw used to end this
+  // promise before createWindow: the app then ran on with no window, holding the single-instance
+  // lock, so every later launch only "focused" a window that did not exist — and one malformed state
+  // file was enough to do it. Now the window always opens, and says what did not start.
+  const failed: string[] = []
+  const step = async (name: string, fn: () => unknown) => {
+    try {
+      await fn()
+    } catch (e) {
+      failed.push(name)
+      logError('startup', e)
+    }
+  }
   // before any console starts: what a run that died left running would otherwise work on unseen
-  const orphans = await endOrphans().catch(() => 0)
-  if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
-  await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
-  registerCore()
+  await step('orphans', async () => {
+    const orphans = await endOrphans().catch(() => 0)
+    if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
+  })
+  await step('hooks', () => startHookServer((id, event, payload) => ptys.hook(id, event, payload)))
+  await step('core', registerCore)
   // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
   // be registered from inside profiles, which made its handlers appear to come from nowhere.
-  for (const m of [store, recovery, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal, update]) m.register(ctx)
+  const modules = { store, recovery, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal, update }
+  for (const [name, m] of Object.entries(modules)) await step(name, () => m.register(ctx))
   // these two start servers, so they are awaited rather than listed
-  await fleet.register(ctx)
-  await remote.register(ctx)
+  await step('teams', () => fleet.register(ctx))
+  await step('phone inbox', () => remote.register(ctx))
   createWindow()
+  if (failed.length) {
+    // not showErrorBox: it would hold up this process, and with it every console's output
+    void dialog.showMessageBox({
+      type: 'warning',
+      title: 'Part of Fleetboard did not start',
+      message: `Some parts failed to start: ${failed.join(', ')}.`,
+      detail: `The rest works. What went wrong is in ${path.join(dirs.root, 'logs', 'main.log')}.`
+    })
+  }
 })
 
 app.on('window-all-closed', async () => {

@@ -158,29 +158,55 @@ export function commandOf(p: Prompt | null): string | null {
   return null
 }
 
+/** `git` and whatever global options come before its subcommand (`git -C dir push`, `git -c k=v push`) */
+const GIT = String.raw`\bgit(?:\s+(?:-[Cc]\s+\S+|--[a-z-]+(?:=\S+)?))*\s+`
+/** `rm` with a recursive flag anywhere among its arguments: -r, -R, -fr, -f -r, --recursive */
+const RM_RECURSIVE = String.raw`\brm\s+(?:[^;&|\n]*\s)?(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b`
+const DELETES = new RegExp(
+  [RM_RECURSIVE, String.raw`\bfind\b[^;&|\n]*\s-delete\b`, String.raw`\b(shred|truncate)\b`, String.raw`${GIT}(?:reset\s+--hard|clean\s+-[a-z]*f|push\s+(?:[^;&|\n]*\s)?(?:-f|--force(?:-with-lease)?)\b)`, String.raw`\bdrop\s+(table|database)\b`].join('|'),
+  'i'
+)
+const SENDS = new RegExp([String.raw`${GIT}push\b`, String.raw`\b(npm|pnpm|yarn)\s+publish\b`, String.raw`\bcurl\b.*-X\s*(POST|PUT|PATCH|DELETE)\b`].join('|'), 'i')
+/** options that make a reading command write a file or run a program: find -exec, rg --pre, git diff --output, tree -o */
+const READ_BUT_ACTS = /\s(-(exec|execdir|ok|okdir|delete|fprint0?|fprintf|fls)\b|--pre(=|\s)|--output\b|-o\s)/i
+
 /** A plain word on what a command does, when it is clear from the command. Null when unsure. */
 export function commandNote(cmd: string | undefined): string | null {
   if (!cmd) return null
   const c = cmd.trim().replace(/^(sudo\s+)?/, '')
-  if (/\brm\s+-[a-z]*r|\bgit\s+(reset\s+--hard|clean\s+-[a-z]*f|push\s+(-f|--force))|\bdrop\s+(table|database)\b/i.test(c)) return 'Deletes or overwrites things'
-  if (/\bgit\s+push\b|\bnpm\s+publish\b|\bcurl\b.*-X\s*(POST|PUT|PATCH|DELETE)\b/i.test(c)) return 'Sends something off this machine'
+  if (DELETES.test(c)) return 'Deletes or overwrites things'
+  if (SENDS.test(c)) return 'Sends something off this machine'
   // the rest describe one command: "npm test && …" is not just "Runs your tests"
   if (/[;&|`\n]|\$\(/.test(c)) return null
-  if (/^(npm|pnpm|yarn|bun)\s+(i|install|add)\b|^pip3?\s+install\b|^cargo\s+add\b/i.test(c)) return 'Installs packages'
+  if (/^(npm|pnpm|yarn|bun)\s+(i|install|add|ci)\b|^pip3?\s+install\b|^cargo\s+(add|install)\b|^npx\s+(-y|--yes)\b/i.test(c)) return 'Installs packages'
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|^(npx\s+)?(vitest|jest|pytest|playwright\s+test)\b|^(cargo|go)\s+test\b/i.test(c)) return 'Runs your tests'
   if (/^(npm|pnpm|yarn|bun)\s+(run\s+)?(typecheck|lint|build|check)\b|^(npx\s+)?tsc\b/i.test(c)) return 'Runs a check or build'
-  if (/^(ls|cat|head|tail|wc|grep|rg|find|tree|pwd|which)\b|^git\s+(status|diff|log|show|branch)\b/i.test(c)) return 'Only reads'
+  if (/^(ls|cat|head|tail|wc|grep|rg|find|tree|pwd|which)\b|^git\s+(status|diff|log|show)\b|^git\s+branch(\s+(-a|-r|-v|-vv|--list|--all|--show-current))*\s*$/i.test(c) && !READ_BUT_ACTS.test(c) && !c.includes('>')) return 'Only reads'
   return null
 }
 
+/** What may have a team rule: the kinds of command a team asks for over and over, and nothing else. */
+const RULE_KINDS = new Set(['Runs your tests', 'Runs a check or build', 'Only reads'])
+
 /**
- * Whether one yes may stand for a whole team's identical requests. Never for what deletes, overwrites
- * or sends something off this machine, nor anything run as root: each of those deserves its own look.
+ * Whether one yes may stand for a whole team's identical requests.
+ *
+ * An allowlist. It used to be the other way round — everything except what looked like deleting,
+ * root or the network — and a list of what is dangerous is never finished for a shell: `rm -f -r`,
+ * `git -C . push`, `node -e "fetch(…)"` and `npm install` (whose install scripts run anything) all
+ * went through. Now only a single plain command of a known everyday kind qualifies: no chaining,
+ * substitution, redirection, variables or line continuations, and nothing run as another user.
+ *
+ * This says what the command *is*, not what it will *do*: `npm test` runs whatever package.json
+ * says. A rule is therefore also bound to the files that define such commands (main/teamrules.ts),
+ * and stops answering when one of them changes.
  */
 export function teamRuleAllowed(cmd: string): boolean {
-  const note = commandNote(cmd)
-  if (note === 'Deletes or overwrites things' || note === 'Sends something off this machine') return false
-  return !/\b(sudo|doas|runas|curl|wget|ssh|scp|rsync|nc)\b/i.test(cmd)
+  const c = cmd.trim()
+  if (!c || /[;&|`<>\n\r$\\]/.test(c)) return false
+  if (/^(sudo|doas|runas|su)\b/i.test(c)) return false
+  const note = commandNote(c)
+  return note !== null && RULE_KINDS.has(note)
 }
 
 /** What a card showed, as one string: an answer given on it carries this (PromptAnswer.seen). */

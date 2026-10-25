@@ -10,7 +10,8 @@ const { confirmReasons } = await import('@/voice/actions')
 
 const NAMES = ['Maya', 'Rafa', 'Dax', 'Nova', 'Iris', 'Theo', 'Juno', 'Kai']
 
-before(() => {
+/** the board every test starts from; a test that closes consoles takes them off it, so seed again after */
+function seed() {
   const node = (name: string, i: number) => ({ id: `c${i}`, type: 'console', x: i * 800, y: 0, w: 780, h: 440, z: i, groupId: i < 2 ? 'g1' : undefined, data: { name, agentId: 'claude' } })
   useApp.setState({
     project: {
@@ -38,7 +39,8 @@ before(() => {
     statuses: Object.fromEntries(NAMES.map((_, i) => [`c${i}`, 'idle'])),
     agents: [{ id: 'claude', installed: true }, { id: 'codex', installed: true }] as any
   })
-})
+}
+before(seed)
 
 const plan = (text: string) => parseLocal(text)
 const confirmFor = (text: string) => {
@@ -170,4 +172,58 @@ test('panels by name: the night log and the sweep can be asked for, and a panel 
 test('"team, …" and "everyone, …" address every console, unless a group is called that', async () => {
   const { parseDictation } = await import('@/voice/planner')
   for (const word of ['team', 'everyone', 'all']) assert.deepEqual(parseDictation(`${word}, run the tests`), { targets: ['all'], text: 'run the tests' }, word)
+})
+
+test('a parked plan runs on what it named, not on what "all" means by the time of the yes', async () => {
+  const { ipc } = await import('../support/renderer-env')
+  const { runCommand } = await import('@/voice/planner')
+  const { useVoice } = await import('@/voice/thread')
+  ipc.reset()
+  ipc.handle('pty:kill', () => {})
+  ipc.handle('store:saveProject', () => {})
+  ipc.handle('journal:append', () => {})
+  useApp.setState((st) => ({ settings: { ...st.settings, speakReplies: false, confirmKill: false } }))
+  seed()
+  const home = useApp.getState().project!
+  const killed = () => ipc.callsTo('pty:kill').map((c: unknown[]) => c[0])
+
+  // "close all" names the eight on the board; one more arrives before the yes
+  await runCommand('close all', 'typed')
+  assert.ok(useVoice.getState().pending)
+  const ws = home.workspaces[0]!
+  const late = { ...ws.nodes[7]!, id: 'late', data: { name: 'Late', agentId: 'claude' } }
+  useApp.setState((st) => ({ project: { ...home, workspaces: [{ ...ws, nodes: [...ws.nodes, late] }] } as never, live: { ...st.live, late: true } }))
+  await runCommand('confirm', 'typed')
+  assert.deepEqual([...killed()].sort(), NAMES.map((_, i) => `c${i}`).sort(), 'the eight it named, not the one that came after')
+  useApp.setState({ project: home })
+})
+
+test('a parked plan is dropped when the yes comes on another workspace', async () => {
+  const { ipc } = await import('../support/renderer-env')
+  const { runCommand } = await import('@/voice/planner')
+  const { useVoice } = await import('@/voice/thread')
+  ipc.reset()
+  ipc.handle('pty:kill', () => {})
+  ipc.handle('store:saveProject', () => {})
+  ipc.handle('journal:append', () => {})
+  seed()
+  const home = useApp.getState().project!
+  await runCommand('close all', 'typed')
+  assert.ok(useVoice.getState().pending)
+  const other = { ...home.workspaces[0]!, id: 'w2', name: 'Other', nodes: [] }
+  useApp.setState({ project: { ...home, activeWorkspaceId: 'w2', workspaces: [...home.workspaces, other] } as never })
+  await runCommand('confirm', 'typed')
+  assert.equal(ipc.callsTo('pty:kill').length, 0, 'nothing closed: the board it was about is not the one in front of the user')
+  assert.equal(useVoice.getState().pending, null)
+  useApp.setState({ project: home })
+})
+
+test('deleting a group of plain tiles waits for confirm too: they go with it', () => {
+  seed()
+  const home = useApp.getState().project!
+  const ws = home.workspaces[0]!
+  const note = { id: 'n1', type: 'note', x: 0, y: 600, w: 200, h: 200, z: 99, groupId: 'g2', data: { text: 'only copy' } }
+  useApp.setState({ project: { ...home, workspaces: [{ ...ws, nodes: [...ws.nodes, note], groups: [...ws.groups, { id: 'g2', name: 'Notes', x: 0, y: 600, w: 400, h: 400 }] }] } as never })
+  assert.deepEqual(confirmReasons([{ type: 'deleteTeam', team: 'g2' }], 'delete the notes group', false), ['deletes the tiles in a group'])
+  useApp.setState({ project: home })
 })

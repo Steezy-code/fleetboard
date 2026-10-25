@@ -11,6 +11,7 @@ import { memberOf } from '../engine/fleet'
 import { gateCharter } from '../fleet/charter'
 import { ensureOrchestratorNode } from '../orchestration/connect'
 import { DRAWER_NAMES, MODALS, isDrawer } from '../panels/names'
+import { deleteItems } from '../board/deleteSelection'
 
 export type Action =
   | { type: 'spawn'; agent: string; count: number; team?: string; role?: Role | string; prompt?: string }
@@ -194,6 +195,45 @@ export function resolveRefs(refs: string[], scope: 'all' | 'workspace' = 'all'):
   return { ids: [...ids], missing }
 }
 
+/**
+ * The plan with its targets resolved now, to the consoles and groups they mean at this moment.
+ *
+ * A plan that waits for "confirm" was described with the targets of when it was asked ("about to
+ * close A, B, C, D"). Resolved again when it runs, "all", "this", "them" and a selection mean
+ * whatever is in front of the user by then — switch workspace, say confirm, and four other running
+ * agents were closed. So the steps are pinned to ids when parked (resolveRef takes an id as itself).
+ *
+ * Steps after a spawn are left as said: "spawn three codex then group them" means the new ones,
+ * which only exist once the plan runs.
+ */
+export function freezeTargets(actions: Action[]): Action[] {
+  let spawned = false
+  return actions.map((a) => {
+    if (a.type === 'spawn') spawned = true
+    if (spawned) return a
+    switch (a.type) {
+      case 'kill':
+      case 'group': {
+        const { ids } = resolveRefs(a.targets, 'workspace')
+        return ids.length ? { ...a, targets: ids } : a
+      }
+      case 'send':
+      case 'pause':
+      case 'resume': {
+        const { ids } = resolveRefs(a.targets)
+        return ids.length ? { ...a, targets: ids } : a
+      }
+      case 'ungroup':
+      case 'deleteTeam': {
+        const g = resolveTeam(a.team)
+        return g ? { ...a, team: g.id } : a
+      }
+      default:
+        return a
+    }
+  })
+}
+
 export function selectedConsoles(): string[] {
   const app = useApp.getState()
   const ws = activeWs()
@@ -325,6 +365,8 @@ function refLabel(ref: string) {
 }
 
 const teamMembers = (gid: string) => activeWs()?.nodes.filter((n) => n.type === 'console' && n.groupId === gid).map((n) => n.id) ?? []
+/** every tile in a group, whatever its type */
+const groupTiles = (gid: string) => activeWs()?.nodes.filter((n) => n.groupId === gid).map((n) => n.id) ?? []
 
 /** Words the user must have said for the planner to be allowed to do this without asking. */
 const ASKED: Partial<Record<Action['type'], RegExp>> = {
@@ -352,7 +394,9 @@ export function confirmReasons(actions: Action[], userText: string, fromPlanner:
     if (a.type === 'kill' && resolveRefs(a.targets, 'workspace').ids.length) reasons.push('closes consoles')
     if (a.type === 'deleteTeam') {
       const g = resolveTeam(a.team)
+      // every tile in the group goes with it, notes and documents included, not only its consoles
       if (g && teamMembers(g.id).some(isLive)) reasons.push('closes live consoles')
+      else if (g && groupTiles(g.id).length) reasons.push('deletes the tiles in a group')
     }
     if (a.type === 'send') for (const id of resolveRefs(a.targets).ids) messaged.add(id)
     if (a.type === 'spawn') {
@@ -508,8 +552,11 @@ export async function runAction(a: Action): Promise<ActionResult> {
       const g = resolveTeam(a.team)
       if (!g) return { ok: false, line: `No group called ${a.team}.` }
       const members = teamMembers(g.id)
-      if (members.length) await killConsoles(members, { confirm: false })
-      useApp.getState().removeGroup(g.id, true)
+      // confirmed already (confirmReasons): the consoles close without a second question, and the
+      // group and its tiles go the way Delete takes them, so one Undo brings the lot back
+      if (members.length) await killConsoles(members, { confirm: false, remove: false })
+      const gone = await deleteItems([g.id, ...groupTiles(g.id)], { ask: false })
+      if (!gone) return { ok: false, line: `${g.name} is no longer on this board.` }
       return { ok: true, line: `Deleted ${g.name}${members.length ? ` and its ${members.length} console${members.length === 1 ? '' : 's'}` : ''}` }
     }
     case 'orchestrator': {

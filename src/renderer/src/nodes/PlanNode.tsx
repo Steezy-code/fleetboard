@@ -1,4 +1,4 @@
-import { Circle, CircleCheck, CircleDashed, CircleDot, Pause, Play, TerminalSquare, TriangleAlert } from 'lucide-react'
+import { Circle, CircleCheck, CircleDashed, CircleDot, Pause, Play, RotateCw, TerminalSquare, TriangleAlert } from 'lucide-react'
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
 import { useApp } from '../state/store'
@@ -34,6 +34,8 @@ function DoneWhen({ fleet }: { fleet: FleetState }) {
   const last = fleet.check?.runs[fleet.check.runs.length - 1]
   const tone = !runs || fleet.check?.off || !last ? '' : last.code === 0 ? 'ok' : 'bad'
   const off = !!fleet.check?.off
+  // merged work never runs on its own (mayRun): it waits for this button
+  const waiting = !off && !fleet.check?.running && !!fleet.check?.unchecked && fleet.check.unchecked !== last?.head
   return (
     <div className={`plan-check ${tone}`}>
       <TerminalSquare size={12} />
@@ -41,10 +43,22 @@ function DoneWhen({ fleet }: { fleet: FleetState }) {
         {cmd}
       </span>
       <span className="plan-check-trend">{trend}</span>
+      {runs && waiting && (
+        <button
+          className="icon-btn sm"
+          title="Run this check now, on the work merged so far (it runs the code the agents wrote)"
+          onClick={(e) => {
+            e.stopPropagation()
+            invoke('fleet:runCheck', fleet.projectId)
+          }}
+        >
+          <RotateCw size={12} />
+        </button>
+      )}
       {runs && (
         <button
           className="icon-btn sm"
-          title={off ? 'Run this check as the work lands' : 'Stop running this check'}
+          title={off ? 'Check again (merged work waits for you to run it)' : 'Stop running this check'}
           onClick={(e) => {
             e.stopPropagation()
             invoke('fleet:checkOff', fleet.projectId, !off)

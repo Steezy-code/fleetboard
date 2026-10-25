@@ -80,11 +80,41 @@ const stateFile = (projectId: string) => path.join(fleetDir, `${assertProjectId(
 /** exported for the test that pins the check above */
 export const stateFileFor = stateFile
 
+/** Enough of a team's shape to load it: anything less is set aside, not trusted to be a team. */
+export function validFleetState(v: unknown): v is FleetState {
+  const o = v as FleetState | null
+  return (
+    !!o &&
+    typeof o === 'object' &&
+    typeof o.projectId === 'string' &&
+    !!o.projectId &&
+    !!o.members &&
+    typeof o.members === 'object' &&
+    !Array.isArray(o.members) &&
+    Object.values(o.members).every((m) => !!m && typeof m === 'object' && typeof m.id === 'string' && typeof m.role === 'string') &&
+    ['tasks', 'messages', 'asks'].every((k) => (o as unknown as Record<string, unknown>)[k] === undefined || Array.isArray((o as unknown as Record<string, unknown>)[k]))
+  )
+}
+
 function loadAll() {
   for (const f of fs.readdirSync(fleetDir)) {
     if (!f.endsWith('.json')) continue
-    const s = readJson<FleetState | null>(path.join(fleetDir, f), null)
-    if (!s) continue
+    const file = path.join(fleetDir, f)
+    const s = readJson<unknown>(file, null)
+    if (s === null) continue
+    if (!validFleetState(s)) {
+      // one unreadable team must not stop the others, nor the app (index.ts used to open no window)
+      logError('fleet', new Error(`${f} is not a team's state; set aside as ${f}.invalid`))
+      try {
+        fs.renameSync(file, `${file}.invalid`)
+      } catch {
+        /* gone meanwhile */
+      }
+      continue
+    }
+    s.tasks ??= []
+    s.messages ??= []
+    s.asks ??= []
     states.set(s.projectId, s)
     for (const m of Object.values(s.members)) memberProject.set(m.id, s.projectId)
   }
@@ -1337,7 +1367,14 @@ export async function register(c: MainContext) {
       delete s.check.running
     }
     changed(s)
-    if (!off) void runCheck(s, 'start')
+    if (!off) void runCheck(s, 'user')
+    return true
+  })
+  /** The user runs the charter's check now, on whatever the team has merged so far. */
+  ipc.handle('fleet:runCheck', (_e, projectId: string) => {
+    const s = states.get(projectId)
+    if (!s?.charter?.doneWhen) return false
+    void runCheck(s, 'user')
     return true
   })
   ipc.handle('fleet:diff', async (_e, projectId: string) => {

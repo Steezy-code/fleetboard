@@ -11,7 +11,7 @@ before(async () => {
   repo = makeRepo(sb)
   app = await App.launch({
     sandbox: sb,
-    scenario: { solo: [{ match: 'deploy', bash: 'rm -rf build', reply: 'deployed' }, { match: 'slow', workMs: 3000, reply: 'slow done' }] }
+    scenario: { solo: [{ match: 'deploy', bash: 'rm -rf build', reply: 'deployed' }, { match: 'run the tests', bash: 'npm test', reply: 'tested' }, { match: 'slow', workMs: 3000, reply: 'slow done' }] }
   })
   await app.openProject(repo)
 })
@@ -66,14 +66,28 @@ test('a stale answer is refused and types nothing', async () => {
 test("a team rule's answer types nothing unless the dialog asks for exactly its command", async () => {
   const id = await spawnClaude()
   await app.waitStatus(id, 'idle')
+  await send(id, 'please run the tests')
+  await app.waitStatus(id, 'needs-you')
+  const fp = await app.invoke('pty:ruleFingerprint', id)
+  assert.equal(typeof fp, 'string', 'the definition files of the console’s folder')
+  const keysBefore = app.fakeLog((e) => e.event === 'keys').length
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'npm', 'Maya', fp), { ok: false, reason: 'changed' }, 'a prefix is not the command')
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, '', 'Maya', fp), { ok: false, reason: 'changed' })
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'npm test', 'Maya', 'other'), { ok: false, reason: 'redefined' }, 'its scripts are not what the user said yes to')
+  assert.equal(app.fakeLog((e) => e.event === 'keys').length, keysBefore, 'no keystrokes reached the agent')
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'npm test', 'Maya', fp), { ok: true })
+  await app.waitStatus(id, 'idle')
+})
+
+test('a team rule never answers a command a rule may not cover, even word for word', async () => {
+  const id = await spawnClaude()
+  await app.waitStatus(id, 'idle')
   await send(id, 'please deploy')
   await app.waitStatus(id, 'needs-you')
+  const fp = await app.invoke('pty:ruleFingerprint', id)
   const keysBefore = app.fakeLog((e) => e.event === 'keys').length
-  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'rm -rf', 'Maya'), { ok: false, reason: 'changed' }, 'a prefix is not the command')
-  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, '', 'Maya'), { ok: false, reason: 'changed' })
+  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'rm -rf build', 'Maya', fp), { ok: false, reason: 'changed' })
   assert.equal(app.fakeLog((e) => e.event === 'keys').length, keysBefore, 'no keystrokes reached the agent')
-  assert.deepEqual(await app.invoke('pty:answerByRule', id, { option: 'Yes' }, 'rm -rf build', 'Maya'), { ok: true })
-  await app.waitStatus(id, 'idle')
 })
 
 test('pty:prompt reads the dialog structurally', async () => {

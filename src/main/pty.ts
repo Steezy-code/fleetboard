@@ -24,6 +24,8 @@ const MAX_BUFFER = 400_000
 interface Session {
   id: string
   agentId: string
+  /** the folder it was started in */
+  cwd: string
   proc: pty.IPty
   /** raw output, replayed into the board's terminal when its node mounts again */
   buffer: string
@@ -64,6 +66,8 @@ export const pasteText = (text: string) => text.replace(/\r?\n|\t/g, ' ').replac
 
 export class PtyManager {
   private sessions = new Map<string, Session>()
+  /** starts in flight, by console id (spawn) */
+  private starting = new Map<string, Promise<PtyInfo>>()
   private exitListeners = new Set<ExitListener>()
   private spawnListeners = new Set<SpawnListener>()
   /** the app is quitting: consoles exit because of that, not on their own */
@@ -87,9 +91,28 @@ export class PtyManager {
     }
   }
 
-  async spawn(req: PtySpawnRequest): Promise<PtyInfo> {
+  /**
+   * Start a console, or hand back the one already running (or starting) under that id.
+   *
+   * The check for a running one is not enough on its own: starting awaits the login shell's
+   * environment and the CLI's path before the session is recorded, and a second request in that gap
+   * (the tile remounting while a board reopens) started a second process under the same id. The first
+   * was then tracked nowhere — not ended by close or quit, not in the orphan record — and kept
+   * working, and spending, after the app was gone. So a start in flight is shared.
+   */
+  spawn(req: PtySpawnRequest): Promise<PtyInfo> {
     const existing = this.sessions.get(req.id)
-    if (existing) return this.info(existing)
+    if (existing) return Promise.resolve(this.info(existing))
+    const pending = this.starting.get(req.id)
+    if (pending) return pending
+    const started = this.start(req).finally(() => {
+      if (this.starting.get(req.id) === started) this.starting.delete(req.id)
+    })
+    this.starting.set(req.id, started)
+    return started
+  }
+
+  private async start(req: PtySpawnRequest): Promise<PtyInfo> {
 
     const settings = this.settings()
     const agent = agentById(req.agentId, settings.customAgents)
@@ -168,6 +191,7 @@ export class PtyManager {
     const s: Session = {
       id: req.id,
       agentId: req.agentId,
+      cwd: req.cwd,
       proc,
       buffer: '',
       screen: new TermScreen(Math.max(20, req.cols | 0), Math.max(5, req.rows | 0)),
@@ -213,10 +237,14 @@ export class PtyManager {
       this.emit('pty:data', req.id, data)
     })
     proc.onExit(({ exitCode }) => {
-      // a respawn under the same id may already have replaced this session
-      if (this.sessions.get(req.id) === s) this.sessions.delete(req.id)
       this.record.remove(req.id, proc.pid)
       s.screen.dispose()
+      // A respawn under the same id may already have replaced this session: then this exit is the old
+      // process's, and the console on the board is the new one, still running. Saying it exited would
+      // mark a live console dead.
+      const current = this.sessions.get(req.id)
+      if (current && current !== s) return
+      this.sessions.delete(req.id)
       this.emit('pty:exit', req.id, exitCode)
       this.emit('pty:status', req.id, 'exited')
       for (const l of this.exitListeners) {
@@ -494,6 +522,11 @@ export class PtyManager {
 
   list(): PtyInfo[] {
     return [...this.sessions.values()].map((s) => this.info(s))
+  }
+
+  /** The folder a live console was started in, or null. */
+  cwdOf(id: string): string | null {
+    return this.sessions.get(id)?.cwd ?? null
   }
 
   infoOf(id: string): PtyInfo | null {
