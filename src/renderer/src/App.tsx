@@ -35,17 +35,19 @@ export function App() {
   // from the real elements where they already are, so what scrambles is the shape of the content it
   // is about to become — no hand-written skeleton to keep in step with the layout.
   const launch = useAsciiReveal({ preset: 'terminal', revealOnMount: false })
-  const launched = useRef(false)
+  const waved = useRef<string | undefined>(undefined)
 
   useThemeSync()
   useInboxWatcher()
 
   useEffect(() => {
-    if (!project || launched.current) return
-    launched.current = true
+    const ws = project?.activeWorkspaceId
+    if (!ws || waved.current === ws) return
+    waved.current = ws
     // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
-    // mark it done either way: a wave that failed must not stop later consoles animating
-    void launch.reveal({ duration: 'cinematic' }).then(markBoardRevealed, markBoardRevealed)
+    const done = () => markBoardRevealed(ws)
+    // marked either way: a wave that could not run must not leave later tiles un-animated
+    void launch.reveal({ duration: 'cinematic' }).then(done, done)
   }, [project, launch])
 
   useEffect(() => {

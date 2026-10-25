@@ -137,12 +137,11 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
   const ref = useRef<HTMLDivElement>(null)
   const viewport = useApp((s) => s.viewport)
 
-  // A console that arrives after the launch wave decodes itself in: frame, header and status. Its
-  // terminal body carries data-ascii="skip", so live output is never redrawn through the glyph grid.
+  // A tile that arrives after its board's wave decodes itself in. A console's terminal body carries
+  // data-ascii="skip", so live output is never redrawn through the glyph grid.
   // Attached imperatively because the root's ref is already taken.
-  // ponytail: consoles only. Drop the type check and every new tile does it.
   useEffect(() => {
-    if (node.type !== 'console' || !boardIsRevealed() || !ref.current) return
+    if (!boardIsRevealed(activeWs()?.id) || !ref.current) return
     let live = true
     const r = createAsciiReveal(ref.current, { preset: 'terminal' })
     void r.reveal().finally(() => {
@@ -152,7 +151,7 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       live = false
       r.destroy()
     }
-  }, [node.type])
+  }, [])
   const tool = useApp((s) => s.tool)
   // A type this build does not know — a board written by a newer Fleetboard, or edited by hand. It
   // used to render nothing at all: the tile was invisible, unselectable and undeletable, while still
