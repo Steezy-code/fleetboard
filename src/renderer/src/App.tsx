@@ -36,6 +36,9 @@ export function App() {
   // is about to become — no hand-written skeleton to keep in step with the layout.
   const launch = useAsciiReveal({ preset: 'terminal', revealOnMount: false })
   const waved = useRef<string | undefined>(undefined)
+  // Home paints placeholders ("Looking…", the empty-board line) until agent detection answers. init()
+  // sets the board list first and asks for agents after, so agents arriving means both have.
+  const homeReady = useApp((s) => s.agents.length > 0)
 
   useThemeSync()
   useInboxWatcher()
@@ -43,12 +46,21 @@ export function App() {
   useEffect(() => {
     const ws = waveKey(project?.activeWorkspaceId)
     if (waved.current === ws) return
-    waved.current = ws
-    // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
-    const done = () => markBoardRevealed(ws)
-    // marked either way: a wave that could not run must not leave later tiles un-animated
-    void launch.reveal({ duration: 'cinematic' }).then(done, done)
-  }, [project, launch])
+    const run = () => {
+      if (waved.current === ws) return
+      waved.current = ws
+      // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
+      const done = () => markBoardRevealed(ws)
+      // marked either way: a wave that could not run must not leave later tiles un-animated
+      void launch.reveal({ duration: 'cinematic' }).then(done, done)
+    }
+    // The wave measures the page when it starts, so a page that is still filling in leaves it drawing
+    // the old layout over the new one. A board has its content already; Home waits for its data,
+    // but not for long: a detection that is slow or has failed must not mean no wave at all.
+    if (project || homeReady) return run()
+    const t = setTimeout(run, 2500)
+    return () => clearTimeout(t)
+  }, [project, homeReady, launch])
 
   useEffect(() => {
     useApp.getState().init()
