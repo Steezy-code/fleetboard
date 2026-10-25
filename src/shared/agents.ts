@@ -23,7 +23,8 @@ export const promptArg = (p: string) => (p.startsWith('-') ? ' ' + p : p)
  * judges and brainstorms feed a run console output, PR comments and model replies, any of which can
  * carry instructions; another CLI's headless mode may edit files or run commands on them.
  */
-const READS_ONLY = new Set(['claude', 'codex', 'gemini'])
+export const TEAM_AGENTS = ['claude', 'codex', 'gemini', 'antigravity', 'freebuff']
+const READS_ONLY = new Set(['claude', 'codex', 'gemini', 'antigravity'])
 export const readsOnly = (agentId: string | undefined) => !!agentId && READS_ONLY.has(agentId)
 /** `agentId` when its headless run reads only, else Claude Code: a planner chosen before this was enforced. */
 export const readOnlyAgent = (agentId: string | undefined) => (readsOnly(agentId) ? agentId! : 'claude')
@@ -48,7 +49,7 @@ export const AGENTS: AgentDef[] = [
     session: { start: (id) => ['--session-id', id], resume: (id) => ['--resume', id] },
     homepage: 'https://github.com/google-gemini/gemini-cli', install: 'npm i -g @google/gemini-cli'
   },
-  { id: 'antigravity', name: 'Antigravity CLI', vendor: 'Google', bin: 'agy', color: '#4285f4', homepage: 'https://antigravity.google/docs/getting-started', install: 'irm https://antigravity.google/cli/install.ps1 | iex' },
+  { id: 'antigravity', name: 'Antigravity CLI', vendor: 'Google', bin: 'agy', color: '#4285f4', editsArgs: ['--mode', 'accept-edits'], headless: (p) => ['--mode', 'plan', '--disable-slash-commands', '--output-format', 'stream-json', '--print-timeout', '10m', '-p', promptArg(p)], homepage: 'https://antigravity.google/docs/getting-started', install: 'irm https://antigravity.google/cli/install.ps1 | iex' },
   { id: 'grok', name: 'Grok', vendor: 'xAI', bin: 'grok', color: '#e5e5e5', headless: (p) => ['-p', promptArg(p)], homepage: 'https://x.ai/' },
   {
     id: 'opencode', name: 'OpenCode', vendor: 'sst', bin: 'opencode', color: '#f5b740', resumeArgs: ['--continue'],

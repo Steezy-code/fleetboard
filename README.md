@@ -181,3 +181,13 @@ Prefer trackpad-style (scroll pans, drag pans)? Switch it in **Settings → Navi
 | Double-click a node header | Focus / back to board |
 
 Middle-click paste is disabled on the board (middle button pans); paste into a console with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>.
+
+## Freebuff and Antigravity
+
+Install each official CLI, run it once to sign in, then restart Fleetboard so it picks up the updated PATH. In Settings → Planning and teams, choose a **Team lead agent**. New teams and playbooks use that agent; workers and reviewers inherit it unless the lead explicitly selects another supported CLI. Both Freebuff and Antigravity reach Fleetboard's role-scoped MCP tools through per-console profiles, including when a reviewer shares the lead's worktree. Normal CLI trust and permission prompts remain interactive.
+
+Antigravity can also be selected as the **Planner agent**, covering Oracle, voice plans, studios, handoffs, loop judges and brainstorms. Its background runs use the official stream-json protocol and a temporary profile that denies file writes, commands, browser actions and MCP calls. The selected provider's normal sign-in and quota still apply.
+
+Freebuff's current official CLI has no headless/print mode. It can plan as a team lead and run as a worker or reviewer, but cannot serve the separate background planner. Fleetboard does not reuse its OAuth token as a paid SDK key; Freebuff is not offered in the background-planner selector.
+
+Team restarts for these two CLIs start fresh and resend the role, goal/task and current team state. Exact conversation recovery, provider-specific prompt detection and usage accounting are not yet validated. Their per-console homes isolate MCP identities; unrelated shell credentials and home configuration are not copied into them. Tests cover the adapters with scripted CLIs, not authenticated live model responses.

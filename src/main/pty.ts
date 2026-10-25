@@ -135,7 +135,9 @@ export class PtyManager {
         if (req.resume && known && state !== 'resumable') notice = `\x1b[2mNo saved conversation to pick up: starting a new one.\x1b[0m\r\n`
         if (req.resume && known && state === 'lost') lost = true
         // else a new conversation whose id the CLI picks: found after its first turn
-      } else if (req.resume && agent.resumeArgs) args.push(...agent.resumeArgs)
+      } else if (req.resume && agent.resumeArgs && !isTeamConsole(req.id)) args.push(...agent.resumeArgs)
+      // A team without a tracked conversation id is re-briefed, never attached to a sibling's latest chat.
+      if (isTeamConsole(req.id) && !agent.session) req = { ...req, resume: false }
       const yolo = (req.autoApprove ?? settings.autoApprove) && agent.yoloArgs
       autoApproves = !!yolo
       if (yolo) args.push(...agent.yoloArgs!)

@@ -235,6 +235,8 @@ export interface PtyInfo {
 export interface Settings {
   autoApprove: boolean
   plannerAgent: string
+  /** CLI used by new team leads; workers inherit it unless explicitly chosen. */
+  teamAgent: string
   speakReplies: boolean
   voiceName: string
   sttModel: string
@@ -258,6 +260,7 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   autoApprove: false,
   plannerAgent: 'claude',
+  teamAgent: 'claude',
   speakReplies: true,
   voiceName: 'af_heart',
   sttModel: 'onnx-community/whisper-base.en',

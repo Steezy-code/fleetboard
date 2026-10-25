@@ -66,7 +66,7 @@ export const PERSONAS: Record<PersonaId, { name: string; brief: string }> = {
 
 const ORDER: PersonaId[] = ['pragmatist', 'wildcard', 'critic']
 /** Different CLIs make for a more varied panel. Only those whose headless run reads only: a panelist reads the board. */
-const PREFERRED = ['claude', 'codex', 'gemini']
+const PREFERRED = ['claude', 'codex', 'gemini', 'antigravity']
 
 const clip = (s: unknown, n: number) => {
   const t = String(s ?? '').replace(/\s+/g, ' ').trim()

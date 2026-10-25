@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Bot, Palette, Database, FolderOpen, Keyboard, Mic, Move, Minus, Plus, RefreshCw, Route, Settings as SettingsIcon, Smartphone, Tag, TerminalSquare, Trash2 } from 'lucide-react'
 import type { AgentDef } from '@shared/types'
 import type { UpdateCheck } from '../../../main/update'
-import { AGENTS, readsOnly } from '@shared/agents'
+import { AGENTS, readsOnly, TEAM_AGENTS } from '@shared/agents'
 import { invoke, on } from '../lib/api'
 import { useApp } from '../state/store'
 import { Modal, Seg, Switch } from '../ui/Modal'
@@ -235,8 +235,19 @@ export default function SettingsPanel({ section }: { section?: string }) {
 
           {/* ---------- Planner ---------- */}
           <section data-section="planner">
-            <h3 className="settings-h">Planner</h3>
+            <h3 className="settings-h">Planning and teams</h3>
             <div className="settings-rows">
+              <div className="settings-row">
+                <div className="grow">
+                  <div>Team lead agent</div>
+                  <div className="muted small">New teams and playbooks use this CLI. Workers and reviewers inherit it unless the lead chooses another agent.</div>
+                </div>
+                <select className="select" style={{ width: 200 }} value={settings.teamAgent ?? 'claude'} onChange={(e) => set({ teamAgent: e.target.value })}>
+                  {AGENTS.filter((a) => TEAM_AGENTS.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.name}{installed.has(a.id) ? '' : ' (not installed)'}</option>)}
+                </select>
+              </div>
+              <div className="small muted">Freebuff can lead and join teams through its terminal and MCP tools. Its current CLI has no headless mode, so choose another agent for background planning.</div>
+
               <div className="settings-row">
                 <div className="grow">
                   <div>Planner agent</div>
