@@ -23,10 +23,10 @@ jobs:
   windows:
     # a manual run uses master's copy of this file, never a branch's
     if: github.event_name == 'push' || github.ref == 'refs/heads/master'
-    # our own machine, as the Windows checks in ci.yml are: a hosted Windows runner bills at twice the
-    # rate, and a release is the one job that cannot be skipped to save minutes. It waits for that
-    # machine to be on; `windows-latest` here instead puts it back on a hosted runner.
-    runs-on: [self-hosted, windows, x64]
+    # hosted, as ci.yml's jobs are: free on a public repository, and a release no longer waits for our
+    # own machine to be awake. A self-hosted runner must not serve a public repository — ci.yml's
+    # windows job says why.
+    runs-on: windows-latest
     timeout-minutes: 40
     permissions:
       contents: write # only the last step uses it (gh release create)
