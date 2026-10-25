@@ -464,3 +464,83 @@ H-2 and H-3 together: the team-rule allowlist plus hash binding. Then H-1, the s
 - **renderer/:** a specialist review of all 165 files; the voice confirm path was verified directly.
 - **CI/release/dependabot, the build config, the launch scripts, and docs (README, ARCHITECTURE, HARDENING).**
 - **Not examined in depth:** `remote-page.ts` (the generated phone JS), the diagram studio internals, themes, the QR encoder (covered by a reference-fixture test), and the CSS.
+
+---
+
+## 14. Remediation status (branch `fix/audit-findings`)
+
+The sections above are the audit as it stood at `83d247d`; they are left as written. This section records what was done about each finding afterwards, and what was **not** done or only partly done. Each fix has a regression test unless noted, and the High fixes were checked to fail without the change where that was practical (double spawn, voice targets, relative paths, mismatched-project Inbox).
+
+**Verification of the fixed tree** (commands run in this environment after `npm ci --ignore-scripts` and a local `node-gyp` build of `node-pty`):
+
+| Check | Result |
+|---|---|
+| `tsc --noEmit -p tsconfig.json` | clean |
+| `tsc --noEmit -p tsconfig.strict.json` | clean |
+| `oxlint` | 0 errors, 44 warnings (unchanged from the baseline before the changes) |
+| `npm test` | 873 tests: 839 pass, 0 fail, 34 skip (the skips are CLIs not installed here, and platform conditions). Baseline before the changes: 830 / 796 / 0 / 34 |
+| `npx electron-vite build` | succeeds |
+| `npm run test:e2e` (headless, 3 files at a time) | 135 tests: 118 pass, 0 fail, 17 skip (the real-CLI suites and the opt-in benchmark). A first run found 3 failures caused by these changes (a stale-board project root that blocked starting a team in a just-opened folder, and a test reading a token the config no longer holds); both were fixed and the whole suite re-run |
+| `npm audit` | 0 vulnerabilities (run during the audit; dependencies unchanged since, only `engines` added) |
+
+**Not verified:** anything Windows-specific (M-12, M-13, L-10, the installer, Electron fuses in a packaged build: `electron-builder` was not run), the real-CLI suites, and a live Claude Code run against the team flow (only the scripted fake). The one real-CLI check made was that Claude Code 2.1.310 expands `${VAR}` in an MCP config's headers, which M-6 relies on.
+
+### Fixed
+
+| Finding | What changed | Tests |
+|---|---|---|
+| H-1 | Merged work no longer runs the done-when check by itself; the plan shows "new work not checked" and a button runs it (`fleet:runCheck`). The baseline still runs on its own | `live-work` (unit and e2e) |
+| H-2 | A team rule is bound to a fingerprint of the files that define commands, taken where the user said yes; main compares it in the asking console's folder on every answer | `team-rule-binding`, `console-status` (e2e) |
+| H-3 | `teamRuleAllowed` is an allowlist of single plain commands (tests, checks, builds, reads); main enforces it too; `commandNote` names `rm -f -r`, `rm --recursive`, `git -C . push`, `find -delete`, `npm ci` | `team-rules` |
+| H-4 | `pty.spawn` shares a start in flight; `loginEnv` shares its read; an old process's exit no longer marks its replacement exited | `pty-dispose` (fails without the fix: two pids) |
+| H-5 | Each startup step is guarded, the window always opens and names what failed; malformed team state files are set aside | `fleet-state-load` |
+| H-6 | A parked voice plan is pinned to the consoles it named and dropped if the workspace changed; "delete the group" confirms for any tile and goes through the board's Delete with Undo | `planner` |
+| M-1 | `allowedPath()` returns the path as checked and every handler uses it; the private parts of `~/.fleetboard` are out of reach of the fs handlers | `fsops-confine` (fails without the fix), `roots*` |
+| M-2 | `git:diff` refuses a path outside the repository; `git:show` checks its folder | `git-ops` |
+| M-3 | Team handlers accept only an allowed absolute folder; a team with live members keeps its folder. The e2e run showed this needed a companion fix: a newly opened folder is now the project root at once, and a background save of the board being left no longer takes that over | `fleet-state-load`, `roots`, `team-folder` (e2e) |
+| M-4 | Done recounts the Lead's commits when pressed | `fleet-worktrees` (real repository) |
+| M-5 | A spoken answer only acts on the Inbox card that was in front when push-to-talk began | `planner` |
+| M-7 | The fleet mirror ignores a stale project's state; the Inbox never builds from another project's team | `inbox-charter` (fails without the fix) |
+| M-8 | Handoff re-reads the store after writing the brief and stops if the project or the sources changed | `handoff-await` |
+| M-9 | A dead or silent page no longer makes the window unclosable: the main process asks natively | none (needs a crashed page; checked by reading only) |
+| M-12 | Windows pause and resume calls for a console run in order | none (Windows) |
+| M-13 | The Windows tree walk skips a "child" older than its parent | `suspend` (the TS side; the PowerShell mirror is untested) |
+| Helm | The confirm lists every console with its exact text; multi-step routes are gated like planner output | `helm-*` still pass |
+| L-1, L-5 | README corrected; actions pinned to SHAs | none |
+| L-2 | `pdf:fromHtml` always destroys its window, prints from a temp file, and its session may load no other local file | `pdf` (e2e) |
+| L-3 | Electron fuses configured in `electron-builder.yml` | none (not packaged here) |
+| L-4 | Releases carry `SHA256SUMS.txt` | none |
+| L-6 | A Wi-Fi phone link lasts a day | `remote` |
+| L-7 | MCP server: header timeout, bytes decoded once, non-object bodies answered 400 | none |
+| L-8 | A member whose CLI will not start releases its slot and worktree and says why | none |
+| L-9 | Goal checks settle when spawn throws; headless runs stop after 20 minutes; `fleet_merge` aborts only a merge it left half done | `goal-check`, `cli-run` still pass |
+| L-10 | An argument cmd.exe would expand (`%NAME%`) is refused | `platform` (the pattern only) |
+| L-11 | Git hardening reaches git started by `gh` and submodules through `GIT_CONFIG_*` | `git-safety` |
+| L-12 | A cached "can write" lasts 10 minutes | none |
+| L-13 | Daily snapshot tier; Forget removes snapshots; old `.tmp` / `.corrupt` files cleared; locked `app.json` retried and reported as unreadable, not damaged; journal keeps every rotated part | `store-housekeeping`, `journal` |
+| L-14 | Repeated renderer errors are logged a few times a minute, then counted | `error-repeats` |
+| L-15 | Console buffer trims once a quarter over, at a line start | `pty-buffer` |
+| L-16 | A web tile in any session but its own is not attached | none |
+| L-17 | CSP gains `object-src`, `base-uri`, `form-action` `'none'`; markdown keeps only the renderer's own classes and prefixes ids | `sanitize` (e2e) |
+| L-18 | STT model switch answers pending work; terminal re-attach holds live output until the replay is in; `extractJson` is linear and finds JSON after a bracket in prose | `extract-json` |
+| L-19 | `engines.node` and `.nvmrc` | none |
+| L-20 | One name comparison (`nameKey`) and one typing-target check | existing resolver tests |
+
+### Partly done
+
+| Finding | Done | Left |
+|---|---|---|
+| M-6 | Claude members' MCP token moved out of the config file into the console's environment | Gemini members still get theirs in a settings file under `gemini-homes/` (Gemini reads MCP servers only from settings), and a same-user process can read another's environment through `/proc`. Role checks remain defence in depth, not isolation |
+| M-10 | The schema re-read is cached; `app.json` is rewritten only when its entry changed | Each save still pretty-prints, writes and fsyncs the board on the main thread |
+| M-11 | `App`, `TopBar` and `Wires` no longer re-render on every camera frame | The camera is still part of the persisted project (each pan still schedules a save), and `Board` and the other chrome still select the whole project |
+| M-14 | The sorted event list is memoised per cache change; the cache is written at most every five minutes | The cache still holds every event for all time (no rolling index) |
+| M-15 | 35 of 116 invoke channels are typed, a test stops the untyped list growing, and typed channels must be called through `request()` | 81 legacy channels remain untyped |
+| L-17 | New directives and the markdown class and id rules | `connect-src https:` and `img-src https:` stay wide: model downloads and remote images in READMEs need them |
+| L-18 | See above | Background engines still have no teardown, so a Vite hot reload in dev duplicates their timers |
+| L-4 | Checksums | The installer is still unsigned and has no build provenance attestation |
+
+### Not done (by design, or out of scope for a fix)
+
+- **Code signing** needs a certificate the project does not have.
+- **The policy layer, the `fleet.ts` split, renderer state slices, a main-process I/O worker and sandboxed checks** (§10, §12 medium and long term) are architectural programmes, not fixes to findings. H-1 to H-3 close the gaps they were meant to prevent; the structure is unchanged.
+- Items listed as unverified in §13 question 8 are still unverified, apart from the one Claude Code behaviour noted above.
