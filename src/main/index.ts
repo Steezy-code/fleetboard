@@ -95,6 +95,14 @@ function createWindow() {
     frame: false,
     // Windows: the system's own minimize / maximize / close (with Snap Layouts), in the theme's colors
     ...(process.platform === 'win32' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: overlayFor(themeById(store.getSettings().theme)) } : {}),
+    // FB_E2E_HEADLESS on Windows: --ozone-platform=headless is Chromium's Linux switch and does
+    // nothing here, so the window goes off the screen instead of onto it. The self-hosted runner
+    // shares a logon session with whoever is using the machine, and a suite that flashes windows over
+    // their work is a suite they turn off.
+    //
+    // ponytail: far-offscreen coordinates rather than `show: false`, which stops the compositor and
+    // with it the screenshots a failing test is meant to leave behind.
+    ...(process.platform === 'win32' && process.env.FB_E2E_HEADLESS ? { x: -32000, y: -32000, skipTaskbar: true } : {}),
     title: 'Fleetboard',
     icon: path.join(__dirname, '../../resources/icon.png'),
     webPreferences: {
@@ -267,6 +275,7 @@ function registerCore() {
 if (app.isPackaged) {
   delete process.env.ELECTRON_RENDERER_URL
   delete process.env.FLEETBOARD_DEVTOOLS
+  delete process.env.FB_E2E_HEADLESS
 }
 
 // A separate state folder (FLEETBOARD_HOME) is a separate Fleetboard: give it its own Electron profile
