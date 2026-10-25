@@ -319,6 +319,11 @@ export interface Recovery {
    * was moved and nothing was damaged.
    */
   tooNew?: number
+  /**
+   * The file is there but could not be read (locked, no permission): it was neither set aside nor
+   * written over, and changes this session are not saved to it. Nothing about it is known damaged.
+   */
+  unreadable?: boolean
 }
 
 /** fs:write with a base: refused when the file no longer holds it (current: what it holds now, null if gone) */

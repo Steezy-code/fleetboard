@@ -62,6 +62,8 @@ export function App() {
       invoke('app:quit')
     }
     const offConfirm = on('app:confirmQuit', async (n: number) => {
+      // heard: main waits for the answer instead of asking natively (index.ts)
+      fb.send('app:quitAck')
       if (!(await mayDropUnsaved('Quit'))) return
       const ok = await useApp.getState().confirm({
         title: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
@@ -97,6 +99,10 @@ export function App() {
             `This board was saved by a newer version of Fleetboard (board format ${r.tooNew}; this one reads ${SCHEMA_VERSION}). It was left untouched and not opened. Update Fleetboard to open it.`,
             'warn'
           )
+        return
+      }
+      if (r.unreadable) {
+        useApp.getState().toast('The settings file could not be read (it may be locked by another program), so Fleetboard started with default settings and will not save over it. Restart Fleetboard to try again.', 'warn')
         return
       }
       const when = r.snapshot ? new Date(Number(/-(\d+)\.json$/.exec(r.snapshot)?.[1])).toLocaleString() : ''

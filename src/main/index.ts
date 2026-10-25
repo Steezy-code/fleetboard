@@ -60,6 +60,38 @@ let quitWatchdog: ReturnType<typeof setTimeout> | undefined
 const QUIT_ACK_MS = 2000
 /** the window was reloaded after its page crashed; the new page says so once */
 let crashRecovered = false
+/** the page crashed too often to be reloaded: nothing in the window can answer any more */
+let pageDead = false
+let askingNatively = false
+
+/**
+ * Quit with consoles running, asked by the main process itself: for when the page cannot ask. The
+ * board was last saved by the page while it lived; what it had not saved yet cannot be reached now.
+ */
+async function askToQuitNatively() {
+  if (askingNatively || !win || win.isDestroyed()) return
+  askingNatively = true
+  try {
+    const n = ptys.size
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Quit', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Quit Fleetboard?',
+      message: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
+      detail: 'Their processes stop. The window is not responding, so changes it had not saved yet may be lost.'
+    })
+    if (response !== 0) return
+    quitConfirmed = true
+    await shutdown()
+    win?.destroy()
+    win = null
+    setTimeout(() => app.exit(0), 300)
+  } finally {
+    askingNatively = false
+  }
+}
 
 // On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
 // with these flags (Vulkan backend). Without an adapter the models fall back to slower CPU wasm.
@@ -140,6 +172,7 @@ function createWindow() {
     while ((crashes[0] ?? Infinity) < now - 60_000) crashes.shift()
     console.error(`window crashed (${details.reason}, exit ${details.exitCode})`)
     if (crashes.length > 3) {
+      pageDead = true
       // not showErrorBox: it would hold up this process, and with it every console's output
       void dialog.showMessageBox({
         type: 'error',
@@ -150,6 +183,7 @@ function createWindow() {
       return
     }
     crashRecovered = true
+    pageDead = false
     win.webContents.reload()
   })
   win.on('closed', () => {
@@ -158,7 +192,16 @@ function createWindow() {
   win.on('close', (e) => {
     if (quitConfirmed) return
     e.preventDefault()
-    if (ptys.size) return ctx.emit('app:confirmQuit', ptys.size)
+    if (ptys.size) {
+      // The page asks the user (it knows about unsaved editors too). A page that is gone — crashed
+      // past the retries, or hung — cannot, and the window used to be unclosable then: the "keeps
+      // crashing" dialog said to restart, and nothing could. So it is asked here instead.
+      if (pageDead || win?.webContents.isCrashed()) return void askToQuitNatively()
+      ctx.emit('app:confirmQuit', ptys.size)
+      clearTimeout(quitWatchdog)
+      quitWatchdog = setTimeout(() => void askToQuitNatively(), QUIT_ACK_MS)
+      return
+    }
     // No console to stop, so nothing to confirm — but the board's save is debounced (350 ms, pushed
     // back by every keystroke), and this was the only path that did not flush it: closing the window
     // after typing into a note threw away everything since the last pause, and note, text, checklist
