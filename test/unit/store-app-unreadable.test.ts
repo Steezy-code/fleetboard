@@ -18,7 +18,7 @@ test('an unreadable app.json: defaults for this session, the file left exactly a
   const store = await import('../../src/main/store')
   store.register({ ipc: ipcMain as any, win: () => null, ptys: null as any, settings: store.getSettings, emit: () => {} } as any)
   try {
-    assert.deepEqual(await ipcMain.invoke('store:recoveries'), [{ what: 'app', corruptCopy: appFile }], 'the user is told')
+    assert.deepEqual(await ipcMain.invoke('store:recoveries'), [{ what: 'app', corruptCopy: '', unreadable: true }], 'the user is told: unreadable, not damaged, and nothing was moved')
     // every path that writes app.json
     await ipcMain.invoke('store:setSettings', { autoApprove: true })
     await ipcMain.invoke('store:setGlobal', 'k', 1)

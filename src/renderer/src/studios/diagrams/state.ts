@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { errorText, extractJson, invoke, runCli } from '../../lib/api'
+import { errorText, extractJson, invoke, runCli, request } from '../../lib/api'
 import { activeWs, useApp } from '../../state/store'
 import { buildDiagramPrompt } from './presets'
 import { layoutDiagram } from './layout'
@@ -121,7 +121,7 @@ export async function exportPng(figureId: string) {
   const path = await invoke<string | null>('dialog:saveFile', `${name}.png`, [{ name: 'PNG image', extensions: ['png'] }])
   if (!path) return
   try {
-    await invoke('fs:writeBase64', path, await figureToPngBase64(items, 2))
+    await request('fs:writeBase64', path, await figureToPngBase64(items, 2))
     useApp.getState().toast('PNG exported', 'ok')
   } catch (e: any) {
     useApp.getState().toast(`PNG export failed: ${errorText(e)}`, 'error')
@@ -136,6 +136,6 @@ export async function exportExcalidraw(figureId: string) {
   const name = slugify(figureTitle(items))
   const path = await invoke<string | null>('dialog:saveFile', `${name}.excalidraw`, [{ name: 'Excalidraw', extensions: ['excalidraw'] }])
   if (!path) return
-  await invoke('fs:write', path, JSON.stringify(figureToExcalidraw(items), null, 2))
+  await request('fs:write', path, JSON.stringify(figureToExcalidraw(items), null, 2))
   useApp.getState().toast('Saved .excalidraw — open it at excalidraw.com or in any Excalidraw app', 'ok')
 }

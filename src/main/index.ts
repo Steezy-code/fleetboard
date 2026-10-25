@@ -3,6 +3,7 @@ import { guardedIpc } from './ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell, webContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
 import type { MainContext } from './context'
 import { PtyManager } from './pty'
 import { describeAnswer } from '@shared/prompt'
@@ -27,24 +28,32 @@ import * as remote from './remote'
 import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
-import { catchStrayErrors, logError } from './errors'
+import { catchStrayErrors, logError, logRepeated } from './errors'
 import { appPermission, mediaTypesOf, webPermission } from './permissions'
 import * as journal from './journal'
-import { allowed, outsideMessage } from './roots'
+import { allowed, allowedPath, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
+import { definitionFingerprint } from './teamrules'
+import { teamRuleAllowed } from '@shared/approvals'
 
 let win: BrowserWindow | null = null
 
 /** The session web tiles browse in (WebNode's <webview partition>). */
 const WEB_PARTITION = 'persist:fleetboard-web'
-// Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
+// Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process —
+// and it browses in the web tiles' own session. In any other (the app's default one, which may use the
+// microphone and read the clipboard) a page would be granted what appPermission allows the app itself.
 app.on('web-contents-created', (_e, contents) => {
-  contents.on('will-attach-webview', (_ev, prefs) => {
+  contents.on('will-attach-webview', (ev, prefs, params) => {
     delete prefs.preload
     prefs.nodeIntegration = false
     prefs.nodeIntegrationInSubFrames = false
     prefs.contextIsolation = true
     prefs.sandbox = true
+    if (params.partition !== WEB_PARTITION) {
+      ev.preventDefault()
+      logError('webview', `a web tile asked for session "${params.partition}" and was not attached`)
+    }
   })
 })
 let quitConfirmed = false
@@ -57,6 +66,38 @@ let quitWatchdog: ReturnType<typeof setTimeout> | undefined
 const QUIT_ACK_MS = 2000
 /** the window was reloaded after its page crashed; the new page says so once */
 let crashRecovered = false
+/** the page crashed too often to be reloaded: nothing in the window can answer any more */
+let pageDead = false
+let askingNatively = false
+
+/**
+ * Quit with consoles running, asked by the main process itself: for when the page cannot ask. The
+ * board was last saved by the page while it lived; what it had not saved yet cannot be reached now.
+ */
+async function askToQuitNatively() {
+  if (askingNatively || !win || win.isDestroyed()) return
+  askingNatively = true
+  try {
+    const n = ptys.size
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['Quit', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Quit Fleetboard?',
+      message: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
+      detail: 'Their processes stop. The window is not responding, so changes it had not saved yet may be lost.'
+    })
+    if (response !== 0) return
+    quitConfirmed = true
+    await shutdown()
+    win?.destroy()
+    win = null
+    setTimeout(() => app.exit(0), 300)
+  } finally {
+    askingNatively = false
+  }
+}
 
 // On-device voice (Whisper, Kokoro) runs on the GPU through WebGPU; on Linux Chromium only exposes it
 // with these flags (Vulkan backend). Without an adapter the models fall back to slower CPU wasm.
@@ -137,6 +178,7 @@ function createWindow() {
     while ((crashes[0] ?? Infinity) < now - 60_000) crashes.shift()
     console.error(`window crashed (${details.reason}, exit ${details.exitCode})`)
     if (crashes.length > 3) {
+      pageDead = true
       // not showErrorBox: it would hold up this process, and with it every console's output
       void dialog.showMessageBox({
         type: 'error',
@@ -147,6 +189,7 @@ function createWindow() {
       return
     }
     crashRecovered = true
+    pageDead = false
     win.webContents.reload()
   })
   win.on('closed', () => {
@@ -155,7 +198,16 @@ function createWindow() {
   win.on('close', (e) => {
     if (quitConfirmed) return
     e.preventDefault()
-    if (ptys.size) return ctx.emit('app:confirmQuit', ptys.size)
+    if (ptys.size) {
+      // The page asks the user (it knows about unsaved editors too). A page that is gone — crashed
+      // past the retries, or hung — cannot, and the window used to be unclosable then: the "keeps
+      // crashing" dialog said to restart, and nothing could. So it is asked here instead.
+      if (pageDead || win?.webContents.isCrashed()) return void askToQuitNatively()
+      ctx.emit('app:confirmQuit', ptys.size)
+      clearTimeout(quitWatchdog)
+      quitWatchdog = setTimeout(() => void askToQuitNatively(), QUIT_ACK_MS)
+      return
+    }
     // No console to stop, so nothing to confirm — but the board's save is debounced (350 ms, pushed
     // back by every keystroke), and this was the only path that did not flush it: closing the window
     // after typing into a note threw away everything since the last pause, and note, text, checklist
@@ -187,6 +239,27 @@ const shutdown = () =>
     await ptys.dispose()
   })())
 
+/** The session PDFs are printed in. */
+const PRINT_PARTITION = 'pdf-print'
+/** pages being printed right now: the only file: URLs that session may load */
+const printing = new Set<string>()
+let printGuarded = false
+/**
+ * A page printed from a file may load the file itself and what a data: page could (images over the
+ * network, inline data) — never another local file, which an <iframe src="file:///…"> would otherwise
+ * print into the PDF.
+ */
+function printOnly(page: string) {
+  printing.add(page)
+  setTimeout(() => printing.delete(page), 120_000).unref?.()
+  if (printGuarded) return
+  printGuarded = true
+  session.fromPartition(PRINT_PARTITION).webRequest.onBeforeRequest((details, cb) => {
+    const url = details.url
+    cb({ cancel: !(printing.has(url) || /^(data|https?):/i.test(url)) })
+  })
+}
+
 function registerCore() {
   ctx.ipc.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ctx.ipc.on('app:background', (_e, color: string) => {
@@ -211,9 +284,21 @@ function registerCore() {
     if (r.ok) journal.answered('you, on the board', id, describeAnswer(answer))
     return r
   })
-  // a team rule answering for you (teamRules.ts): only while the prompt asks for that very command
-  ctx.ipc.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string) => {
+  // A team rule answering for you (renderer fleet/teamRules.ts), decided here rather than trusted from
+  // the renderer: only a command of a kind a rule may cover (teamRuleAllowed), only while the files
+  // that define it are as they were when the user said yes (teamrules.ts), and only while the prompt
+  // still asks for that very command (ptys.answer).
+  ctx.ipc.handle('pty:ruleFingerprint', (_e, id: string) => {
+    const cwd = ptys.cwdOf(String(id))
+    return cwd ? definitionFingerprint(cwd) : null
+  })
+  ctx.ipc.handle('pty:answerByRule', async (_e, id: string, answer, command: string, who: string, fingerprint: string) => {
     if (typeof command !== 'string' || !command) return { ok: false, reason: 'changed' }
+    if (!teamRuleAllowed(command)) return { ok: false, reason: 'changed' }
+    const cwd = ptys.cwdOf(id)
+    if (!cwd) return { ok: false, reason: 'not-live' }
+    const now = definitionFingerprint(cwd)
+    if (!now || now !== fingerprint) return { ok: false, reason: 'redefined' }
     const r = await ptys.answer(id, answer, command)
     if (r.ok) journal.append({ kind: 'prompt.answer', text: `Fleetboard allowed \`${command.split('\n')[0]}\` for ${String(who)}, by your rule for its team`, detail: { consoleId: id, by: 'rule', command } })
     return r
@@ -234,7 +319,7 @@ function registerCore() {
   // closing the window while the save, or the dialog a failed save opens, is still going.
   ctx.ipc.on('app:quitAck', () => clearTimeout(quitWatchdog))
   // the renderer's own stray errors, into the same log as the main process's
-  ctx.ipc.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
+  ctx.ipc.on('app:logError', (_e, message: string) => void logRepeated('renderer', String(message).slice(0, 4000)))
 
   // asked once by a page as it starts: was it reloaded after the window crashed?
   ctx.ipc.handle('app:crashRecovered', () => {
@@ -255,18 +340,30 @@ function registerCore() {
 
   // Render HTML to a real paginated PDF (document studio, markdown export).
   ctx.ipc.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
-    if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
+    const target = allowedPath(outPath, 'pdf:fromHtml')
+    if (!target) throw new Error(outsideMessage(outPath))
     // The HTML is the renderer's, rendered markdown today: printed as a page, never run as one. No
     // scripts, a session of its own that keeps nothing, and nowhere to navigate or open a window to.
-    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, partition: 'pdf-print' } })
-    w.webContents.on('will-navigate', (e) => e.preventDefault())
-    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
-    const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
-    w.destroy()
-    const fs = await import('node:fs')
-    fs.writeFileSync(outPath, pdf)
-    return outPath
+    //
+    // Loaded from a file rather than a data: URL. Chromium refuses a URL past 2 MiB, and percent-
+    // encoding triples anything that is not ASCII, so a long document failed to export — and the
+    // hidden window, never destroyed on that path, stayed behind for the rest of the session.
+    const page = path.join(dirs.exports, `print-${process.pid}-${Date.now()}.html`)
+    printOnly(pathToFileURL(page).href)
+    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, partition: PRINT_PARTITION } })
+    try {
+      w.webContents.on('will-navigate', (e) => e.preventDefault())
+      w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      await fs.promises.writeFile(page, html, 'utf8')
+      await w.loadFile(page)
+      const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
+      await fs.promises.writeFile(target, pdf)
+      return target
+    } finally {
+      if (!w.isDestroyed()) w.destroy()
+      printing.delete(pathToFileURL(page).href)
+      void fs.promises.rm(page, { force: true }).catch(() => {})
+    }
   })
 }
 
@@ -327,18 +424,43 @@ app.whenReady().then(async () => {
     cb(ok)
   })
   web.setPermissionCheckHandler((_wc, permission, origin, details) => webPermission(permission, origin, mediaTypesOf(details)))
+  // Every step on the way to the window is guarded on its own. One that threw used to end this
+  // promise before createWindow: the app then ran on with no window, holding the single-instance
+  // lock, so every later launch only "focused" a window that did not exist — and one malformed state
+  // file was enough to do it. Now the window always opens, and says what did not start.
+  const failed: string[] = []
+  const step = async (name: string, fn: () => unknown) => {
+    try {
+      await fn()
+    } catch (e) {
+      failed.push(name)
+      logError('startup', e)
+    }
+  }
   // before any console starts: what a run that died left running would otherwise work on unseen
-  const orphans = await endOrphans().catch(() => 0)
-  if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
-  await startHookServer((id, event, payload) => ptys.hook(id, event, payload))
-  registerCore()
+  await step('orphans', async () => {
+    const orphans = await endOrphans().catch(() => 0)
+    if (orphans) logError('startup', new Error(`stopped ${orphans} console process${orphans === 1 ? '' : 'es'} the last run left running`))
+  })
+  await step('hooks', () => startHookServer((id, event, payload) => ptys.hook(id, event, payload)))
+  await step('core', registerCore)
   // every module that takes IPC, in one list, so this reads as the map it looks like. skills used to
   // be registered from inside profiles, which made its handlers appear to come from nowhere.
-  for (const m of [store, recovery, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal, update]) m.register(ctx)
+  const modules = { store, recovery, fsops, cli, agents, git, usage, profiles, skills, goal, knowledge, ci, sweep, starter, journal, update }
+  for (const [name, m] of Object.entries(modules)) await step(name, () => m.register(ctx))
   // these two start servers, so they are awaited rather than listed
-  await fleet.register(ctx)
-  await remote.register(ctx)
+  await step('teams', () => fleet.register(ctx))
+  await step('phone inbox', () => remote.register(ctx))
   createWindow()
+  if (failed.length) {
+    // not showErrorBox: it would hold up this process, and with it every console's output
+    void dialog.showMessageBox({
+      type: 'warning',
+      title: 'Part of Fleetboard did not start',
+      message: `Some parts failed to start: ${failed.join(', ')}.`,
+      detail: `The rest works. What went wrong is in ${path.join(dirs.root, 'logs', 'main.log')}.`
+    })
+  }
 })
 
 app.on('window-all-closed', async () => {

@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { Modal, Seg } from '../ui/Modal'
 import { useApp } from '../state/store'
-import { errorText, invoke, uid } from '../lib/api'
+import { errorText, invoke, uid, request } from '../lib/api'
 import { AgentPicker, resolveAgent, shortName, useHeadlessAgents } from './docs/AgentPicker'
 import { CUSTOM_ICON, DEPTHS, DOC_PRESETS, presetById, slugify, type Depth } from './docs/presets'
 import { dismissGen, removeDoc, savedDocs, startDoc, stopDoc, useDocStudio, type DocGen, type SavedDoc } from './docs/state'
@@ -300,7 +300,7 @@ function DoneView({ doc, agentName, onRegenerate }: { doc: SavedDoc; agentName: 
     if (!path) return
     setBusy('pdf')
     try {
-      await invoke('pdf:fromHtml', markdownToHtmlDocument(doc.markdown, doc.title), path)
+      await request('pdf:fromHtml', markdownToHtmlDocument(doc.markdown, doc.title), path)
       invoke('shell:openPath', path)
       useApp.getState().toast('PDF exported', 'ok')
     } catch (e: any) {
@@ -314,7 +314,7 @@ function DoneView({ doc, agentName, onRegenerate }: { doc: SavedDoc; agentName: 
       { name: 'Markdown', extensions: ['md'] }
     ])
     if (!path) return
-    await invoke('fs:write', path, doc.markdown)
+    await request('fs:write', path, doc.markdown)
     useApp.getState().toast(`Saved ${path.startsWith(project.path) ? path.slice(project.path.length + 1) : path}`, 'ok')
   }
   const place = () => {

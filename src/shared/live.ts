@@ -168,6 +168,12 @@ export interface DoneWhenCheck {
   off?: boolean
   /** when the run in flight started */
   running?: number
+  /**
+   * The integration branch's commit once the team's work has been merged into it and not checked
+   * since. Merged work is the agents' code, and what `npm test` runs is whatever that code says, so
+   * it is never run on its own: it waits here until the user runs the check (mayRun).
+   */
+  unchecked?: string
   /** the last few, oldest first */
   runs: CheckRun[]
 }
@@ -226,13 +232,14 @@ export function checkTrend(c: DoneWhenCheck | undefined, doneWhen: string): stri
   const running = c?.running ? 'running…' : ''
   if (!last) return c?.off ? 'off' : running || 'not run yet'
   let now = describe(last)
+  const waiting = !running && !!c?.unchecked && c.unchecked !== last.head ? ' · new work not checked' : ''
   const base = runs.find((r) => r.failing !== undefined && r !== last)
   if (base?.failing !== undefined && last.code !== null) {
     if (last.code === 0 && base.failing > 0) now += `, from ${base.failing} failing`
     else if (last.failing !== undefined && last.failing !== base.failing) now += `, ${last.failing < base.failing ? 'down' : 'up'} from ${base.failing}`
   }
   if (c?.off) return `off · last ${now}`
-  return running ? `${now} · ${running}` : now
+  return running ? `${now} · ${running}` : now + waiting
 }
 
 /** Why a run may not start now, or true when it may. One rule for every trigger, so they cannot disagree. */
@@ -245,9 +252,15 @@ export function mayRun(o: {
   inWorktree: boolean
   head?: string
   lastHead?: string
-  reason: 'start' | 'merge' | 'tick'
+  /**
+   * 'start': the team's baseline, the user's own last commit. 'user': the user asked for a run.
+   * 'merge' / 'tick': the integration branch moved, which only happens when agents' work lands.
+   */
+  reason: CheckReason
 }): true | string {
   if (!commandLike(o.command)) return 'not a command'
+  // asked for by the user: their command, run on their say-so, whatever the Lead is doing
+  if (o.reason === 'user') return o.running ? 'already running' : o.inWorktree ? true : 'no integration worktree'
   if (o.off) return 'switched off'
   // a long check must not overlap itself
   if (o.running) return 'already running'
@@ -255,11 +268,22 @@ export function mayRun(o: {
   if (!o.inWorktree) return 'no integration worktree'
   // the integration branch only moves when the Lead merges: the same commit gives the same answer
   if (o.reason === 'tick' && o.head && o.head === o.lastHead) return 'nothing new to check'
+  // Merged work is code the agents wrote, tests and package.json scripts included: running the check
+  // on it runs that code, in the user's shell with the user's environment, outside whatever sandbox
+  // or approval the agents worked under. That is the user's call to make, so it waits for them.
+  if (o.reason === 'merge' || o.reason === 'tick') return AGENTS_CODE
   return true
 }
 
+/** Why a check run on its own: see mayRun. */
+export type CheckReason = 'start' | 'user' | 'merge' | 'tick'
+
+/** mayRun's answer when the run would execute merged agent code nobody asked to run. */
+export const AGENTS_CODE = 'runs code the agents wrote: waits for you'
+
 /** A finished run, appended and trimmed. */
 export function withRun(c: DoneWhenCheck, run: CheckRun): DoneWhenCheck {
-  const { running: _done, ...rest } = c
-  return { ...rest, runs: [...c.runs, run].slice(-MAX_RUNS) }
+  const { running: _done, unchecked, ...rest } = c
+  // a run of the commit that was waiting answers it; a run of another (the baseline) leaves it waiting
+  return { ...rest, ...(unchecked && unchecked !== run.head ? { unchecked } : {}), runs: [...c.runs, run].slice(-MAX_RUNS) }
 }

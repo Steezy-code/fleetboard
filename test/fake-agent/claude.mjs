@@ -150,10 +150,14 @@ function history(id) {
 }
 // ------------------------------------------------------------------ MCP
 
+// like Claude Code, ${VAR} in a server's headers is read from the environment (the fleet's bearer
+// token is kept out of the file that way)
+const expand = (v) => String(v).replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, k) => process.env[k] ?? '')
 const mcpServer = (() => {
   try {
     const cfg = JSON.parse(fs.readFileSync(opts.mcpConfig, 'utf8'))
-    return Object.values(cfg.mcpServers ?? {})[0]
+    const server = Object.values(cfg.mcpServers ?? {})[0]
+    return server && { ...server, headers: Object.fromEntries(Object.entries(server.headers ?? {}).map(([k, v]) => [k, expand(v)])) }
   } catch {
     return undefined
   }
@@ -541,6 +545,9 @@ function onKeys(data) {
   opts.resumed = opts.resumeId !== undefined || !!opts.cont
 }
 log('start', { args: argv, mode: opts.mode, allowed: opts.allowed, resumed: !!opts.resumed, mcp: !!mcpUrl, session, history: history(session) ?? [] })
+// what the real CLI would send to the fleet server, once ${FB_MCP_TOKEN} is expanded: for the tests that
+// call that server as one member or another (the config file names the variable, never the token)
+if (mcpUrl) log('mcp-auth', { url: mcpUrl, headers: mcpServer.headers })
 process.stdin.setRawMode?.(true)
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', onKeys)

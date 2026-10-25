@@ -158,3 +158,24 @@ test('a request with the secret is served though its address is locked out', asy
     await handlers.get('remote:disable')!({})
   }
 })
+
+test('on Wi-Fi a link lasts a day; on Tailscale it lasts until New link', async () => {
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const { register, expireLanToken, LAN_TOKEN_MS, remoteStatus } = await import('../../src/main/remote')
+  const file = path.join(process.env.FLEETBOARD_HOME!, 'remote.json')
+  const old = 'c'.repeat(48)
+  const ctx = { ipc: { handle: () => {} }, emit: () => {}, ptys: {} } as any
+  // plain HTTP: whoever saw the link once could otherwise keep it for good
+  fs.writeFileSync(file, JSON.stringify({ enabled: true, network: 'lan', token: old, tokenAt: Date.now() - LAN_TOKEN_MS - 1, port: 0 }))
+  await register(ctx)
+  const fresh = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.notEqual(fresh.token, old, 'a day-old Wi-Fi link is replaced')
+  assert.equal(expireLanToken(), false, 'and the new one is good for its own day')
+  assert.equal(expireLanToken(Date.now() + LAN_TOKEN_MS + 1), true)
+  fs.writeFileSync(file, JSON.stringify({ enabled: true, network: 'tailscale', token: old, tokenAt: 0, port: 0 }))
+  await register(ctx)
+  assert.equal(expireLanToken(), false)
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).token, old, 'Tailscale is encrypted: its link is kept')
+  remoteStatus()
+})

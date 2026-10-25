@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import type { Project, ProjectMeta, Recovery, Settings, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
 import type { MainContext } from './context'
-import { declareProject, mainOwnedGlobal } from './roots'
+import { declareProject, declaredProject, mainOwnedGlobal } from './roots'
 import { dirs, writeJsonAtomic } from './paths'
 import { logError } from './errors'
 
@@ -19,6 +19,9 @@ interface AppFile {
   projects: ProjectMeta[]
   global: Record<string, unknown>
 }
+
+/** Windows and macOS compare folders without regard to case (roots.ts does the same). */
+const fold = (p: string) => (process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p)
 
 const recoveries: Recovery[] = []
 let emit: MainContext['emit'] | null = null
@@ -100,13 +103,24 @@ const appFile = path.join(dirs.root, 'app.json')
 // app.json there but unreadable at startup: run on defaults and never write over it this session
 let appUnreadable = false
 let app: AppFile = (() => {
-  try {
-    return load(appFile, 'app', 'app', validApp)
-  } catch (e) {
-    appUnreadable = true
-    logError('store', e)
-    recovered({ what: 'app', corruptCopy: appFile })
-    return null
+  // A read error that is not "not there" is often brief — a Windows sharing lock from antivirus or a
+  // backup tool — and on its own it switched saving off for the whole session. Tried a few times first.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return load(appFile, 'app', 'app', validApp)
+    } catch (e) {
+      if (attempt < 4) {
+        const until = Date.now() + 50 * (attempt + 1)
+        while (Date.now() < until) {
+          /* a short synchronous wait: this runs once, before anything else reads settings */
+        }
+        continue
+      }
+      appUnreadable = true
+      logError('store', e)
+      recovered({ what: 'app', corruptCopy: '', unreadable: true })
+      return null
+    }
   }
 })() ?? { schema: SCHEMA_VERSION, settings: DEFAULT_SETTINGS, projects: [], global: {} }
 app.settings = { ...DEFAULT_SETTINGS, ...app.settings }
@@ -116,9 +130,28 @@ app.global = isObj(app.global) ? app.global : {}
 const lastSnapshot = new Map<string, number>()
 let lastAppSnapshot = 0
 
-/** Keep the newest `keep` snapshots of `prefix`. */
-function prune(prefix: string, keep: number) {
-  for (const f of snapshots(prefix).slice(keep)) fs.rmSync(path.join(dirs.history, f), { force: true })
+/** The local day a snapshot was taken, from its name. */
+const dayOf = (prefix: string, f: string) => new Date(Number(f.slice(prefix.length + 1, -5))).toDateString()
+
+/**
+ * Keep the newest `keep` snapshots of `prefix`, and the newest of each of the last `days` days besides.
+ *
+ * The newest alone is a couple of hours at a five-minute cadence: a board emptied by a bug that still
+ * passed validation would have rotated every good copy out by evening. One a day for two weeks is
+ * what lets yesterday's board come back.
+ */
+export function prune(prefix: string, keep: number, days = 14) {
+  const all = snapshots(prefix)
+  const kept = new Set(all.slice(0, keep))
+  const seen = new Set<string>()
+  for (const f of all) {
+    const day = dayOf(prefix, f)
+    if (seen.has(day)) continue
+    seen.add(day)
+    if (seen.size > days) break
+    kept.add(f)
+  }
+  for (const f of all) if (!kept.has(f)) fs.rmSync(path.join(dirs.history, f), { force: true })
 }
 
 function saveApp() {
@@ -150,13 +183,29 @@ const projectFile = (id: string) => path.join(dirs.projects, `${id}.json`)
  * the one file the app has no other copy of.
  */
 function schemaOf(file: string): number | null {
+  // Asked before every save, which is every pause in typing; reading and parsing a whole board each
+  // time held up the main process, which also carries every console's output. The answer only
+  // changes when the file does, so it is kept against the file's size and time.
+  let st: fs.Stats
   try {
-    const v = JSON.parse(fs.readFileSync(file, 'utf8'))
-    return isObj(v) && Number.isFinite(v.schema) ? Number(v.schema) : null
+    st = fs.statSync(file)
   } catch {
+    schemas.delete(file)
     return null
   }
+  const known = schemas.get(file)
+  if (known && known.size === st.size && known.mtimeMs === st.mtimeMs) return known.schema
+  let schema: number | null = null
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8'))
+    schema = isObj(v) && Number.isFinite(v.schema) ? Number(v.schema) : null
+  } catch {
+    /* unreadable: no schema */
+  }
+  schemas.set(file, { schema, size: st.size, mtimeMs: st.mtimeMs })
+  return schema
 }
+const schemas = new Map<string, { schema: number | null; size: number; mtimeMs: number }>()
 
 /** Written by a Fleetboard newer than this one, so this build must not touch it. */
 export const tooNew = (schema: number | null): schema is number => schema !== null && schema > SCHEMA_VERSION
@@ -215,7 +264,11 @@ export function saveProject(p: Project) {
   // and never write an older shape over a board a newer Fleetboard saved
   const onDisk = schemaOf(projectFile(p.id))
   if (tooNew(onDisk)) throw new Error(`This board was saved by a newer version of Fleetboard (board format ${onDisk}, this one writes ${SCHEMA_VERSION}). Update Fleetboard to open it.`)
-  current = p
+  // Saving a board is not opening it. The page saves the board it is leaving in the background just
+  // after it has declared the next one, and that save used to make the old board current again — the
+  // old folder was then the only project root, and nothing could be read or started in the new one.
+  const declaredNow = declaredProject()
+  if (!declaredNow || fold(path.resolve(p.path)) === fold(declaredNow)) current = p
   p.schema = SCHEMA_VERSION
   // The board is saved here. Everything after this is bookkeeping — the recent-projects list and a
   // periodic snapshot — and none of it may be reported as "the board could not be saved", which is
@@ -225,8 +278,13 @@ export function saveProject(p: Project) {
   try {
     const consoles = p.workspaces.reduce((n, w) => n + w.nodes.filter((x) => x.type === 'console').length, 0)
     const meta: ProjectMeta = { id: p.id, name: p.name, path: p.path, lastOpened: p.lastOpened, consoles }
-    app.projects = [meta, ...app.projects.filter((m) => m.id !== p.id)]
-    saveApp()
+    // app.json only when its entry for this board changed: rewriting (and fsyncing) it on every save
+    // of an unchanged list doubled the cost of each one
+    const was = app.projects[0]
+    if (!was || JSON.stringify(was) !== JSON.stringify(meta)) {
+      app.projects = [meta, ...app.projects.filter((m) => m.id !== p.id)]
+      saveApp()
+    }
   } catch (e) {
     logError('store', e)
   }
@@ -249,9 +307,41 @@ export function saveProject(p: Project) {
   }
 }
 
+/**
+ * What a crash or a full disk leaves behind: a temporary file from a write that never got renamed,
+ * and the set-aside copies of unreadable files. Kept a while for rescue by hand, then cleared, so
+ * neither grows without end.
+ */
+export function sweepLeftovers(now = Date.now()) {
+  const DAY = 86_400_000
+  for (const dir of [dirs.root, dirs.projects, dirs.history]) {
+    let names: string[]
+    try {
+      names = fs.readdirSync(dir)
+    } catch {
+      continue
+    }
+    for (const f of names) {
+      const age = f.endsWith('.tmp') ? DAY : /\.corrupt-\d+\.json$/.test(f) ? 30 * DAY : 0
+      if (!age) continue
+      try {
+        const file = path.join(dir, f)
+        if (now - fs.statSync(file).mtimeMs > age) fs.rmSync(file, { force: true })
+      } catch {
+        /* gone meanwhile, or not ours to remove */
+      }
+    }
+  }
+}
+
 export function register(ctx: MainContext) {
   const { ipc } = ctx
   emit = ctx.emit
+  try {
+    sweepLeftovers()
+  } catch (e) {
+    logError('store', e)
+  }
   ipc.handle('store:recoveries', () => recoveries)
   ipc.handle('store:settings', () => app.settings)
   ipc.handle('store:setSettings', (_e, patch: Partial<Settings>) => {
@@ -265,7 +355,12 @@ export function register(ctx: MainContext) {
   ipc.handle('store:projectId', (_e, p: string) => {
     // the first thing openProject does, and the only point before any read where the folder being
     // opened is named — a brand-new folder has no saved board to take it from (see roots.ts)
-    declareProject(p)
+    const opening = declareProject(p)
+    // A different folder is being opened, so the board loaded before is not "the open one" any more.
+    // For a folder with a saved board loadProject makes that one current next; for a brand-new folder
+    // nothing does until its first save, and projectRoot() preferred the old board's folder over the
+    // declared one meanwhile: a team could not be started, nor a file read, in a folder just opened.
+    if (opening && current && fold(path.resolve(current.path)) !== fold(opening)) current = null
     return projectIdFor(p)
   })
   ipc.handle('store:loadProject', (_e, id: string) => {
@@ -283,6 +378,14 @@ export function register(ctx: MainContext) {
   ipc.handle('store:forgetProject', (_e, id: string) => {
     app.projects = app.projects.filter((m) => m.id !== id)
     saveApp()
+    // its snapshots go with it: nothing lists them any more, and nothing else would ever remove them
+    if (/^[\w-]+$/.test(id)) {
+      try {
+        for (const f of snapshots(id)) fs.rmSync(path.join(dirs.history, f), { force: true })
+      } catch (e) {
+        logError('store', e)
+      }
+    }
   })
   ipc.handle('store:getGlobal', (_e, key: string) => getGlobal(key))
   ipc.handle('store:setGlobal', (_e, key: string, value: unknown) => {

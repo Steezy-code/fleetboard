@@ -56,3 +56,14 @@ test('pid 0 is never in a tree: it is not a process anything may be suspended th
   )
   assert.deepEqual(treeOf(rows, 0), [])
 })
+
+test('a process older than the one holding its parent’s pid is not its child', () => {
+  // its real parent ended; Windows kept the id on it and gave that pid to a process in this tree
+  const rows = [
+    { pid: 100, ppid: 1, born: 50 },
+    { pid: 200, ppid: 100, born: 60 },
+    { pid: 700, ppid: 200, born: 10 }
+  ]
+  assert.deepEqual(treeOf(rows, 100), [100, 200], 'the stranger is left running')
+  assert.deepEqual(treeOf([...rows, { pid: 300, ppid: 200, born: 60 }], 100), [100, 200, 300], 'one started the same moment is a child')
+})

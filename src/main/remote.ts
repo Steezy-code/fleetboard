@@ -27,7 +27,32 @@ interface RemoteConfig {
   enabled: boolean
   network: RemoteNetwork
   token: string
+  /** when the token was made (LAN_TOKEN_MS) */
+  tokenAt?: number
   port: number
+}
+
+/**
+ * How long a link lasts on Wi-Fi. There it is plain HTTP, so anyone who saw the traffic once could keep
+ * using the link for as long as it lived — which was until the user pressed New link or switched off.
+ * A day is a morning's approvals and the evening's; then the QR code in Settings is scanned again.
+ * Tailscale (encrypted) and This PC keep theirs.
+ */
+export const LAN_TOKEN_MS = 24 * 3600_000
+
+/** A new secret, stamped. */
+function freshToken() {
+  config.token = newSecret()
+  config.tokenAt = Date.now()
+}
+
+/** On Wi-Fi, a link past its day: true when it was replaced. */
+export function expireLanToken(now = Date.now()): boolean {
+  if (config.network !== 'lan' || !config.enabled) return false
+  if (config.tokenAt && now - config.tokenAt < LAN_TOKEN_MS) return false
+  freshToken()
+  save()
+  return true
 }
 
 export interface RemoteStatus {
@@ -362,17 +387,21 @@ export async function register(c: MainContext) {
   ctx = c
   config = { ...config, ...readJson<Partial<RemoteConfig>>(configFile(), {}) }
   if (!config.token) {
-    config.token = newSecret()
+    freshToken()
     save()
   }
+  expireLanToken()
   if (config.enabled) await start()
-  follower ??= setInterval(() => void followAddress().catch(() => {}), 10_000)
+  follower ??= setInterval(() => {
+    if (expireLanToken()) ctx?.emit('remote:changed')
+    void followAddress().catch(() => {})
+  }, 10_000)
   follower.unref?.()
   c.ipc.handle('remote:status', () => remoteStatus())
   c.ipc.handle('remote:enable', async (_e, network: RemoteNetwork) => {
     if (!['tailscale', 'lan', 'local'].includes(network)) throw new Error('bad network')
     // Wi-Fi carries the link in the clear: a link from there does not work on another network, nor one into it
-    if (network !== config.network && (network === 'lan' || config.network === 'lan')) config.token = newSecret()
+    if (network !== config.network && (network === 'lan' || config.network === 'lan')) freshToken()
     config.enabled = true
     config.network = network
     save()
@@ -382,14 +411,14 @@ export async function register(c: MainContext) {
   c.ipc.handle('remote:disable', () => {
     config.enabled = false
     // a link that crossed a network once does not work again after Off
-    config.token = newSecret()
+    freshToken()
     save()
     stop()
     return remoteStatus()
   })
   /** A new secret: the old link stops working at once. */
   c.ipc.handle('remote:reset', async () => {
-    config.token = newSecret()
+    freshToken()
     save()
     if (config.enabled) await start()
     return remoteStatus()

@@ -44,8 +44,12 @@ before(async () => {
 beforeEach(() => roots.resetGrantsForTest())
 
 test('the open project and ~/.fleetboard are allowed, including the roots themselves', () => {
-  for (const p of [project, path.join(project, 'src', 'a.ts'), path.join(project, 'src'), home, path.join(home, 'projects', 'proj1.json')]) {
+  for (const p of [project, path.join(project, 'src', 'a.ts'), path.join(project, 'src'), home, path.join(home, 'assets', 'pic.png'), path.join(home, 'exports', 'doc.pdf')]) {
     assert.equal(roots.insideAllowed(p), true, p)
+  }
+  // ~/.fleetboard's private parts are not, from any root
+  for (const p of [path.join(home, 'app.json'), path.join(home, 'projects', 'proj1.json'), path.join(home, 'profiles', 'x', '.credentials.json'), path.join(home, 'remote.json'), path.join(home, 'fleet', 'p.json'), path.join(home, 'hooks')]) {
+    assert.equal(roots.insideAllowed(p), false, p)
   }
   // a file that does not exist yet, inside the project: writeText creates parents, so this must pass
   assert.equal(roots.insideAllowed(path.join(project, 'docs', 'deep', 'new.md')), true)
@@ -149,9 +153,48 @@ test('a board that claims the whole disk as its folder gets no project root at a
     assert.equal(roots.insideAllowed(path.join(os.homedir(), '.ssh', 'id_ed25519')), false, wide)
     assert.equal(roots.insideAllowed('/etc/passwd'), false, wide)
     // and ~/.fleetboard is still allowed, so the app can still read its own files
-    assert.equal(roots.insideAllowed(path.join(home, 'app.json')), true, wide)
+    assert.equal(roots.insideAllowed(path.join(home, 'assets', 'pic.png')), true, wide)
+    assert.equal(roots.insideAllowed(path.join(home, 'app.json')), false, 'but not the private ones, even with the home folder claimed')
   }
   // back to the real project for whatever runs after this
   assert.ok(store.loadProject('proj1'))
+  assert.equal(roots.projectRoot(), project)
+})
+
+test('a folder opened for the first time becomes the project root at once, not when it is first saved', async () => {
+  // store:projectId is the first thing openProject does. With a board already loaded, the old
+  // project's folder kept being "the open one" until the new folder had a saved board of its own —
+  // so nothing could be read in it, and no team started
+  const { ipcMain } = await import('../support/electron-stub')
+  const { DEFAULT_SETTINGS } = await import('../../src/shared/types')
+  store.register({ ipc: ipcMain as never, win: () => null, ptys: null as never, settings: () => DEFAULT_SETTINGS, emit: () => {} })
+  const fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-fresh-'))
+  assert.equal(roots.projectRoot(), project, 'the board loaded before')
+  assert.equal(roots.insideAllowed(path.join(fresh, 'a.txt')), false, 'and its folder alone')
+  await ipcMain.invoke('store:projectId', fresh)
+  assert.equal(roots.projectRoot(), fresh)
+  assert.equal(roots.insideAllowed(path.join(fresh, 'a.txt')), true)
+  assert.equal(roots.insideAllowed(path.join(project, 'src', 'a.ts')), false, 'the previous project is not a root any more')
+  // a name that is no folder changes nothing
+  await ipcMain.invoke('store:projectId', path.join(fresh, 'not-there'))
+  assert.equal(roots.projectRoot(), fresh)
+  // back to the real project for whatever runs after this
+  assert.ok(store.loadProject('proj1'))
+  assert.equal(roots.projectRoot(), project)
+})
+
+test('the board being left, saved in the background after the next folder is declared, does not become the open project again', async () => {
+  const { ipcMain } = await import('../support/electron-stub')
+  const next = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-next-'))
+  assert.ok(store.loadProject('proj1'))
+  await ipcMain.invoke('store:projectId', next)
+  store.saveProject(board('proj1', project) as never) // the page saving the board it just left
+  assert.equal(roots.projectRoot(), next, 'the folder being opened stays the root')
+  assert.equal(roots.insideAllowed(path.join(project, 'src', 'a.ts')), false)
+  // saving the board of the declared folder is the normal case, and still makes it current
+  store.saveProject(board('proj2', next) as never)
+  assert.equal(store.currentProject()?.id, 'proj2')
+  assert.ok(store.loadProject('proj1'))
+  await ipcMain.invoke('store:projectId', project)
   assert.equal(roots.projectRoot(), project)
 })

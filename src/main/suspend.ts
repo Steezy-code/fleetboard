@@ -20,11 +20,18 @@ import { dirs } from './paths'
  * one PowerShell call wide. Close it with a job object (a real freeze of the whole job) if an agent
  * ever turns out to spawn fast enough to slip through.
  */
-export function treeOf(rows: { pid: number; ppid: number }[], root: number): number[] {
+export function treeOf(rows: { pid: number; ppid: number; born?: number }[], root: number): number[] {
   if (!root) return []
   const kids = new Map<number, number[]>()
+  const born = new Map(rows.filter((r) => r.born !== undefined).map((r) => [r.pid, r.born!]))
   for (const r of rows) {
     if (!r.pid || r.pid === r.ppid) continue
+    // Windows never clears a parent id when the parent ends, and reuses pids soon: a process whose
+    // long-gone parent had a pid that now belongs to one in this tree is not its child. A child is
+    // never older than its parent, so one that is was someone else's.
+    const self = born.get(r.pid)
+    const parent = born.get(r.ppid)
+    if (self !== undefined && parent !== undefined && self < parent) continue
     const there = kids.get(r.ppid)
     if (there) there.push(r.pid)
     else kids.set(r.ppid, [r.pid])
@@ -61,9 +68,18 @@ public static class FbFreeze {
 }
 '@
 # parents before children, so a process cannot start one behind the walk; the other way to thaw
-$rows = Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId | ForEach-Object { @{ pid = [int]$_.ProcessId; ppid = [int]$_.ParentProcessId } }
+# a child is never older than its parent: Windows keeps a dead parent's id on its children and reuses
+# pids, so one older than the process now holding its parent's pid is not in this tree (treeOf)
+$rows = Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate | ForEach-Object { @{ pid = [int]$_.ProcessId; ppid = [int]$_.ParentProcessId; born = $_.CreationDate } }
+$born = @{}
+foreach ($r in $rows) { if ($r.born) { $born[$r.pid] = $r.born } }
 $kids = @{}
-foreach ($r in $rows) { if ($r.pid -and $r.pid -ne $r.ppid) { if (-not $kids.ContainsKey($r.ppid)) { $kids[$r.ppid] = @() }; $kids[$r.ppid] += $r.pid } }
+foreach ($r in $rows) {
+  if (-not $r.pid -or $r.pid -eq $r.ppid) { continue }
+  if ($born.ContainsKey($r.pid) -and $born.ContainsKey($r.ppid) -and $born[$r.pid] -lt $born[$r.ppid]) { continue }
+  if (-not $kids.ContainsKey($r.ppid)) { $kids[$r.ppid] = @() }
+  $kids[$r.ppid] += $r.pid
+}
 $order = @()
 $seen = @{}
 $queue = [System.Collections.Queue]::new()
@@ -97,19 +113,32 @@ function ensureScript(): string {
   return p
 }
 
+/** per console root: the freeze or thaw in flight, which the next one waits for */
+const queued = new Map<number, Promise<void>>()
+
 /**
- * Freeze or thaw a console's process tree. Fire and forget, like `killTree`: a pause the user can see
- * on the tile either took or the process is gone, and there is nothing useful to do with an error from
- * a process that ended while we asked about it.
+ * Freeze or thaw a console's process tree, after whatever was asked of it before.
  *
- * ponytail: PowerShell compiles the P/Invoke on every call, so this costs a few hundred milliseconds.
- * Fine for a button; batch the pids into one call if "Pause all" on a full board ever feels slow.
+ * Each call is a PowerShell start that compiles the P/Invoke first, a few hundred milliseconds, and
+ * they used to run side by side: Pause then Resume (or Pause all, Resume all) in quick succession let
+ * the resume finish first — a no-op on a tree not frozen yet — and then the suspend landed, leaving an
+ * agent frozen while its tile said it was running. In order, the last one asked is the one that holds.
+ * Errors are dropped like `killTree`'s: a process that ended while it was asked about has nothing to say.
  */
-export function suspendTree(pid: number | undefined, action: 'suspend' | 'resume') {
-  if (!pid) return
-  try {
-    execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ensureScript(), '-Root', String(pid), '-Action', action], { windowsHide: true, timeout: 20_000 }, () => {})
-  } catch {
-    /* gone, or no PowerShell: the tile stays as it was */
-  }
+export function suspendTree(pid: number | undefined, action: 'suspend' | 'resume'): Promise<void> {
+  if (!pid) return Promise.resolve()
+  const run = () =>
+    new Promise<void>((resolve) => {
+      try {
+        execFile('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ensureScript(), '-Root', String(pid), '-Action', action], { windowsHide: true, timeout: 20_000 }, () => resolve())
+      } catch {
+        resolve() // gone, or no PowerShell: the tile stays as it was
+      }
+    })
+  const next = (queued.get(pid) ?? Promise.resolve()).then(run)
+  queued.set(pid, next)
+  void next.then(() => {
+    if (queued.get(pid) === next) queued.delete(pid)
+  })
+  return next
 }

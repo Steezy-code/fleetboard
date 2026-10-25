@@ -72,14 +72,21 @@ test('while a worker works: its changes, its task’s clock against the estimate
   const task = (await fleet(projectId)).tasks[0]
   assert.ok(task.startedAt, 'startedAt populates')
 
-  // merged into the Lead's worktree, the check runs again there and passes
+  // merged into the Lead's worktree, the check does not run on its own: that would run the agents'
+  // code (mayRun). It says the merged commit is waiting, and runs when the user asks
   await app!.waitFor(async () => (await fleet(projectId)).ready, { label: 'Ready card', timeout: 60_000 })
+  const waiting = await app!.waitFor(async () => (await fleet(projectId)).check?.unchecked ?? null, { label: 'merged work waiting', timeout: 20_000 })
+  assert.equal(waiting.length, 40)
+  assert.equal((await fleet(projectId)).check.runs.length, 1, 'nothing ran on the merged work by itself')
+  await app!.waitFor(async () => (/new work not checked/.test(await text('.plan-check')) ? true : null), { label: 'waiting on the plan' })
+  assert.equal(await app!.invoke('fleet:runCheck', projectId), true)
   const after = await app!.waitFor(async () => {
     const c = (await fleet(projectId)).check
     return c && !c.running && c.runs.length >= 2 ? c : null
   }, { label: 'run after the merge', timeout: 20_000 })
   assert.equal(after.runs.at(-1).code, 0)
-  assert.equal(after.runs.at(-1).head?.length, 40, 'against the commit that was merged')
+  assert.equal(after.runs.at(-1).head, waiting, 'against the commit that was merged')
+  assert.equal(after.unchecked, undefined, 'and that answers it')
   const done = (await fleet(projectId)).tasks[0]
   assert.ok(done.endedAt >= done.startedAt, 'the task’s clock stopped when it was done')
   await app!.waitFor(async () => (/passing/.test(await text('.plan-check')) ? true : null), { label: 'passing on the plan' })

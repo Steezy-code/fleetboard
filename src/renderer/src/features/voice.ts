@@ -1,4 +1,5 @@
 // Voice feature entry: push-to-talk keys, caption + Helm card overlays, thread persistence, console activity tracking.
+import { isTypingTarget } from '../lib/typing'
 import '../styles/voice.css'
 import '../styles/helm.css'
 import { BOARD_OVERLAYS } from '../board/BoardOverlays'
@@ -13,10 +14,7 @@ import { hydrateThread } from '../voice/thread'
 
 BOARD_OVERLAYS.push(Caption, HelmCard)
 
-const isTyping = (t: EventTarget | null) => {
-  const el = t as HTMLElement | null
-  return !!el?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .xterm, [data-terminal], webview')
-}
+const isTyping = isTypingTarget
 
 /** Which key started the current push-to-talk (null when not held). */
 let held: 'space' | 'alt' | null = null

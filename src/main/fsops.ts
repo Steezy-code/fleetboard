@@ -4,19 +4,14 @@ import { isUtf8 } from 'node:buffer'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
 import { readRegularFile, readRegularText, writeDurable } from './paths'
-import type { WriteResult } from '@shared/types'
+import type { TreeEntry, WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
-import { allowed, grant, grantDropped, outsideMessage } from './roots'
+import { allowedPath, grant, grantDropped, outsideMessage } from './roots'
 
 /** The most a text read hands the renderer: any source file, note or log; past this it is not a text to edit here. */
 const MAX_READ = 32 * 1024 * 1024
 
-export interface TreeEntry {
-  name: string
-  path: string
-  dir: boolean
-  children?: TreeEntry[]
-}
+export type { TreeEntry }
 
 const IGNORE = new Set(['node_modules', '.git', '.next', 'dist', 'out', 'build', '.turbo', '.cache', 'target', '.venv', 'venv', '__pycache__', '.DS_Store'])
 
@@ -169,47 +164,62 @@ export function register(ctx: MainContext) {
   // Reads keep the shape they already had for a path that is not there — an empty tree, null, false —
   // because callers rely on it (a file node on a missing path, an unreadable folder). Writes and opens
   // say so, because silently not writing is worse than an error.
-  ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) =>
-    allowed(dir, 'fs:tree') ? tree(dir, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined) : []
-  )
+  // every handler acts on the path allowedPath returns: the one that was checked (roots.ts)
+  ipc.handle('fs:tree', (_e, dir: string, depth = 8, ext?: string[]) => {
+    const abs = allowedPath(dir, 'fs:tree')
+    return abs ? tree(abs, depth, ext ? (n) => ext.some((x) => n.toLowerCase().endsWith(x)) : undefined) : []
+  })
   ipc.handle('fs:read', (_e, file: string) => {
     // already throws for a missing file, so callers handle a throw
-    if (!allowed(file, 'fs:read')) throw new Error(outsideMessage(file))
-    return readRegularText(file, MAX_READ)
+    const abs = allowedPath(file, 'fs:read')
+    if (!abs) throw new Error(outsideMessage(file))
+    return readRegularText(abs, MAX_READ)
   })
   ipc.handle('fs:write', (_e, file: string, content: string, opts?: { base?: string | null }) => {
-    if (!allowed(file, 'fs:write')) throw new Error(outsideMessage(file))
-    return writeText(file, content, opts?.base)
+    const abs = allowedPath(file, 'fs:write')
+    if (!abs) throw new Error(outsideMessage(file))
+    return writeText(abs, content, opts?.base)
   })
   ipc.handle('fs:writeBase64', (_e, file: string, b64: string) => {
-    if (!allowed(file, 'fs:writeBase64')) throw new Error(outsideMessage(file))
+    const abs = allowedPath(file, 'fs:writeBase64')
+    if (!abs) throw new Error(outsideMessage(file))
     // the same write as fs:write: it used to truncate the target in place, so a write that ran out of
     // room destroyed whatever was there, and it replaced a symlink with a plain file
-    writeResolved(file, Buffer.from(b64, 'base64'))
+    writeResolved(abs, Buffer.from(b64, 'base64'))
   })
-  ipc.handle('fs:exists', (_e, p: string) => allowed(p, 'fs:exists') && fs.existsSync(p))
+  ipc.handle('fs:exists', (_e, p: string) => {
+    const abs = allowedPath(p, 'fs:exists')
+    return !!abs && fs.existsSync(abs)
+  })
   ipc.handle('fs:mkdir', (_e, p: string) => {
-    if (!allowed(p, 'fs:mkdir')) throw new Error(outsideMessage(p))
-    return fs.mkdirSync(p, { recursive: true })
+    const abs = allowedPath(p, 'fs:mkdir')
+    if (!abs) throw new Error(outsideMessage(p))
+    return fs.mkdirSync(abs, { recursive: true })
   })
   ipc.handle('fs:stat', (_e, p: string) => {
-    if (!allowed(p, 'fs:stat')) return null
+    const abs = allowedPath(p, 'fs:stat')
+    if (!abs) return null
     try {
-      const s = fs.statSync(p)
+      const s = fs.statSync(abs)
       return { size: s.size, mtime: s.mtimeMs, dir: s.isDirectory() }
     } catch {
       return null
     }
   })
   // openPath resolves with '' on success or an error string, so a refusal is just that string
-  ipc.handle('shell:openPath', (_e, p: string) =>
-    !allowed(p, 'shell:openPath') ? outsideMessage(p) : opensSafely(p) ? shell.openPath(p) : (shell.showItemInFolder(p), '')
-  )
+  ipc.handle('shell:openPath', (_e, p: string) => {
+    const abs = allowedPath(p, 'shell:openPath')
+    if (!abs) return outsideMessage(p)
+    if (opensSafely(abs)) return shell.openPath(abs)
+    shell.showItemInFolder(abs)
+    return ''
+  })
   ipc.handle('shell:openExternal', (_e, url: string) => {
     if (/^(https?:\/\/|mailto:)/i.test(url)) return shell.openExternal(url)
   })
   ipc.handle('shell:showItem', (_e, p: string) => {
-    if (allowed(p, 'shell:showItem')) shell.showItemInFolder(p)
+    const abs = allowedPath(p, 'shell:showItem')
+    if (abs) shell.showItemInFolder(abs)
   })
 }
 

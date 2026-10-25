@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpenText, Check, ChevronRight, FileDown, LayoutDashboard, Loader2, Plus, RefreshCw, Search, X } from 'lucide-react'
 import { Modal, Seg } from '../ui/Modal'
-import { errorText, invoke } from '../lib/api'
+import { errorText, invoke, request } from '../lib/api'
 import { useApp } from '../state/store'
 import { FileTree, ancestors, graft, flattenFiles, type Creating, type TreeEntry } from '../workbench/FileTree'
 import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
 import { extractLinks, firstHeading, handleMdClick, isMarkdownPath, renderMarkdown } from '../workbench/markdown'
 import { exportMarkdownPdf } from '../workbench/pdf'
 import { baseName, dirname, joinPath, relativeTo, stripExt, isInside } from '../workbench/paths'
-import type { FileStat } from '../workbench/useFileText'
-import type { WriteResult } from '@shared/types'
 import { setUnsaved } from '../lib/unsaved'
 
 type Mode = 'reading' | 'source' | 'graph'
@@ -101,14 +99,14 @@ export default function MarkdownStudio(props: { path?: string }) {
   // ---------- loading ----------
   const loadTree = useCallback(async () => {
     if (!root) return []
-    const t = await invoke<TreeEntry[]>('fs:tree', root, 8, MD_EXT).catch(() => [] as TreeEntry[])
+    const t = await request('fs:tree', root, 8, MD_EXT).catch(() => [] as TreeEntry[])
     setTree(t)
     return t
   }, [root])
 
   /** a folder the first read left out, read once it is opened */
   const loadDir = useCallback(async (dir: string) => {
-    const children = await invoke<TreeEntry[]>('fs:tree', dir, 1, MD_EXT).catch(() => null)
+    const children = await request('fs:tree', dir, 1, MD_EXT).catch(() => null)
     if (children) setTree((t) => t && graft(t, dir, children))
   }, [])
 
@@ -117,7 +115,7 @@ export default function MarkdownStudio(props: { path?: string }) {
     const entries = await Promise.all(
       list.map(async (p) => {
         try {
-          const text = await invoke<string>('fs:read', p)
+          const text = await request('fs:read', p)
           // this read is a base: without it a save over one of these notes would have nothing to
           // compare against, and fs:write would overwrite it unconditionally
           onDisk.current.set(p, text)
@@ -166,7 +164,7 @@ export default function MarkdownStudio(props: { path?: string }) {
     pending.current = null
     setSave('saving')
     try {
-      const r = await invoke<WriteResult>('fs:write', p.path, p.text, { base })
+      const r = await request('fs:write', p.path, p.text, { base })
       if (!r.ok) {
         // changed on disk since we read it: never overwrite that silently
         pending.current ??= p
@@ -181,7 +179,7 @@ export default function MarkdownStudio(props: { path?: string }) {
             // exactly what the user was shown — if it changed again while they read the dialog this
             // refuses and asks afresh, rather than overwriting a version nobody saw. A deleted file
             // has no base to give: then "replace with mine" means write it back.
-            const again = await invoke<WriteResult>('fs:write', p.path, p.text, disk === null ? undefined : { base: disk })
+            const again = await request('fs:write', p.path, p.text, disk === null ? undefined : { base: disk })
             if (!again.ok) {
               pending.current ??= p
               setSave('conflict')
@@ -213,7 +211,7 @@ export default function MarkdownStudio(props: { path?: string }) {
         return
       }
       onDisk.current.set(p.path, p.text)
-      const st = await invoke<FileStat | null>('fs:stat', p.path)
+      const st = await request('fs:stat', p.path)
       if (st) mtimes.current.set(p.path, st.mtime)
       if (!pending.current) setSave('saved')
     } catch (e: any) {
@@ -264,7 +262,7 @@ export default function MarkdownStudio(props: { path?: string }) {
       const cached = notes.get(path)
       if (cached != null) setText(cached)
       try {
-        const [st, fresh] = await Promise.all([invoke<FileStat | null>('fs:stat', path), invoke<string>('fs:read', path)])
+        const [st, fresh] = await Promise.all([request('fs:stat', path), request('fs:read', path)])
         if (st) mtimes.current.set(path, st.mtime)
         onDisk.current.set(path, fresh)
         if (currentRef.current === path) setText(fresh)
@@ -296,10 +294,10 @@ export default function MarkdownStudio(props: { path?: string }) {
     const id = window.setInterval(async () => {
       const p = currentRef.current
       if (!p || pending.current || document.visibilityState !== 'visible') return
-      const st = await invoke<FileStat | null>('fs:stat', p).catch(() => null)
+      const st = await request('fs:stat', p).catch(() => null)
       if (!st || st.mtime === mtimes.current.get(p)) return
       mtimes.current.set(p, st.mtime)
-      const fresh = await invoke<string>('fs:read', p).catch(() => null)
+      const fresh = await request('fs:read', p).catch(() => null)
       if (fresh == null || pending.current || currentRef.current !== p) return
       onDisk.current.set(p, fresh)
       setText(fresh)
@@ -317,11 +315,11 @@ export default function MarkdownStudio(props: { path?: string }) {
     const file = /\.(md|mdx)$/i.test(clean) ? clean : clean + '.md'
     const path = joinPath(target, file)
     if (!isInside(root, path) || !relativeTo(root, path)) return toast('Stay inside the project folder', 'warn')
-    if (await invoke<boolean>('fs:exists', path)) return open(path)
+    if (await request('fs:exists', path)) return open(path)
     try {
       // base: null is "only if it is not there", so a note an agent wrote in the meantime is opened
       // rather than replaced by this empty stub
-      const made = await invoke<WriteResult>('fs:write', path, `# ${stripExt(baseName(file))}\n\n`, { base: null })
+      const made = await request('fs:write', path, `# ${stripExt(baseName(file))}\n\n`, { base: null })
       if (!made.ok) return open(path)
       const t = await loadTree()
       loadAll(t)

@@ -1,5 +1,5 @@
 import { useApp, allConsoles } from '../state/store'
-import { invoke, runCli, uid } from '../lib/api'
+import { runCli, uid, request } from '../lib/api'
 import { journal } from '../lib/journal'
 import { maySpendOn, spendable } from './guards'
 import { agentLabel, consoleTail, isLive, onConsoleData, sendToConsole } from './consoles'
@@ -297,7 +297,7 @@ export async function checkGoal(l: Loop, consoleIds: string[]): Promise<{ met: b
   const s = l.stop
   if (s.goalKind === 'command') {
     // run by the app itself: its exit code decides (a model asked to run it could also edit the code)
-    const r = await invoke<{ code: number | null; tail: string; timedOut?: boolean; error?: string }>('goal:check', cwd, s.command)
+    const r = await request('goal:check', cwd, s.command)
     const last = r.tail.trim().split('\n').filter((l) => l.trim()).at(-1)?.trim().slice(0, 140)
     if (r.code === 0) return { met: true, note: `\`${s.command}\` passed` }
     if (r.error) return { met: false, failed: true, note: `\`${s.command}\` could not run: ${r.error}` }

@@ -4,6 +4,9 @@
   "private": true,
   "description": "A visual board of real terminals for your AI coding agents.",
   "main": "out/main/index.js",
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",

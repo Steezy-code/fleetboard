@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { HEAVY_DIRS, LINKED_DIRS, type FleetMember, type FleetState } from '@shared/fleet'
-import { type CheckRun, failingCount, liveDiff, mayRun, sameDiff, withRun } from '@shared/live'
+import { AGENTS_CODE, type CheckReason, type CheckRun, failingCount, liveDiff, mayRun, sameDiff, withRun } from '@shared/live'
 import type { MainContext } from './context'
 import { runGoalCheck } from './goal'
 import { readRegularText } from './paths'
@@ -27,7 +27,7 @@ const OUTPUT_TICK_MS = 15_000
 /** an output time this much newer is worth writing: a chatty console must not rewrite the fleet file every tick */
 const OUTPUT_STEP_MS = 30_000
 const DIFF_TICK_MS = 15_000
-/** the done-when only runs again on this tick if the integration branch moved (mayRun) */
+/** how often the integration branch is looked at: moved, its new commit waits to be checked (mayRun) */
 const CHECK_TICK_MS = 5 * 60_000
 const CHECK_TIMEOUT_MS = 10 * 60_000
 
@@ -152,7 +152,7 @@ const leadOf = (s: FleetState) =>
  * be working when it is asked: that is decided before anything is awaited, so a trigger cannot slip
  * through as the Lead finishes.
  */
-export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'): Promise<void> {
+export async function runCheck(s: FleetState, reason: CheckReason): Promise<void> {
   if (!live) return
   const command = s.charter?.doneWhen ?? ''
   const lead = leadOf(s)
@@ -164,7 +164,16 @@ export async function runCheck(s: FleetState, reason: 'start' | 'merge' | 'tick'
   const check = s.check ?? { command, runs: [] }
   const head = inWorktree ? (await git(lead.cwd, ['rev-parse', 'HEAD'], { timeout: 20_000 })).stdout.trim() || undefined : undefined
   // what is in flight is this map's to say: `check.running` is for the board, and survives a stop until the process closes
-  const ok = mayRun({ command, off: check.off, running: inflight.has(s.projectId) ? 1 : undefined, leadWorking, inWorktree, head, lastHead: check.runs[check.runs.length - 1]?.head, reason })
+  const lastHead = check.runs[check.runs.length - 1]?.head
+  const ok = mayRun({ command, off: check.off, running: inflight.has(s.projectId) ? 1 : undefined, leadWorking, inWorktree, head, lastHead, reason })
+  if (ok === AGENTS_CODE) {
+    // not run: said instead, so the plan can offer the run to the user
+    if (head && head !== lastHead && s.check?.unchecked !== head) {
+      s.check = { ...check, unchecked: head }
+      live.changed(s)
+    }
+    return
+  }
   if (ok !== true) return
   const ac = new AbortController()
   inflight.set(s.projectId, ac)

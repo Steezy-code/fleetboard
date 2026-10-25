@@ -344,24 +344,27 @@ export async function runHelmOption(i: number | null = primaryIndex()) {
  * own prompts. Those are asked about with the text in full, whatever the card said.
  */
 async function mayRunIn(actions: Action[]): Promise<boolean> {
-  const risky = new Set<string>()
-  let text = ''
+  // every console with what it would be sent: a plan that sends two different things to two consoles
+  // used to show only the first text, under both names
+  const risky = new Map<string, string[]>()
   for (const a of actions) {
     if (a.type !== 'send' || !a.submit) continue
     for (const id of resolveRefs(a.targets).ids) {
       const c = allConsoles().find((x) => x.id === id)
       if (!c) continue
       if (c.data.agentId === 'shell' || c.data.command || autoApproves(id)) {
-        risky.add(String(c.data.name ?? id))
-        text ||= a.text
+        const name = String(c.data.name ?? id)
+        risky.set(name, [...(risky.get(name) ?? []), a.text])
       }
     }
   }
   if (!risky.size) return true
-  const names = [...risky]
+  const names = [...risky.keys()]
+  const clip = (t: string) => (t.length > 300 ? t.slice(0, 299) + '…' : t)
+  const lines = [...risky].map(([name, texts]) => `${name}: ${texts.map((t) => `“${clip(t)}”`).join(', then ')}`)
   return useApp.getState().confirm({
     title: `Send this to ${names.join(', ')}?`,
-    body: `${names.length === 1 ? 'It runs' : 'They run'} what it is sent without asking: “${text.length > 300 ? text.slice(0, 299) + '…' : text}”`,
+    body: `${names.length === 1 ? 'It runs' : 'They run'} what it is sent without asking. ${lines.join(' · ')}`,
     confirm: 'Send',
     danger: true
   })
@@ -403,7 +406,9 @@ async function execOption(o: HelmOption, request: string) {
       }
       case 'actions':
         if (!(await mayRunIn(o.actions!))) return
-        return await plan(o.actions!, '', request, false)
+        // Oracle wrote these steps, from a context that includes what consoles printed: they are
+        // gated as the planner's are (a step the request did not ask for, a spawn with a task)
+        return await plan(o.actions!, '', request, true)
       case 'panel':
         return await plan([{ type: 'openPanel', name: o.panel! }], '', request, false)
       case 'brainstorm': {

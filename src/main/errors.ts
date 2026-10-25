@@ -22,6 +22,36 @@ export function logError(kind: string, err: unknown) {
   return text
 }
 
+/** message → this minute's count, for logRepeated */
+const repeats = new Map<string, { since: number; n: number }>()
+const REPEAT_WINDOW_MS = 60_000
+/** how many of one message a minute reach the log; the rest are counted */
+const REPEAT_LIMIT = 5
+
+/**
+ * logError for a source that can repeat itself (the renderer's stray errors: one thrown on every
+ * animation frame is sixty a second). Past a few of the same in a minute they are only counted, and
+ * the count is written when the minute is up — otherwise they filled the 1 MB log and rotated out the
+ * first one, which is the one that says what went wrong.
+ */
+export function logRepeated(kind: string, message: string, now = Date.now()): boolean {
+  const key = `${kind}\0${message.split('\n')[0]}`
+  let r = repeats.get(key)
+  if (r && now - r.since > REPEAT_WINDOW_MS) {
+    if (r.n > REPEAT_LIMIT) logError(kind, `(the error above repeated ${r.n - REPEAT_LIMIT} more times in a minute)`)
+    r = undefined
+  }
+  if (!r) {
+    if (repeats.size > 200) repeats.clear()
+    r = { since: now, n: 0 }
+    repeats.set(key, r)
+  }
+  r.n++
+  if (r.n > REPEAT_LIMIT) return false
+  logError(kind, message)
+  return true
+}
+
 export function catchStrayErrors(tell: (message: string) => void) {
   let lastTold = 0
   const report = (kind: string) => (err: unknown) => {

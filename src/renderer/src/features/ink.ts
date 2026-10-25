@@ -1,5 +1,6 @@
 // Feature module entry: board content (planning nodes) and ink. Registers the ink style toolbar overlay,
 // a couple of ink keyboard shortcuts and the content stylesheet.
+import { isTypingTarget } from '../lib/typing'
 import { BOARD_OVERLAYS } from '../board/BoardOverlays'
 import { InkToolbar } from '../board/ink/InkToolbar'
 import { duplicateInk, selectedInk, useInkUi } from '../board/ink/inkState'
@@ -12,8 +13,7 @@ if (prev >= 0) BOARD_OVERLAYS.splice(prev, 1)
 ;(InkToolbar as any).__fbInk = true
 BOARD_OVERLAYS.push(InkToolbar)
 
-const typing = (t: EventTarget | null) =>
-  !!(t as HTMLElement | null)?.closest?.('input, textarea, select, [contenteditable="true"], .xterm, [data-terminal], webview')
+const typing = isTypingTarget
 
 function onKey(e: KeyboardEvent) {
   if (typing(e.target) || !useApp.getState().project) return

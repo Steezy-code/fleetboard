@@ -71,9 +71,21 @@ test('a path inside the project still works, through every handler', async () =>
   assert.equal(fs.readFileSync(path.join(project, 'bin.dat'), 'utf8'), 'hi')
 })
 
-test('~/.fleetboard works too — Settings reveals it, and the board lives there', async () => {
-  assert.equal(await ipcMain.invoke('fs:exists', path.join(home, 'projects', 'proj1.json')), true)
+test('~/.fleetboard works too — Settings reveals it, and pictures dropped on a board live there', async () => {
+  fs.mkdirSync(path.join(home, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(home, 'assets', 'pic.png'), 'png')
+  assert.equal(await ipcMain.invoke('fs:exists', path.join(home, 'assets', 'pic.png')), true)
   assert.equal(await ipcMain.invoke('shell:openPath', home), '', 'the root itself, not only what is in it')
+})
+
+test('but not its private parts: sign-ins, tokens, the board files and app.json are main’s alone', async () => {
+  fs.mkdirSync(path.join(home, 'profiles', 'work'), { recursive: true })
+  fs.writeFileSync(path.join(home, 'profiles', 'work', '.credentials.json'), '{"token":"x"}')
+  await assert.rejects(() => ipcMain.invoke('fs:read', path.join(home, 'profiles', 'work', '.credentials.json')), /Outside the folders/)
+  assert.equal(await ipcMain.invoke('fs:exists', path.join(home, 'projects', 'proj1.json')), false)
+  // app.json holds the grants: writing it would be a way round mainOwnedGlobal after a restart
+  await assert.rejects(() => ipcMain.invoke('fs:write', path.join(home, 'app.json'), '{}'), /Outside the folders/)
+  await assert.rejects(() => ipcMain.invoke('fs:write', path.join(home, 'hooks', 'fb-hook.cjs'), 'evil'), /Outside the folders/)
 })
 
 test('a read outside the roots is refused, in the shape each caller expects', async () => {
@@ -183,4 +195,26 @@ test("a loop's goal check only runs in a folder Fleetboard may touch", async () 
   await assert.rejects(() => ipcMain.invoke('goal:check', outside, 'true'), /Outside the folders/)
   const r = await ipcMain.invoke('goal:check', project, IS_WIN ? 'exit 0' : 'true')
   assert.equal(r.code, 0, JSON.stringify(r))
+})
+
+test('a relative path is checked and used as the same file: the project’s, never the app’s working folder', async () => {
+  // the check resolved it against the project; fs then resolved it against process.cwd(), so a name
+  // that exists in the project passed and the same name in the working folder (often the home
+  // folder) was read and written instead
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-confine-cwd-'))
+  fs.mkdirSync(path.join(cwd, 'src'), { recursive: true })
+  fs.writeFileSync(path.join(cwd, 'src', 'a.ts'), 'the working folder’s\n')
+  const was = process.cwd()
+  process.chdir(cwd)
+  try {
+    assert.equal(await ipcMain.invoke('fs:read', 'src/a.ts'), fs.readFileSync(path.join(project, 'src', 'a.ts'), 'utf8'), 'read from the project')
+    await ipcMain.invoke('fs:write', 'src/b.ts', 'new\n')
+    assert.equal(fs.readFileSync(path.join(project, 'src', 'b.ts'), 'utf8'), 'new\n', 'written into the project')
+    assert.equal(fs.existsSync(path.join(cwd, 'src', 'b.ts')), false, 'and not into the working folder')
+    assert.equal(await ipcMain.invoke('fs:exists', 'src/b.ts'), true)
+    assert.equal((await ipcMain.invoke('fs:stat', 'src/a.ts'))?.size, fs.statSync(path.join(project, 'src', 'a.ts')).size)
+    await assert.rejects(ipcMain.invoke('fs:read', '../../' + path.relative(path.resolve(project, '../..'), secret)), /Outside/, 'climbing out is still refused')
+  } finally {
+    process.chdir(was)
+  }
 })
