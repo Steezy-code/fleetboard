@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import type { Project, ProjectMeta, Recovery, Settings, Workspace } from '@shared/types'
 import { DEFAULT_SETTINGS, SCHEMA_VERSION } from '@shared/types'
 import type { MainContext } from './context'
-import { declareProject, mainOwnedGlobal } from './roots'
+import { declareProject, declaredProject, mainOwnedGlobal } from './roots'
 import { dirs, writeJsonAtomic } from './paths'
 import { logError } from './errors'
 
@@ -19,6 +19,9 @@ interface AppFile {
   projects: ProjectMeta[]
   global: Record<string, unknown>
 }
+
+/** Windows and macOS compare folders without regard to case (roots.ts does the same). */
+const fold = (p: string) => (process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p)
 
 const recoveries: Recovery[] = []
 let emit: MainContext['emit'] | null = null
@@ -261,7 +264,11 @@ export function saveProject(p: Project) {
   // and never write an older shape over a board a newer Fleetboard saved
   const onDisk = schemaOf(projectFile(p.id))
   if (tooNew(onDisk)) throw new Error(`This board was saved by a newer version of Fleetboard (board format ${onDisk}, this one writes ${SCHEMA_VERSION}). Update Fleetboard to open it.`)
-  current = p
+  // Saving a board is not opening it. The page saves the board it is leaving in the background just
+  // after it has declared the next one, and that save used to make the old board current again — the
+  // old folder was then the only project root, and nothing could be read or started in the new one.
+  const declaredNow = declaredProject()
+  if (!declaredNow || fold(path.resolve(p.path)) === fold(declaredNow)) current = p
   p.schema = SCHEMA_VERSION
   // The board is saved here. Everything after this is bookkeeping — the recent-projects list and a
   // periodic snapshot — and none of it may be reported as "the board could not be saved", which is
@@ -348,7 +355,12 @@ export function register(ctx: MainContext) {
   ipc.handle('store:projectId', (_e, p: string) => {
     // the first thing openProject does, and the only point before any read where the folder being
     // opened is named — a brand-new folder has no saved board to take it from (see roots.ts)
-    declareProject(p)
+    const opening = declareProject(p)
+    // A different folder is being opened, so the board loaded before is not "the open one" any more.
+    // For a folder with a saved board loadProject makes that one current next; for a brand-new folder
+    // nothing does until its first save, and projectRoot() preferred the old board's folder over the
+    // declared one meanwhile: a team could not be started, nor a file read, in a folder just opened.
+    if (opening && current && fold(path.resolve(current.path)) !== fold(opening)) current = null
     return projectIdFor(p)
   })
   ipc.handle('store:loadProject', (_e, id: string) => {

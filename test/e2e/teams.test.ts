@@ -433,9 +433,12 @@ test("a team console's token is good for that console only: a worker cannot call
   const members = Object.values(s.members) as any[]
   const lead = members.find((m) => m.role === 'lead')
   const worker = members.find((m) => m.role === 'worker')
-  const config = (id: string) => JSON.parse(fs.readFileSync(path.join(sb.fbHome, 'hooks', `mcp-${id}.json`), 'utf8')).mcpServers.fleet
-  const { url: leadUrl, headers: leadHeaders } = config(lead.id)
-  const { headers: workerHeaders } = config(worker.id)
+  // the config files name ${FB_MCP_TOKEN}; each console's environment holds the token, and the fake
+  // agent records what it sent with it (workers have exited by now, so their environment is gone)
+  const auth = (name: string) => app!.fakeLog((e) => e.event === 'mcp-auth' && e.name === name).at(-1) as { url: string; headers: Record<string, string> }
+  assert.equal(JSON.parse(fs.readFileSync(path.join(sb.fbHome, 'hooks', `mcp-${lead.id}.json`), 'utf8')).mcpServers.fleet.headers.Authorization, 'Bearer ${FB_MCP_TOKEN}', 'the file holds no token')
+  const { url: leadUrl, headers: leadHeaders } = auth(lead.name)
+  const { headers: workerHeaders } = auth(worker.name)
   const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' }
   const call = (url: string, headers: Record<string, string>, body: unknown = list) =>
     fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: typeof body === 'string' ? body : JSON.stringify(body) })

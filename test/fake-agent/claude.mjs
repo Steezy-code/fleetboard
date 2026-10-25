@@ -545,6 +545,9 @@ function onKeys(data) {
   opts.resumed = opts.resumeId !== undefined || !!opts.cont
 }
 log('start', { args: argv, mode: opts.mode, allowed: opts.allowed, resumed: !!opts.resumed, mcp: !!mcpUrl, session, history: history(session) ?? [] })
+// what the real CLI would send to the fleet server, once ${FB_MCP_TOKEN} is expanded: for the tests that
+// call that server as one member or another (the config file names the variable, never the token)
+if (mcpUrl) log('mcp-auth', { url: mcpUrl, headers: mcpServer.headers })
 process.stdin.setRawMode?.(true)
 process.stdin.setEncoding('utf8')
 process.stdin.on('data', onKeys)

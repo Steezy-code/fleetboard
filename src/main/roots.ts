@@ -54,15 +54,25 @@ function within(child: string, root: string): boolean {
  */
 let declared: string | null = null
 
-/** The folder the renderer is opening. Ignored unless it is a directory that exists. */
-export function declareProject(p: unknown): void {
-  if (typeof p !== 'string' || !p.trim() || !path.isAbsolute(p)) return
+/** The folder the renderer last declared it is opening (declareProject), or null. */
+export const declaredProject = () => declared
+
+/**
+ * The folder the renderer is opening. Ignored unless it is a directory that exists. Returns the
+ * folder it took, or null when it took none.
+ */
+export function declareProject(p: unknown): string | null {
+  if (typeof p !== 'string' || !p.trim() || !path.isAbsolute(p)) return null
   const abs = path.resolve(p)
   try {
-    if (fs.statSync(abs).isDirectory()) declared = abs
+    if (fs.statSync(abs).isDirectory()) {
+      declared = abs
+      return abs
+    }
   } catch {
     /* not a folder: leave the previous one */
   }
+  return null
 }
 
 let cache: Grant[] | null = null
