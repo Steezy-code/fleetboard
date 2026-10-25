@@ -24,7 +24,7 @@ import { InboxTray } from './fleet/InboxTray'
 import { useInboxWatcher } from './fleet/inboxModel'
 import { mayDropUnsaved } from './lib/unsaved'
 import { useAsciiReveal } from 'ascii-reveal'
-import { markBoardRevealed } from './lib/reveal'
+import { markBoardRevealed, waveKey } from './lib/reveal'
 
 export function App() {
   const project = useApp((s) => s.project)
@@ -41,8 +41,8 @@ export function App() {
   useInboxWatcher()
 
   useEffect(() => {
-    const ws = project?.activeWorkspaceId
-    if (!ws || waved.current === ws) return
+    const ws = waveKey(project?.activeWorkspaceId)
+    if (waved.current === ws) return
     waved.current = ws
     // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
     const done = () => markBoardRevealed(ws)
