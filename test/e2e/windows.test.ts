@@ -91,9 +91,22 @@ test('pausing a console really freezes it, and the tile says so', opts, async ()
 
   await a.invoke('pty:pause', id)
   await a.waitFor(async () => ((await statusOf()) === 'paused' ? true : null), { timeout: 20_000, label: 'the tile reads paused' })
-  // the freeze is one PowerShell call away: let it land before deciding whether it took
-  await new Promise((r) => setTimeout(r, 3000))
-  const frozen = await ticks()
+  // The freeze is one PowerShell call away, and a fixed delay is a guess about how long that call
+  // takes. On our own machine three seconds was always enough; a hosted runner has come in 400 ms
+  // late (21 ticks against 19) and, once, not frozen at all by then (31). So wait for the output to
+  // actually stop, then hold still and prove it stays stopped. A pause that never lands fails here
+  // just as loudly, on the timeout.
+  let frozen = await ticks()
+  await a.waitFor(
+    async () => {
+      await new Promise((r) => setTimeout(r, 700))
+      const n = await ticks()
+      if (n === frozen) return true
+      frozen = n
+      return null
+    },
+    { timeout: 30_000, label: 'the console going quiet' }
+  )
   await new Promise((r) => setTimeout(r, 2500))
   assert.equal(await ticks(), frozen, 'a paused console prints nothing more')
 
