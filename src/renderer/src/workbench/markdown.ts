@@ -159,6 +159,10 @@ const ALLOWED_TAGS = new Set(
   ).split(' ')
 )
 const DROP_TAGS = new Set('script style iframe frame frameset object embed applet template noscript form textarea select option button link meta base svg math audio video source track canvas dialog portal'.split(' '))
+/** classes markdown may keep: what this module's own renderer writes (see the attribute loop) */
+const SAFE_CLASS = /^(hljs(-[\w-]+)?|language-[\w+#.-]+|wikilink|unresolved|callout(-[a-z]+)?)$/
+/** every id from markdown goes under this, so none can be one of the app's */
+const ID_PREFIX = 'md-'
 const ALLOWED_ATTRS = new Set('href src alt title class align width height colspan rowspan type checked disabled start id open data-wiki lang dir'.split(' '))
 
 const RELATIVE_BASE = 'https://relative.invalid/'
@@ -212,6 +216,16 @@ export function sanitizeHtml(html: string, opts?: MdOptions): string {
           const ok = safeUrl(attr.value, name)
           if (ok == null) child.removeAttribute(attr.name)
         }
+        // A README's classes and ids live in the app's own page. Its classes could dress a paragraph up
+        // as the app's buttons or dialogs, and an id could take one the app looks up. So classes are the
+        // renderer's own few (highlighting, wiki links, callouts), and every id is put under md-, which
+        // the in-page anchor lookup below adds too.
+        if (name === 'class') {
+          const kept = attr.value.split(/\s+/).filter((c) => SAFE_CLASS.test(c))
+          if (kept.length) child.setAttribute('class', kept.join(' '))
+          else child.removeAttribute('class')
+        }
+        if (name === 'id') child.setAttribute('id', ID_PREFIX + attr.value.replace(/^md-/, ''))
       }
       if (tag === 'input') {
         if ((child.getAttribute('type') ?? '').toLowerCase() !== 'checkbox') {
@@ -262,7 +276,7 @@ export function handleMdClick(e: React.MouseEvent<HTMLElement>, h: MdClickHandle
   if (!href) return
   if (href.startsWith('#')) {
     const id = decodeURIComponent(href.slice(1))
-    const el = e.currentTarget.querySelector(`[id="${CSS.escape(id)}"]`)
+    const el = e.currentTarget.querySelector(`[id="${CSS.escape(ID_PREFIX + id)}"]`)
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     return
   }

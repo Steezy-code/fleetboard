@@ -110,10 +110,38 @@ function loadCache() {
   cacheLoaded = true
   const raw = readJson<{ v: number; files: Record<string, FileEntry> } | null>(CACHE_FILE, null)
   if (raw?.v === CACHE_VERSION && raw.files) cache = new Map(Object.entries(raw.files))
+  generation++
 }
 
+/** The cache changed: it is due a write, and every list built from it is out of date. */
+function touched() {
+  cacheDirty = true
+  generation++
+}
+/** bumped on every change to the cache: eventsOf answers from its last list until it moves */
+let generation = 0
+let savedAt = 0
+let saveTimer: NodeJS.Timeout | null = null
+/** how often the cache file is rewritten at most: it is a cache, and losing one costs only a rescan */
+const SAVE_EVERY_MS = 5 * 60_000
+
+/**
+ * Write the cache, at most every few minutes. It holds every event of every log, rewritten whole and
+ * synchronously; after each scan that found something new — every minute while an agent works — that
+ * was a stall on the thread carrying the consoles' output, growing with the user's history.
+ */
 function saveCache() {
   if (!cacheDirty) return
+  const wait = savedAt + SAVE_EVERY_MS - Date.now()
+  if (wait > 0) {
+    saveTimer ??= setTimeout(() => {
+      saveTimer = null
+      saveCache()
+    }, wait)
+    saveTimer.unref?.()
+    return
+  }
+  savedAt = Date.now()
   cacheDirty = false
   try {
     // not pretty-printed: every event is an array of eight numbers, and one-per-line makes this file
@@ -394,7 +422,7 @@ async function scan(force = false) {
     }
     const live = new Set(files.map((f) => f.file))
     // eslint-disable-next-line unicorn/no-useless-spread -- a copy, because the loop deletes as it goes
-    for (const k of [...cache.keys()]) if (!live.has(k)) (cache.delete(k), (cacheDirty = true))
+    for (const k of [...cache.keys()]) if (!live.has(k)) (cache.delete(k), touched())
 
     const todo: { agent: UsageAgent; file: string; mtime: number; size: number }[] = []
     for (const f of files) {
@@ -414,7 +442,7 @@ async function scan(force = false) {
       try {
         const entry = await readLog(f, force ? undefined : cache.get(f.file))
         cache.set(f.file, entry)
-        cacheDirty = true
+        touched()
       } catch {
         /* unreadable file */
       }
@@ -540,8 +568,22 @@ interface FlatEv {
   e: Ev
 }
 
-/** All events of one agent across files, deduplicated (resumed sessions repeat history). */
+const flat = new Map<UsageAgent, { generation: number; events: FlatEv[] }>()
+
+/**
+ * All events of one agent across files, deduplicated (resumed sessions repeat history), oldest first.
+ * Built once per change to the cache: limits() asked for it per agent on every poll, each time a
+ * flat copy and a sort of everything the user had ever run.
+ */
 function eventsOf(agent: UsageAgent): FlatEv[] {
+  const known = flat.get(agent)
+  if (known && known.generation === generation) return known.events
+  const events = buildEvents(agent)
+  flat.set(agent, { generation, events })
+  return events
+}
+
+function buildEvents(agent: UsageAgent): FlatEv[] {
   const seen = new Set<string>()
   const out: FlatEv[] = []
   for (const [file, f] of cache) {

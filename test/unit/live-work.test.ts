@@ -13,6 +13,7 @@ import {
   failingCount,
   farOver,
   liveDiff,
+  AGENTS_CODE,
   mayRun,
   numstat,
   overEstimate,
@@ -154,7 +155,7 @@ test('the trend reads against where the team started', () => {
 })
 
 test('a run starts only when it may, for every trigger alike', () => {
-  const base = { command: 'npm test', leadWorking: true, inWorktree: true, reason: 'merge' as const }
+  const base = { command: 'npm test', leadWorking: true, inWorktree: true, reason: 'start' as const }
   assert.equal(mayRun(base), true)
   assert.equal(mayRun({ ...base, command: 'the tests pass' }), 'not a command')
   assert.equal(mayRun({ ...base, off: true }), 'switched off')
@@ -162,8 +163,28 @@ test('a run starts only when it may, for every trigger alike', () => {
   assert.equal(mayRun({ ...base, leadWorking: false }), 'its lead is not working')
   assert.equal(mayRun({ ...base, inWorktree: false }), 'no integration worktree', 'a team in the user’s own files has nowhere apart to run it')
   assert.equal(mayRun({ ...base, reason: 'tick', head: 'a', lastHead: 'a' }), 'nothing new to check')
-  assert.equal(mayRun({ ...base, reason: 'tick', head: 'b', lastHead: 'a' }), true)
-  assert.equal(mayRun({ ...base, reason: 'merge', head: 'a', lastHead: 'a' }), true, 'a merge always checks again')
+})
+
+test('merged work is the agents’ code: it never runs on its own, only when the user asks', () => {
+  const base = { command: 'npm test', leadWorking: true, inWorktree: true }
+  // a worker that rewrote package.json's "test" script would otherwise have it run, unsandboxed, the moment it is merged
+  assert.equal(mayRun({ ...base, reason: 'merge', head: 'b', lastHead: 'a' }), AGENTS_CODE)
+  assert.equal(mayRun({ ...base, reason: 'tick', head: 'b', lastHead: 'a' }), AGENTS_CODE)
+  assert.equal(mayRun({ ...base, reason: 'user', head: 'b', lastHead: 'a' }), true)
+  assert.equal(mayRun({ ...base, reason: 'user', off: true, leadWorking: false }), true, 'the user’s own say-so, whatever the Lead is doing')
+  assert.equal(mayRun({ ...base, reason: 'user', running: 1 }), 'already running')
+  assert.equal(mayRun({ ...base, reason: 'user', inWorktree: false }), 'no integration worktree')
+  assert.equal(mayRun({ ...base, reason: 'user', command: 'it works' }), 'not a command')
+})
+
+test('a commit waiting to be checked shows on the trend until a run of it answers it', () => {
+  const waiting = check([{ ...run(1), head: 'base' }], { unchecked: 'merged' })
+  assert.equal(checkTrend(waiting, 'npm test'), 'failing · new work not checked')
+  assert.equal(checkTrend({ ...waiting, running: 1 }, 'npm test'), 'failing · running…')
+  const answered = withRun(waiting, { ...run(0), head: 'merged' })
+  assert.equal(answered.unchecked, undefined)
+  assert.equal(checkTrend(answered, 'npm test'), 'passing')
+  assert.equal(withRun(waiting, { ...run(0), head: 'base' }).unchecked, 'merged', 'a run of another commit leaves it waiting')
 })
 
 test('a finished run is kept, the oldest dropped past the limit, and the run in flight cleared', () => {

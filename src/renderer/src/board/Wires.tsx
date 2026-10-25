@@ -1,12 +1,16 @@
 import { memo } from 'react'
 import type { Workspace } from '@shared/types'
+
+/** What wires are drawn from. Not the workspace itself: its camera changes on every pan frame, and the memo below would never hold. */
+type WireSpace = Pick<Workspace, 'nodes' | 'groups' | 'wires'>
 import { center, edgePoint, type Rect } from './geometry'
 import { groupBox, hiddenIds } from './place'
 import { useApp } from '../state/store'
 import { useFleet } from '../engine/fleet'
 
 /** Curved orchestrator wires between board items, with a dot travelling along each. */
-export const Wires = memo(function Wires({ ws }: { ws: Workspace }) {
+export const Wires = memo(function Wires({ nodes, groups, wires }: WireSpace) {
+  const ws = { nodes, groups, wires }
   const selection = useApp((s) => s.selection)
   const hot = useFleet((s) => s.hot)
   const folded = hiddenIds(ws)

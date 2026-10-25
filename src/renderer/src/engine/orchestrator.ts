@@ -1,12 +1,12 @@
 import { create } from 'zustand'
 import { allConsoles, useApp } from '../state/store'
 import { uid } from '../lib/api'
-import { agentLabel, isLive, resolveTargets, sendToConsole } from './consoles'
+import { agentLabel, isLive, nameKey, resolveTargets, sendToConsole } from './consoles'
 
 // Orchestrator: command many consoles at once. Shared by the orchestrator drawer, the orchestrator
 // board node and the voice agent.
 
-const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '')
+const norm = nameKey
 
 /** Mention token for a name ("Maya 2" → "@Maya2"). */
 export const mentionToken = (name: string) => `@${name.replace(/\s+/g, '')}`

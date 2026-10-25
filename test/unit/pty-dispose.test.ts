@@ -120,3 +120,19 @@ test('a shell console is a terminal: what the user started with nohup outlives c
   await new Promise((r) => setTimeout(r, 3000))
   assert.ok(alive(child), 'the nohup job runs on, as after closing any terminal')
 })
+
+test('two starts of one console in flight together start one process, not two', { skip: !fs.existsSync('/proc/self/stat') && 'needs /proc' }, async (t) => {
+  // starting awaits the login shell's environment before the session is recorded; a second request in
+  // that gap (a tile remounting while the board reopens) used to start a second CLI under the same id,
+  // which nothing tracked and nothing ended
+  const ptys = new PtyManager(() => null, () => DEFAULT_SETTINGS)
+  t.after(() => ptys.dispose())
+  const req = { id: 'twice', agentId: 'shell', cwd: dir, cols: 80, rows: 24, command: 'sleep 600' }
+  const [a, b] = await Promise.all([ptys.spawn(req), ptys.spawn(req)])
+  assert.equal(a.pid, b.pid, 'the second start is handed the first')
+  assert.equal(ptys.list().length, 1)
+  const again = await ptys.spawn(req)
+  assert.equal(again.pid, a.pid, 'and a running one is handed back as before')
+  await ptys.dispose()
+  assert.ok(await until(() => !alive(a.pid), 2000))
+})

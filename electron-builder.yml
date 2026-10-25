@@ -32,3 +32,15 @@ linux:
   target: AppImage
   icon: resources/icon.png
   category: Development
+# Electron fuses, flipped in the packaged binary (dev and the end-to-end runs use the plain one):
+# nothing here runs Electron as Node (the hooks use the user's own node), so the switches that would
+# let any program turn this signed-or-not binary into a Node interpreter or attach a debugger to it
+# are off, and only the app's own asar, checked against its hash, is ever loaded. file:// keeps its
+# default: the window and the PDF printer load from it.
+electronFuses:
+  runAsNode: false
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableCookieEncryption: true
+  onlyLoadAppFromAsar: true
+  enableEmbeddedAsarIntegrityValidation: true

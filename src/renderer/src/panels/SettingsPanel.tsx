@@ -504,7 +504,7 @@ function PhoneInbox() {
     if (on && network === 'lan') {
       const ok = await useApp.getState().confirm({
         title: 'Serve the Inbox on your local network?',
-        body: 'It is plain HTTP: someone on the same network who can see its traffic could copy the link and answer for you. Tailscale encrypts the connection; prefer it when you can.',
+        body: 'It is plain HTTP: someone on the same network who can see its traffic could copy the link and answer for you. So a Wi-Fi link lasts a day, then the code here is scanned again. Tailscale encrypts the connection; prefer it when you can.',
         confirm: 'Use the local network',
         danger: true
       })
@@ -540,7 +540,7 @@ function PhoneInbox() {
                 ? `Tailscale (${st.addresses.tailscale}): encrypted, reachable from your devices anywhere.`
                 : 'Tailscale is not running on this computer.'
               : st.network === 'lan'
-                ? `Local network (${st.addresses.lan ?? 'no address'}): plain HTTP, same Wi-Fi only.`
+                ? `Local network (${st.addresses.lan ?? 'no address'}): plain HTTP, same Wi-Fi only; the link lasts a day.`
                 : 'This computer only (127.0.0.1): to try it in a browser here.'}
           </div>
         </div>

@@ -124,9 +124,18 @@ export function launch(file: string, args: string[], env: Record<string, string 
     const node = fs.existsSync(local) ? local : (findExecutable('node', env) ?? 'node')
     return { file: node, args: [script, ...args] }
   }
+  // cmd.exe expands %NAME% before anything else reads the line, quotes or not, and no escape survives
+  // that on a command line (^ is literal inside quotes). A prompt quoting a PR comment or a terminal
+  // that says %GITHUB_TOKEN% would reach the model as the token itself, so such an argument is refused
+  // here rather than sent. A lone % (100%) is not a variable and passes.
+  const expands = args.find((a) => CMD_VARIABLE.test(a))
+  if (expands !== undefined) throw new Error(`${path.basename(file)} runs through cmd.exe, which would replace ${CMD_VARIABLE.exec(expands)![0]} in its arguments with that variable's value, so it was not started. Install it so it has a .exe or an npm shim, or leave the %…% out.`)
   const comspec = env.ComSpec || env.COMSPEC || 'cmd.exe'
   return { file: comspec, args: ['/d', '/s', '/c', `"${[file, ...args].map(cmdQuote).join(' ')}"`] }
 }
+
+/** What cmd.exe expands on a command line: %NAME% (a name with no spaces, quotes or %) */
+export const CMD_VARIABLE = /%[^%\s"]+%/
 
 /** child_process options a launch needs (cmd.exe's own quoting must reach it as written). */
 export const launchOptions = (l: Launch) => (IS_WIN && /cmd\.exe$/i.test(l.file) ? { windowsVerbatimArguments: true, windowsHide: true } : { windowsHide: true })

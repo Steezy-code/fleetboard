@@ -1,3 +1,4 @@
+import { isTypingTarget } from '../lib/typing'
 import { offscreen } from './visibility'
 import { useEffect, useRef, useState } from 'react'
 import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
@@ -10,7 +11,7 @@ import { Wires } from './Wires'
 import { InkLayer } from './InkLayer'
 import { intersects } from './geometry'
 import { groupBox, hiddenIds } from './place'
-import { fileUrl, invoke } from '../lib/api'
+import { fileUrl, request } from '../lib/api'
 
 const within = (box: { x: number; y: number; w: number; h: number }, r: { x: number; y: number; w: number; h: number }) =>
   r.x >= box.x && r.y >= box.y && r.x + r.w <= box.x + box.w && r.y + r.h <= box.y + box.h
@@ -29,10 +30,7 @@ export function zoomToSelection() {
   app.zoomToRect({ x: l, y: t, w: r - l, h: b - t }, 40, 1.4)
 }
 
-const isTyping = (t: EventTarget | null) => {
-  const el = t as HTMLElement | null
-  return !!el?.closest?.('input, textarea, select, [contenteditable="true"], .xterm, [data-terminal], webview')
-}
+const isTyping = isTypingTarget
 
 export function Board() {
   const ref = useRef<HTMLDivElement>(null)
@@ -367,7 +365,7 @@ export function Board() {
         const scale = Math.min(1, 640 / img.w)
         app.addNode({ type: 'image', x: p.x + offset, y: p.y + offset, w: img.w * scale, h: img.h * scale, data: { path } })
       } else {
-        const stat = await invoke<{ dir: boolean } | null>('fs:stat', path)
+        const stat = await request('fs:stat', path)
         if (stat && !stat.dir) app.addNode({ type: 'file', x: p.x + offset, y: p.y + offset, data: { path } })
       }
       offset += 30
@@ -392,7 +390,7 @@ export function Board() {
         {ws.groups.map((g) => (
           <GroupFrame key={g.id} group={g} selected={selection.includes(g.id)} />
         ))}
-        <Wires ws={ws} />
+        <Wires nodes={ws.nodes} groups={ws.groups} wires={ws.wires} />
         {ws.nodes.map((n) =>
           n.id === focusedNode ? (
             <NodeFrame key={n.id} node={n} selected={false} zoom={1} maximized />

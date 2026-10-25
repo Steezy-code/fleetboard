@@ -96,7 +96,9 @@ const fail = (error: string) => ({ ok: false as const, error })
  * and check out, and a git card's folder comes from the board file.
  */
 function validCwd(cwd: string) {
-  return typeof cwd === 'string' && cwd.length > 0 && allowed(cwd, 'git') && fs.existsSync(cwd)
+  // absolute only: git runs with this as its cwd, and a relative one would be taken against the main
+  // process's own working directory rather than the project the check resolved it against (roots.ts)
+  return typeof cwd === 'string' && path.isAbsolute(cwd) && allowed(cwd, 'git') && fs.existsSync(cwd)
 }
 
 const CODE_FOR: Record<string, string> = { M: 'M', T: 'M', A: 'A', D: 'D', R: 'R', C: 'C', U: 'U' }
@@ -227,6 +229,10 @@ async function diff(cwd: string, file: string, opts: { untracked?: boolean; stag
   if (!validCwd(cwd)) return fail('Folder not found')
   const root = (await repoRoot(cwd)) ?? cwd
   const abs = path.resolve(root, file)
+  // a file of this repository: `../../.ssh/id_rsa` resolved here and was read whole for the "new file"
+  // preview, past every check the folder itself had passed
+  const rel = path.relative(root, abs)
+  if (typeof file !== 'string' || !file || !rel || rel.startsWith('..') || path.isAbsolute(rel)) return fail('Not a file of this repository')
   if (opts.untracked) {
     try {
       const st = fs.statSync(abs)
@@ -263,6 +269,7 @@ async function diff(cwd: string, file: string, opts: { untracked?: boolean; stag
 }
 
 async function show(cwd: string, hash: string): Promise<GitResult<{ diff: string }>> {
+  if (!validCwd(cwd)) return fail('Folder not found')
   if (!/^([0-9a-f]{4,64}|HEAD(~\d+)?)$/i.test(hash)) return fail('Bad commit id')
   const r = await git(cwd, ['show', '--no-color', '--stat', '--patch', '--format=%h %s%n%an · %ar%n', hash])
   if (r.code !== 0) return fail(cleanErr(r))

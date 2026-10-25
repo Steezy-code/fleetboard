@@ -11,8 +11,18 @@ let cached: Record<string, string> | null = null
  * that mise / nvm / ~/.local/bin add, so agents would not be found. We read it once from `$SHELL -lic`.
  * (Windows has no login shell: apps get the user's full environment already.)
  */
-export async function loginEnv(): Promise<Record<string, string>> {
-  if (cached) return cached
+/** the read in flight: callers that ask meanwhile share it rather than each start a login shell */
+let reading: Promise<Record<string, string>> | null = null
+
+export function loginEnv(): Promise<Record<string, string>> {
+  if (cached) return Promise.resolve(cached)
+  reading ??= readLoginEnv().finally(() => {
+    reading = null
+  })
+  return reading
+}
+
+async function readLoginEnv(): Promise<Record<string, string>> {
   const shell = process.env.SHELL || '/bin/bash'
   const base = normalizePathKey({ ...process.env } as Record<string, string>)
   if (!IS_WIN) try {

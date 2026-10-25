@@ -148,3 +148,28 @@ test('dependency folders are left out of staging only while the repo tracks noth
   sh('add', '-A', '--', '.', ...skip)
   assert.match(sh('diff', '--cached', '--name-only'), /vendor\/lib\/x\.go/)
 })
+
+test('Done counts the Lead’s commits when pressed, not when the Ready card was made', async () => {
+  // a card with 0 commits offers only Done, which deleted the branch with -D; a Lead that stayed on
+  // and merged follow-up work after it had that work deleted with it
+  const { commitsSinceReady } = await import('../../src/main/fleet')
+  const { emptyFleet } = await import('../../src/shared/fleet')
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-done-'))
+  const env = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' }
+  const sh = (...a: string[]) => execFileSync('git', a, { cwd: repo, env, encoding: 'utf8' }).trim()
+  sh('init', '-q')
+  fs.writeFileSync(path.join(repo, 'a.txt'), '1\n')
+  sh('add', '-A')
+  sh('commit', '-qm', 'base')
+  const base = sh('rev-parse', 'HEAD')
+  sh('branch', 'fleet/lead')
+  const s = emptyFleet('p', repo)
+  const lead = { id: 'lead', name: 'Lead', role: 'lead' as const, agentId: 'claude', projectId: 'p', cwd: repo, status: 'reported' as const, createdAt: 0, branch: 'fleet/lead', base }
+  assert.equal(await commitsSinceReady(s, lead), 0, 'nothing yet: Done may remove it')
+  sh('checkout', '-q', 'fleet/lead')
+  fs.writeFileSync(path.join(repo, 'b.txt'), 'follow-up\n')
+  sh('add', '-A')
+  sh('commit', '-qm', 'follow-up')
+  assert.equal(await commitsSinceReady(s, lead), 1, 'work merged after the card: the branch is kept')
+  assert.equal(await commitsSinceReady(s, { ...lead, base: undefined }), 1, 'and an unknown start counts as work')
+})

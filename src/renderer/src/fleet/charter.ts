@@ -11,7 +11,7 @@ import { type RepoKnowledge, citable, emptyKnowledge, knowledgeBlock } from '@sh
 import { norm } from '@shared/mergeReview'
 import { useApp } from '../state/store'
 import { setVoice, useVoice } from '../voice/thread'
-import { extractJson, invoke, runCli } from '../lib/api'
+import { extractJson, runCli, request } from '../lib/api'
 import { currentKnowledge, recordCharterEdits, refreshKnowledge } from './knowledge'
 import { readOnlyAgent } from '@shared/agents'
 
@@ -217,7 +217,7 @@ async function citedThatExist(c: Charter, root: string | undefined): Promise<Set
   // a fact is looked up in the knowledge, not on disk
   const cited = [...new Set(c.assumptions.flatMap((a) => (a.known && a.from && !FACT_CITE.test(a.from) ? [norm(a.from)] : [])))]
   if (!root) return new Set()
-  const found = await Promise.all(cited.map((p) => invoke<boolean>('fs:exists', rooted(p) ? p : `${root}/${p}`).catch(() => false)))
+  const found = await Promise.all(cited.map((p) => request('fs:exists', rooted(p) ? p : `${root}/${p}`).catch(() => false)))
   return new Set(cited.filter((_, i) => found[i]))
 }
 

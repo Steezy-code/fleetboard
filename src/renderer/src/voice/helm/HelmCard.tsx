@@ -1,3 +1,4 @@
+import { isTypingTarget } from '../../lib/typing'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { AppWindow, Check, CornerDownLeft, Pencil, Send, Sparkles, Users, Wrench, X, Zap, Lightbulb } from 'lucide-react'
 import { useApp } from '../../state/store'
@@ -62,7 +63,7 @@ export function HelmCard() {
       const app = useApp.getState()
       if (app.panel || app.confirms.length) return
       const el = e.target as HTMLElement | null
-      const typing = !!el?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), .xterm, [data-terminal], webview')
+      const typing = isTypingTarget(el)
       if (typing && !el?.classList.contains('command-input')) return
       dismissHelm()
     }

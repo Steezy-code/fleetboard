@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, FilePlus2, FolderPlus } from 'lucide-react'
-import type { TreeEntry } from '../../../main/fsops'
+import type { TreeEntry } from '@shared/types'
 import { FileIcon, FolderIcon } from './icons'
 import { dirname, relativeTo, stripExt } from './paths'
 import { AsciiSkeleton } from 'ascii-reveal'
