@@ -5,7 +5,7 @@ import { ROLES } from '@shared/types'
 import { AGENTS, AGENT_ALIASES } from '@shared/agents'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { activeWs, allConsoles, useApp } from '../state/store'
-import { agentLabel, isLive, killConsoles, pauseAll, resumeAll, sendToConsole, spawnConsoles } from '../engine/consoles'
+import { agentLabel, isLive, killConsoles, nameKey, pauseAll, resumeAll, sendToConsole, spawnConsoles } from '../engine/consoles'
 import { handoff } from '../engine/handoff'
 import { memberOf } from '../engine/fleet'
 import { gateCharter } from '../fleet/charter'
@@ -50,7 +50,8 @@ export const markActive = (id: string) => lastActive.set(id, Date.now())
 
 // ---------------------------------------------------------------- name resolution
 
-export const norm = (s: string) => s.toLowerCase().replace(/^@/, '').replace(/[^a-z0-9]+/g, '')
+/** one way of comparing names across the app (engine/consoles.ts nameKey) */
+export const norm = nameKey
 
 function lev(a: string, b: string): number {
   if (Math.abs(a.length - b.length) > 1) return 2

@@ -114,3 +114,14 @@ test('run.ts is the only module that names git as a program to run', () => {
     .sort()
   assert.deepEqual(spawners, [], 'run git through git() from run.ts: it is where the environment and the arguments are made safe')
 })
+
+test('the hardening reaches git through the environment too, for the git that gh and submodules start', async () => {
+  const { HARDENED_CONFIG_ENV, GIT_OPTS } = await import('../../src/main/run')
+  assert.equal(HARDENED_CONFIG_ENV.GIT_CONFIG_COUNT, String(GIT_OPTS.length / 2))
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-gitenv-'))
+  execFileSync('git', ['init', '-q'], { cwd: repo })
+  execFileSync('git', ['config', 'core.fsmonitor', 'touch pwned'], { cwd: repo })
+  // a plain `git config --get`, with nothing on its command line: the environment's value wins
+  const seen = execFileSync('git', ['config', '--get', 'core.fsmonitor'], { cwd: repo, env: { ...process.env, ...HARDENED_CONFIG_ENV }, encoding: 'utf8' }).trim()
+  assert.equal(seen, 'false')
+})

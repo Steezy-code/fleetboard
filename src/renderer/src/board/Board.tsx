@@ -1,3 +1,4 @@
+import { isTypingTarget } from '../lib/typing'
 import { offscreen } from './visibility'
 import { useEffect, useRef, useState } from 'react'
 import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
@@ -29,10 +30,7 @@ export function zoomToSelection() {
   app.zoomToRect({ x: l, y: t, w: r - l, h: b - t }, 40, 1.4)
 }
 
-const isTyping = (t: EventTarget | null) => {
-  const el = t as HTMLElement | null
-  return !!el?.closest?.('input, textarea, select, [contenteditable="true"], .xterm, [data-terminal], webview')
-}
+const isTyping = isTypingTarget
 
 export function Board() {
   const ref = useRef<HTMLDivElement>(null)

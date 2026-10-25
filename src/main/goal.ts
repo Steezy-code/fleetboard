@@ -41,14 +41,21 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
     if (!command.trim()) return resolve({ code: null, tail: '', error: 'no command' })
     if (signal?.aborted) return resolve({ code: null, tail: '', error: 'stopped' })
     if (!fs.existsSync(cwd)) return resolve({ code: null, tail: '', error: `folder not found: ${cwd}` })
-    void loginEnv().then((env) => {
+    void loginEnv().catch(() => process.env as Record<string, string>).then((env) => {
       let out = ''
       const keep = (d: Buffer) => {
         out = (out + d.toString()).slice(-TAIL * 4)
       }
       // its own process group (POSIX), so a timeout ends whatever it started too; Windows ends the tree
       const l = oneShot(command, env)
-      const child = spawn(l.file, l.args, { cwd, env: { ...env, CI: '1' }, detached: !IS_WIN, stdio: ['ignore', 'pipe', 'pipe'], ...launchOptions(l) })
+      let child: ReturnType<typeof spawn>
+      try {
+        child = spawn(l.file, l.args, { cwd, env: { ...env, CI: '1' }, detached: !IS_WIN, stdio: ['ignore', 'pipe', 'pipe'], ...launchOptions(l) })
+      } catch (e: any) {
+        // spawn throws, rather than emitting 'error', for some bad arguments: this promise must still
+        // settle, or a live check stays "in flight" and never runs again
+        return resolve({ code: null, tail: '', error: String(e?.message ?? e) })
+      }
       running.add(child)
       let timedOut = false
       const timer = setTimeout(() => {
@@ -57,8 +64,8 @@ export function runGoalCheck(cwd: string, command: string, timeoutMs = 15 * 60_0
       }, timeoutMs)
       const stop = () => killTree(child.pid)
       signal?.addEventListener('abort', stop, { once: true })
-      child.stdout.on('data', keep)
-      child.stderr.on('data', keep)
+      child.stdout?.on('data', keep)
+      child.stderr?.on('data', keep)
       child.on('error', (e) => {
         clearTimeout(timer)
         signal?.removeEventListener('abort', stop)

@@ -76,7 +76,14 @@ test('no vector runs script, in markdown or raw HTML, even when its links are cl
 
 test('ordinary markdown survives sanitizing', async () => {
   const html = await app.eval(() => (window as any).__fleetboard.markdown.renderMarkdown('# Title\n\nSee [docs](https://example.com) and [a file](src/a.ts), `code`, **bold**.\n\n- [x] done\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![img](https://example.com/x.png)'))
-  for (const want of ['<h1 id="title">Title</h1>', 'href="https://example.com"', 'href="src/a.ts"', '<code>code</code>', '<strong>bold</strong>', 'type="checkbox"', '<table>', 'src="https://example.com/x.png"']) assert.ok(html.includes(want), `${want} in ${html}`)
+  for (const want of ['<h1 id="md-title">Title</h1>', 'href="https://example.com"', 'href="src/a.ts"', '<code>code</code>', '<strong>bold</strong>', 'type="checkbox"', '<table>', 'src="https://example.com/x.png"']) assert.ok(html.includes(want), `${want} in ${html}`)
+})
+
+test("a README cannot wear the app's classes or take its ids", async () => {
+  const html = await app.eval(() => (window as any).__fleetboard.markdown.renderMarkdown('<p class="modal btn danger hljs-keyword" id="root">x</p>'))
+  assert.match(html, /class="hljs-keyword"/, 'highlighting classes stay')
+  assert.doesNotMatch(html, /modal|btn|danger/, 'the app’s own do not')
+  assert.match(html, /id="md-root"/, 'and an id goes under md-')
 })
 
 test('the Documents studio keeps its callouts', async () => {

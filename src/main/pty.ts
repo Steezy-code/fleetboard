@@ -55,6 +55,22 @@ interface Session {
 
 export { stripAnsi } from '@shared/ansi'
 
+/**
+ * The newest MAX_BUFFER of a console's output, cut where a line starts.
+ *
+ * It was trimmed to exactly MAX_BUFFER on every chunk once full — a 400 KB copy per chunk from a
+ * chatty console — and at whatever character fell there, which could be the middle of an escape
+ * sequence, so a terminal replaying it drew garbage until the next reset. Trimmed once it is a
+ * quarter over, and at a line break when there is one nearby.
+ */
+export function trimBuffer(buffer: string, max = MAX_BUFFER): string {
+  let cut = buffer.length - max
+  if (cut <= 0) return buffer
+  const nl = buffer.indexOf('\n', cut)
+  if (nl >= 0 && nl - cut < 16_384) cut = nl + 1
+  return buffer.slice(cut)
+}
+
 /** Everything the console started: its process group (POSIX), its process tree (Windows). */
 const killGroup = (pid: number) => killTree(pid, 'SIGKILL')
 
@@ -230,7 +246,7 @@ export class PtyManager {
     proc.onData((data) => {
       s.buffer += data
       if (data.includes('\x1b[?2004')) s.bracketed = data.lastIndexOf('\x1b[?2004h') > data.lastIndexOf('\x1b[?2004l')
-      if (s.buffer.length > MAX_BUFFER) s.buffer = s.buffer.slice(-MAX_BUFFER)
+      if (s.buffer.length > MAX_BUFFER * 1.25) s.buffer = trimBuffer(s.buffer)
       s.screen.write(data)
       s.outputAt = Date.now()
       s.tracker.output(s.outputAt)

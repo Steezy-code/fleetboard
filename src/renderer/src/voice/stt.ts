@@ -64,7 +64,14 @@ function getWorker(): Worker {
 export function warmUpStt(): Promise<void> {
   const model = modelId()
   if (loadedModel && loadedModel !== model) {
-    // model changed in settings: start a fresh worker
+    // model changed in settings: start a fresh worker. What the old one still owed is answered now —
+    // terminated, it never would be, and push-to-talk sat at "transcribing" for good
+    const gone = new Error('The speech model changed; say it again.')
+    pending.forEach((p) => p.reject(gone))
+    pending.clear()
+    loadReject?.(gone)
+    loadResolve = null
+    loadReject = null
     worker?.terminate()
     worker = null
     ready = false

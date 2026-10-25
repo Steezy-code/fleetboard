@@ -28,7 +28,7 @@ import * as remote from './remote'
 import { dirs } from './paths'
 import { THEMES, themeById, type Theme } from '@shared/themes'
 import { toRendererPath } from './platform'
-import { catchStrayErrors, logError } from './errors'
+import { catchStrayErrors, logError, logRepeated } from './errors'
 import { appPermission, mediaTypesOf, webPermission } from './permissions'
 import * as journal from './journal'
 import { allowed, allowedPath, outsideMessage } from './roots'
@@ -40,14 +40,20 @@ let win: BrowserWindow | null = null
 
 /** The session web tiles browse in (WebNode's <webview partition>). */
 const WEB_PARTITION = 'persist:fleetboard-web'
-// Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process.
+// Whatever the renderer asks for, a web tile never gets Node, a preload or an unsandboxed process —
+// and it browses in the web tiles' own session. In any other (the app's default one, which may use the
+// microphone and read the clipboard) a page would be granted what appPermission allows the app itself.
 app.on('web-contents-created', (_e, contents) => {
-  contents.on('will-attach-webview', (_ev, prefs) => {
+  contents.on('will-attach-webview', (ev, prefs, params) => {
     delete prefs.preload
     prefs.nodeIntegration = false
     prefs.nodeIntegrationInSubFrames = false
     prefs.contextIsolation = true
     prefs.sandbox = true
+    if (params.partition !== WEB_PARTITION) {
+      ev.preventDefault()
+      logError('webview', `a web tile asked for session "${params.partition}" and was not attached`)
+    }
   })
 })
 let quitConfirmed = false
@@ -313,7 +319,7 @@ function registerCore() {
   // closing the window while the save, or the dialog a failed save opens, is still going.
   ctx.ipc.on('app:quitAck', () => clearTimeout(quitWatchdog))
   // the renderer's own stray errors, into the same log as the main process's
-  ctx.ipc.on('app:logError', (_e, message: string) => logError('renderer', String(message).slice(0, 4000)))
+  ctx.ipc.on('app:logError', (_e, message: string) => void logRepeated('renderer', String(message).slice(0, 4000)))
 
   // asked once by a page as it starts: was it reloaded after the window crashed?
   ctx.ipc.handle('app:crashRecovered', () => {

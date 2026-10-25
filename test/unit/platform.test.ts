@@ -102,3 +102,9 @@ test('a prompt with backslashes and quotes reaches a .cmd CLI as one argument', 
     assert.deepEqual(crtSplit(line), ['agent.exe', '-p', prompt], JSON.stringify(prompt))
   }
 })
+
+test('what cmd.exe would expand in an argument is recognised, and nothing else is', async () => {
+  const { CMD_VARIABLE } = await import('../../src/main/platform')
+  for (const yes of ['print %GITHUB_TOKEN%', '%PATH%', 'a %x% b']) assert.ok(CMD_VARIABLE.test(yes), yes)
+  for (const no of ['100% done', '50% of it, then 20%', 'no percent', '% spaced %', '%"quoted"%']) assert.ok(!CMD_VARIABLE.test(no), no)
+})

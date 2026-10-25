@@ -627,7 +627,14 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   stopCheck(s.projectId)
   delete s.check
   changed(s)
-  await startConsole(s, m)
+  try {
+    await startConsole(s, m)
+  } catch (e) {
+    // no Lead without a console: its worktree goes, and the user is told why (the renderer shows the error)
+    await dismiss(s, m, 'merged')
+    changed(s)
+    throw e
+  }
   post(s, { from: 'user', to: id, kind: 'goal', text: goalMessageFor(charter, opts.goal) })
   // the baseline, so later runs can say "down from 11"
   void runCheck(s, 'start')
@@ -957,7 +964,16 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       }
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
-      await startConsole(s, w)
+      try {
+        await startConsole(s, w)
+      } catch (e: any) {
+        // its CLI could not start (not installed, a bad path): a member left "working" with no console
+        // held a worker slot and its worktree for good, and nothing would ever report for it
+        if (ref) delete ref.owner
+        await dismiss(s, w, 'merged')
+        changed(s)
+        return fail(`${w.name} could not start: ${String(e?.message ?? e).slice(0, 300)}`)
+      }
       post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m, s.charter?.wontTouch) })
       return text(
         `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
@@ -1050,7 +1066,9 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       const r = await git(m.cwd, ['merge', '--no-ff', '--no-edit', '-m', `Merge ${w.branch}`, at])
       if (!r.ok) {
         const conflicts = (await git(m.cwd, ['diff', '--name-only', '--diff-filter=U'])).out
-        await git(m.cwd, ['merge', '--abort'])
+        // only a merge this call left half done: one that never started (refused by a dirty tree) has
+        // nothing to abort, and `--abort` is not a command to run on state it did not make
+        if (await unfinishedOperation(m.cwd)) await git(m.cwd, ['merge', '--abort'])
         return fail(`Merge failed${conflicts ? `; conflicts in: ${conflicts.split('\n').join(', ')}` : `: ${r.err.slice(0, 400)}`}. Ask ${w.name} to fix it with fleet_send.`)
       }
       w.status = 'merged'
@@ -1194,19 +1212,23 @@ function startServer(): Promise<number> {
       if (req.method === 'GET') return res.writeHead(405, { Allow: 'POST' }).end()
       if (req.method === 'DELETE') return res.writeHead(200).end()
       if (req.method !== 'POST') return res.writeHead(405).end()
-      let body = ''
+      const chunks: Buffer[] = []
+      let size = 0
       // a long call (fleet_wait, fleet_ask_user) must notice when its caller goes away
       const hangup = new AbortController()
       res.on('close', () => {
         if (!res.writableFinished) hangup.abort()
       })
       let tooBig = false
-      req.on('data', (d) => {
+      // bytes until the end, decoded once: a character split across two chunks was garbled when each
+      // chunk was turned into a string on its own
+      req.on('data', (d: Buffer) => {
         if (tooBig) return
-        body += d
-        if (body.length > MAX_BODY) {
+        size += d.length
+        chunks.push(d)
+        if (size > MAX_BODY) {
           tooBig = true
-          body = ''
+          chunks.length = 0
           res.writeHead(413, { Connection: 'close' }).end()
           req.resume()
         }
@@ -1215,20 +1237,32 @@ function startServer(): Promise<number> {
         if (tooBig) return
         let parsed: any
         try {
-          parsed = JSON.parse(body)
+          parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
         } catch {
           return res.writeHead(400).end()
         }
         const batch = Array.isArray(parsed)
-        const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
-        if (hangup.signal.aborted) return
-        if (!out.length) return res.writeHead(202).end()
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': encoded })
-        res.end(JSON.stringify(batch ? out : out[0]))
+        const messages: unknown[] = batch ? parsed : [parsed]
+        // `null`, a number, a string: no message at all. It used to throw reading `.id` in handleRpc,
+        // inside this handler, which left the request unanswered and the rejection unhandled
+        if (!messages.length || messages.some((x) => !x || typeof x !== 'object' || Array.isArray(x))) return res.writeHead(400).end()
+        try {
+          const out = (await Promise.all(messages.map((x) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
+          if (hangup.signal.aborted) return
+          if (!out.length) return res.writeHead(202).end()
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': encoded })
+          res.end(JSON.stringify(batch ? out : out[0]))
+        } catch (e) {
+          logError('fleet', e)
+          if (!res.headersSent) res.writeHead(500).end()
+        }
       })
     })
+    // No limit on a request as a whole: fleet_wait and fleet_ask_user hold one open for as long as it
+    // takes. The headers, though, come before the token is checked, and any program on the machine can
+    // open a connection: one that never finishes sending them is let go after a while.
     server.requestTimeout = 0
-    server.headersTimeout = 0
+    server.headersTimeout = 30_000
     server.keepAliveTimeout = 600_000
     // no loopback to listen on: the app starts without teams (port 0) rather than wait for ever
     server.once('error', (e) => {

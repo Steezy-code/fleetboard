@@ -276,6 +276,8 @@ const WRITES = new Set(['admin', 'maintain', 'write'])
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
 /** login → can push, per repository, for an hour: a poll every two minutes asks once */
 const writers = new Map<string, { can: boolean; at: number }>()
+const WRITER_YES_MS = 10 * 60_000
+const WRITER_NO_MS = 60 * 60_000
 
 /** Ask GitHub whether each MEMBER or COLLABORATOR author can push; their association alone does not say. */
 async function markWriters(comments: PrComment[], repo: string, gh: string, cwd: string, env: Record<string, string>) {
@@ -283,7 +285,9 @@ async function markWriters(comments: PrComment[], repo: string, gh: string, cwd:
   for (const login of logins.slice(0, 20)) {
     const key = `${repo}:${login.toLowerCase()}`
     const hit = writers.get(key)
-    if (hit && Date.now() - hit.at < 3_600_000) continue
+    // a yes is what lets a comment instruct an agent, so it is asked again soon: access taken away is
+    // honoured within minutes, not an hour. A no only keeps comments from being routed, and may last.
+    if (hit && Date.now() - hit.at < (hit.can ? WRITER_YES_MS : WRITER_NO_MS)) continue
     const r = await exec(gh, ['api', `repos/${repo}/collaborators/${login}/permission`, '--jq', '.permission'], cwd, env)
     // a failed lookup is not write access: the comment is shown to the user rather than routed
     writers.set(key, { can: r.code === 0 && WRITES.has(r.stdout.trim()), at: Date.now() })

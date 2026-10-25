@@ -49,27 +49,64 @@ export function runCli(
   return { runId, promise, cancel: () => request('cli:cancel', runId) }
 }
 
-/** Pull the first JSON object/array out of a model reply (tolerates ``` fences and prose). */
+/**
+ * Where the object or array opening at `start` closes (the index just past it), or -1. Strings are
+ * skipped whole, so a brace inside one does not count.
+ */
+function closingOf(s: string, start: number): number {
+  const want: string[] = []
+  let inString = false
+  let escaped = false
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') inString = true
+    else if (ch === '{') want.push('}')
+    else if (ch === '[') want.push(']')
+    else if (ch === '}' || ch === ']') {
+      if (want.pop() !== ch) return -1
+      if (!want.length) return i + 1
+    }
+  }
+  return -1
+}
+
+/**
+ * Pull the first JSON object/array out of a model reply (tolerates ``` fences and prose).
+ *
+ * Each `{` or `[` is tried in turn, up to where its brackets close: a reply that mentions "[1]" in its
+ * prose before the JSON still yields the JSON. It used to try the first one only, shrinking from the
+ * end one closing bracket at a time with a JSON.parse each — quadratic on a long reply, on the UI thread.
+ */
 export function extractJson<T = any>(text: string): T | null {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(text)
-  const candidates = [fenced?.[1], text]
-  for (const c of candidates) {
+  for (const c of [fenced?.[1], text]) {
     if (!c) continue
-    const start = c.search(/[[{]/)
-    if (start < 0) continue
-    for (let end = c.length; end > start; end--) {
-      const ch = c[end - 1]
-      if (ch !== '}' && ch !== ']') continue
+    // an object first: replies are asked for as one, and "[1]" in the prose before it is valid JSON too
+    let array: unknown
+    const opening = /[[{]/g
+    for (let tries = 0, m = opening.exec(c); m && tries < 64; m = opening.exec(c), tries++) {
+      const at = m.index
+      const end = closingOf(c, at)
+      if (end < 0) continue
       try {
-        return JSON.parse(c.slice(start, end)) as T
+        const v = JSON.parse(c.slice(at, end))
+        if (!Array.isArray(v)) return v as T
+        array ??= v
+        opening.lastIndex = end
       } catch {
-        /* keep shrinking */
+        /* not JSON after all: the next opening bracket */
       }
     }
+    if (array !== undefined) return array as T
   }
   return null
 }
-
 
 /** URL the renderer can load for a local file (images, PDFs, video). Windows paths become fbfile:///C:/… */
 export const fileUrl = (path: string) => {
