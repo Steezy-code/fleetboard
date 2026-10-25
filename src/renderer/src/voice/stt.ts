@@ -4,7 +4,7 @@ import tapUrl from './tap.worklet.js?url'
 import { fb } from '../lib/api'
 import { useApp } from '../state/store'
 import { setVoice, useVoice } from './thread'
-import { runCommand } from './planner'
+import { noteListening, runCommand } from './planner'
 import { stopSpeaking, warmUpTts } from './tts'
 
 const RATE = 16000
@@ -241,6 +241,7 @@ export async function beginListening() {
   chunks = []
   startedAt = performance.now()
   setVoice({ phase: 'listening', transcript: '', reply: '', level: 0, captionUntil: 0 })
+  noteListening()
   warmUpStt()
     .then(() => {
       // the voice model downloads after the speech model, so the first reply can be spoken by Kokoro sooner

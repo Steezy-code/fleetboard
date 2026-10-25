@@ -392,7 +392,7 @@ export function Board() {
         {ws.groups.map((g) => (
           <GroupFrame key={g.id} group={g} selected={selection.includes(g.id)} />
         ))}
-        <Wires ws={ws} />
+        <Wires nodes={ws.nodes} groups={ws.groups} wires={ws.wires} />
         {ws.nodes.map((n) =>
           n.id === focusedNode ? (
             <NodeFrame key={n.id} node={n} selected={false} zoom={1} maximized />

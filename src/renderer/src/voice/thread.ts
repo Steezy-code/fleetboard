@@ -104,6 +104,11 @@ interface VoiceState {
   download: ModelLoad | null
   /** cancels the running planner call */
   cancelThinking: (() => void) | null
+  /**
+   * The Inbox card in front when push-to-talk began: a spoken "allow" is about that card, and only
+   * answers it if it is still the one in front once the words are transcribed (planner runCommand)
+   */
+  heardFront: string | null
 }
 
 export const useVoice = create<VoiceState>(() => ({
@@ -115,7 +120,8 @@ export const useVoice = create<VoiceState>(() => ({
   captionUntil: 0,
   pending: null,
   download: null,
-  cancelThinking: null
+  cancelThinking: null,
+  heardFront: null
 }))
 
 export const setVoice = (patch: Partial<VoiceState>) => useVoice.setState(patch)

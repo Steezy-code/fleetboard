@@ -644,6 +644,11 @@ export function inboxPick(light: string): number | 'next' | null {
   return null
 }
 
+/** Push-to-talk began: remember which Inbox card the user is looking at as they speak. */
+export function noteListening() {
+  setVoice({ heardFront: frontItem()?.key ?? null })
+}
+
 /** Entry point for the command bar, the chat drawer and push-to-talk. */
 export async function runCommand(raw: string, source: Source) {
   const text = raw.trim()
@@ -676,6 +681,12 @@ export async function runCommand(raw: string, source: Source) {
     const f = frontItem()
     const action = f && i != null ? f.actions[i] : undefined
     if (f && i != null && action) {
+      // Transcribing takes a moment, and the front card can change meanwhile (a new charter takes the
+      // front, the prompt is answered elsewhere): a "yes" said to one approval must not approve the next
+      if (f.key !== useVoice.getState().heardFront) {
+        showReply('The card in front changed while you spoke, so nothing was answered.', 3000)
+        return
+      }
       showReply(`${action.label}.`, 1500)
       return runInboxAction(f, i)
     }

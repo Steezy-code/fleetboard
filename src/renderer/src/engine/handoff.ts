@@ -92,14 +92,20 @@ function message(sources: BoardNode<ConsoleData>[], brief: string, note?: string
  * the first source, in its team) or to `toIds`, and wire source → receiver. Returns receiver ids.
  */
 export async function handoff(req: HandoffRequest): Promise<string[]> {
-  const app = useApp.getState()
-  const sources = sourceNodes(req.fromIds)
-  if (!sources.length) throw new Error('Pick at least one console to hand off')
+  if (!sourceNodes(req.fromIds).length) throw new Error('Pick at least one console to hand off')
   if (!req.toAgentId && !req.toIds?.length) throw new Error('Pick who receives the work')
+  const projectId = useApp.getState().project?.id
 
   const brief = req.brief?.trim() || (await writeBrief(req.fromIds, req.note, req.onChunk).promise)
+  // Writing the brief is a model run, often tens of seconds. Everything below is read again now: the
+  // store, and the sources' workspace and group, as they are after it. Read before the await, a
+  // workspace switch meanwhile spawned the receiver in the wrong one, and another project opened
+  // meanwhile was pointed at a workspace id it does not have — an empty board.
+  const app = useApp.getState()
+  if (app.project?.id !== projectId) throw new Error('Another project was opened while the brief was written, so nothing was handed off')
+  const sources = sourceNodes(req.fromIds)
   const first = sources[0]
-  if (!first) throw new Error('Pick who hands the work over')
+  if (!first) throw new Error('The consoles handing off are no longer on the board')
   // receivers land in the first source's workspace
   if (app.project && app.project.activeWorkspaceId !== first.workspaceId) app.switchWorkspace(first.workspaceId)
   const text = message(sources, brief, req.note)

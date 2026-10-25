@@ -151,7 +151,11 @@ export function wireFleet() {
 
   const refresh = async () => {
     const p = useApp.getState().project
-    useFleet.setState({ state: p ? await invoke<FleetState>('fleet:state', p.id, p.path) : null })
+    const s = p ? await invoke<FleetState>('fleet:state', p.id, p.path) : null
+    // another project opened while this was asked: its own refresh is on the way, and this answer is
+    // about a team whose buttons would act on the wrong project
+    if (useApp.getState().project?.id !== p?.id) return
+    useFleet.setState({ state: s })
   }
   useApp.subscribe((s, prev) => {
     if (s.project?.id === prev.project?.id) return

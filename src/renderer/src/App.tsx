@@ -25,7 +25,10 @@ import { useInboxWatcher } from './fleet/inboxModel'
 import { mayDropUnsaved } from './lib/unsaved'
 
 export function App() {
-  const project = useApp((s) => s.project)
+  // primitives only: the project object changes on every camera frame (pan, zoom), and selecting it
+  // here re-rendered the whole app tree, chrome and drawers included, once per frame
+  const hasProject = useApp((s) => !!s.project)
+  const activeWorkspaceId = useApp((s) => s.project?.activeWorkspaceId ?? '')
   const panel = useApp((s) => s.panel)
   const drawer = useApp((s) => s.drawer)
   const focused = useApp((s) => !!s.focusedNode)
@@ -112,10 +115,10 @@ export function App() {
 
   return (
     <div className="app">
-      {project ? (
+      {hasProject ? (
         <>
-          <Boundary what="The board" resetKey={project.activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>
-            <Board key={project.activeWorkspaceId} />
+          <Boundary what="The board" resetKey={activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>
+            <Board key={activeWorkspaceId} />
           </Boundary>
           <TopBar />
           {/* rails and bars step aside in focus mode; the Inbox stays */}

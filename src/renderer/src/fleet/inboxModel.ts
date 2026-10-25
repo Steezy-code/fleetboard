@@ -257,6 +257,8 @@ function fetchSpend(key: string, cwds: string[]) {
   if (!cwds.length) return
   invoke<Record<string, Spent | null>>('usage:spentIn', cwds).then(
     (r) => {
+      // a newer card asked meanwhile: this is the old one's spend
+      if (spendKey !== key) return
       spend = r
       refreshInbox()
     },
@@ -376,7 +378,10 @@ function build() {
   const app = useApp.getState()
   const project = app.project
   if (!project) return useInbox.setState({ items: [], front: null })
-  const fleet = useFleet.getState().state
+  // only this project's team: a state still about the one just left would pair its Lead and Ready
+  // card with this project's id on every button
+  const mirrored = useFleet.getState().state
+  const fleet = mirrored && mirrored.projectId === project.id ? mirrored : null
   const consoles = Object.fromEntries(allConsoles().map((c) => [c.id, c]))
   const items: InboxItem[] = []
   const memberName = (id: string) => fleet?.members[id]?.name ?? (consoles[id]?.data.name as string) ?? 'Lead'

@@ -227,3 +227,22 @@ test('deleting a group of plain tiles waits for confirm too: they go with it', (
   assert.deepEqual(confirmReasons([{ type: 'deleteTeam', team: 'g2' }], 'delete the notes group', false), ['deletes the tiles in a group'])
   useApp.setState({ project: home })
 })
+
+test('a spoken "allow" answers the card that was in front while it was said, or nothing', async () => {
+  const { runCommand, noteListening } = await import('@/voice/planner')
+  const { useInbox } = await import('@/fleet/inboxModel')
+  seed()
+  const ran: string[] = []
+  const card = (key: string) => ({ key, kind: 'notice', tone: 'info', head: key, lines: [], at: 0, actions: [{ label: 'Allow', tone: 'allow', run: () => void ran.push(key) }, { label: 'Deny', tone: 'deny', run: () => {} }] })
+  useInbox.setState({ items: [card('first')] as never, front: 'first', shownAt: 0 })
+  noteListening()
+  // while the words were being transcribed, another card took the front
+  useInbox.setState({ items: [card('second'), card('first')] as never, front: 'second', shownAt: Date.now() })
+  await runCommand('allow', 'voice')
+  assert.deepEqual(ran, [], 'the yes was for "first", and "second" is not it')
+
+  noteListening()
+  await runCommand('allow', 'voice')
+  assert.deepEqual(ran, ['second'], 'said to the card in front, it answers it')
+  useInbox.setState({ items: [], front: null })
+})
