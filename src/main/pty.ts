@@ -239,6 +239,9 @@ export class PtyManager {
   write(id: string, data: string) {
     const s = this.sessions.get(id)
     if (!s) return
+    // Freebuff disables its keyboard handler on blur. Keep its logical terminal input
+    // available for background delivery; this does not focus the app or the OS window.
+    if (s.agentId === 'freebuff' && data === '\x1b[O') data = '\x1b[I'
     // xterm answers terminal queries (device attributes, cursor position, colors, focus) through the
     // same channel; those replies are not the user typing and must not clear "needs you".
     if (!TERMINAL_REPLY.test(data)) s.tracker.input(Date.now())
@@ -336,11 +339,21 @@ export class PtyManager {
    * Without the paste markers a TUI guesses where a fast burst of text ends, and the Enter that
    * follows can end up inside the paste as a newline instead of submitting it.
    */
-  paste(id: string, text: string, submit = true) {
+  async paste(id: string, text: string, submit = true) {
     const s = this.sessions.get(id)
     if (!s) return
     const clean = pasteText(text)
-    this.write(id, s.bracketed ? `\x1b[200~${clean}\x1b[201~` : clean)
+    if (s.agentId === 'freebuff') {
+      // Freebuff turns pastes over 2,000 characters into attachments. Keep role/goal text
+      // in its composer, and let each paste event update the native UI before the next.
+      this.write(id, '\x1b[I')
+      const points = [...clean]
+      for (let i = 0; i < points.length; i += 1000) {
+        if (this.sessions.get(id) !== s) return
+        this.write(id, '\x1b[200~' + points.slice(i, i + 1000).join('') + '\x1b[201~')
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    } else this.write(id, s.bracketed ? `\x1b[200~${clean}\x1b[201~` : clean)
     if (submit) setTimeout(() => void this.enter(id), s.bracketed ? 150 : 350)
   }
 
@@ -355,6 +368,15 @@ export class PtyManager {
     if (!s) return
     await s.screen.flush()
     if ((detectPrompt(s.screen.view()) || s.tracker.status === 'needs-you') && !(await this.whenNoQuestion(id))) return
+    if (s.agentId === 'freebuff') {
+      // Its native keyboard handler ignores Enter after a terminal focus-out report.
+      // This reports terminal input focus; it never focuses an OS window.
+      this.write(id, '\x1b[I')
+      await new Promise((r) => setTimeout(r, 100))
+      if (this.sessions.get(id) !== s) return
+      await s.screen.flush()
+      if (detectPrompt(s.screen.view()) || s.tracker.status === 'needs-you') return
+    }
     if (this.sessions.has(id)) this.write(id, '\r')
   }
 
@@ -369,7 +391,7 @@ export class PtyManager {
     if (!detectPrompt(s.screen.view())) return this.paste(id, text, submit)
     this.emit('pty:held', id)
     if (submit) void this.deliver(id, text)
-    else void this.whenNoQuestion(id).then((ok) => ok && this.paste(id, text, false))
+    else void this.whenNoQuestion(id).then((ok) => { if (ok) return this.paste(id, text, false) })
   }
 
   private async whenNoQuestion(id: string, timeoutMs = 30 * 60_000): Promise<boolean> {
@@ -388,8 +410,10 @@ export class PtyManager {
    * the first Enter while it settles, leaving the message in its input box. Retries a couple of times.
    */
   typeAndSubmit(id: string, text: string) {
-    this.paste(id, text, false)
-    this.submitTyped(id, text, 0)
+    const session = this.sessions.get(id)
+    void this.paste(id, text, false).then(() => {
+      if (session && this.sessions.get(id) === session) this.submitTyped(id, text, 0)
+    })
   }
 
   private submitTyped(id: string, text: string, attempt: number) {

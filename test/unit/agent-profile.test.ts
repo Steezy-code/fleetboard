@@ -44,3 +44,31 @@ test('profile names cannot escape Fleetboard state',()=>{
  assert.throws(()=>agentProfile('freebuff','../escape',env),/Bad agent profile/)
  assert.throws(()=>removeAgentProfile('../escape','lead'),/Bad agent profile/)
 })
+
+
+test('Antigravity seeds completed native onboarding without letting planner resets overwrite it',()=>{
+ const rel=path.join('.gemini','antigravity-cli','cache','onboarding.json')
+ const realFile=path.join(home,rel)
+ const completed={consumerOnboardingComplete:true,enterpriseOnboardingComplete:false,onboardingComplete:true}
+ fs.mkdirSync(path.dirname(realFile),{recursive:true})
+ fs.writeFileSync(realFile,JSON.stringify(completed))
+ const first=agentProfile('antigravity','setup-planner',env,{readOnly:true})
+ assert.deepEqual(json(path.join(first.HOME!,rel)),completed)
+ assert.notEqual(fs.realpathSync(path.dirname(path.join(first.HOME!,rel))),fs.realpathSync(path.dirname(realFile)))
+ // Observed native print-mode shutdown rewrites its local record as incomplete.
+ fs.writeFileSync(path.join(first.HOME!,rel),JSON.stringify({onboardingComplete:false}))
+ assert.deepEqual(json(realFile),completed)
+ const concurrent=agentProfile('antigravity','setup-team',env)
+ assert.deepEqual(json(path.join(concurrent.HOME!,rel)),completed)
+ removeAgentProfile('antigravity','setup-planner');removeAgentProfile('antigravity','setup-team')
+ assert.deepEqual(json(realFile),completed)
+})
+
+test('Antigravity never manufactures setup completion when the native record is missing',()=>{
+ const rel=path.join('.gemini','antigravity-cli','cache','onboarding.json')
+ fs.rmSync(path.join(home,rel),{force:true})
+ const profile=agentProfile('antigravity','setup-missing',env)
+ assert.equal(fs.existsSync(path.join(profile.HOME!,rel)),false)
+ removeAgentProfile('antigravity','setup-missing')
+ assert.equal(fs.existsSync(path.join(home,rel)),false)
+})

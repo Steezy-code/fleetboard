@@ -47,7 +47,14 @@ export function agentProfile(agent: 'antigravity' | 'freebuff', id: string, env:
   const configDir = path.join(gemini, 'config')
   linkEntries(path.join(real, '.gemini', 'config'), configDir, ['mcp_config.json'])
   const cliDir = path.join(gemini, 'antigravity-cli')
-  linkEntries(path.join(real, '.gemini', 'antigravity-cli'), cliDir, ['settings.json'])
+  linkEntries(path.join(real, '.gemini', 'antigravity-cli'), cliDir, ['settings.json', 'cache'])
+  // Native print mode can reset onboarding.json. Seed each console from the user's
+  // actual completed setup, but never let a planner or sibling overwrite that record.
+  const realCache = path.join(real, '.gemini', 'antigravity-cli', 'cache')
+  const cache = path.join(cliDir, 'cache')
+  linkEntries(realCache, cache, ['onboarding.json'])
+  const onboarding = path.join(realCache, 'onboarding.json')
+  if (fs.existsSync(onboarding)) fs.copyFileSync(onboarding, path.join(cache, 'onboarding.json'))
   const settings = read(path.join(real, '.gemini', 'antigravity-cli', 'settings.json'))
   const mcp = read(path.join(real, '.gemini', 'config', 'mcp_config.json'))
   // Pick a stable terminal layout in Fleetboard when initial setup has not saved one yet.
@@ -73,6 +80,7 @@ export function agentProfile(agent: 'antigravity' | 'freebuff', id: string, env:
 }
 
 export function removeAgentProfile(agent: string, id: string) {
+  const home = profileDir(agent, id)
   // rm removes links/junctions themselves, never their targets.
-  fs.rmSync(profileDir(agent, id), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+  fs.rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }
