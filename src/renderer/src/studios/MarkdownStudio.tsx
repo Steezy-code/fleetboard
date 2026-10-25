@@ -11,6 +11,7 @@ import { baseName, dirname, joinPath, relativeTo, stripExt, isInside } from '../
 import type { FileStat } from '../workbench/useFileText'
 import type { WriteResult } from '@shared/types'
 import { setUnsaved } from '../lib/unsaved'
+import { AsciiSkeleton } from 'ascii-reveal'
 
 type Mode = 'reading' | 'source' | 'graph'
 type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
@@ -550,7 +551,7 @@ export default function MarkdownStudio(props: { path?: string }) {
             ) : !current ? (
               <div className="empty">
                 <BookOpenText size={28} className="dim" />
-                <div>{loaded ? 'Pick a note, or create one with +' : 'Loading vault…'}</div>
+                <div>{loaded ? 'Pick a note, or create one with +' : <AsciiSkeleton variant="terminal" lines={2} widths={['70%', '45%']} />}</div>
               </div>
             ) : mode === 'source' ? (
               <textarea

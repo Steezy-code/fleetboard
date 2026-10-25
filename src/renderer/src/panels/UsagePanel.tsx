@@ -7,6 +7,7 @@ import { metricOf, TokensChart, type TokenMetric } from '../continuity/TokensCha
 import { hasBudget, startUsageWatch, toneColor, usedPct, USAGE_AGENT_IDS, USAGE_AGENT_META, useUsage } from '../continuity/usageStore'
 import { fmtDay, fmtDuration, fmtInt, fmtReset, fmtTokens, fmtUntil, prettyModel } from '../continuity/format'
 import type { UsageAgent } from '../continuity/types'
+import { AsciiSkeleton, useAsciiReveal } from 'ascii-reveal'
 
 /** Usage drawer: plan-window estimates, activity heatmap, stats, and a tokens sub-view. */
 export default function UsagePanel({ agent: initial }: { agent?: UsageAgent }) {
@@ -297,7 +298,9 @@ function TokensView() {
   const loading = useUsage((s) => s.loading)
   const [metric, setMetric] = useState<TokenMetric>('all')
   const [span, setSpan] = useState<'30' | 'all'>('30')
-  if (!report) return <div className="empty">{loading ? 'Reading session logs…' : 'No data yet'}</div>
+  const card = useAsciiReveal({ preset: 'terminal' })
+  if (!report)
+    return <div className="empty">{loading ? <AsciiSkeleton variant="terminal" lines={4} widths={['70%', '85%', '60%', '45%']} /> : 'No data yet'}</div>
   const days = report.days.slice(-30)
   const sum30 = USAGE_AGENT_IDS.reduce((s, a) => s + days.reduce((x, d) => x + metricOf(d[a], metric), 0), 0)
   const byAgent = USAGE_AGENT_IDS.map((a) => {
@@ -309,7 +312,7 @@ function TokensView() {
 
   return (
     <>
-      <div className="usage-card">
+      <div className="usage-card" ref={card.ref}>
         <div className="row" style={{ marginBottom: 4 }}>
           <span className="label grow">Last 30 days</span>
           <span className="mono small">{fmtTokens(sum30)}</span>
