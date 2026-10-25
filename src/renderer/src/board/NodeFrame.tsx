@@ -1,4 +1,4 @@
-import { memo, useRef } from 'react'
+import { memo, useEffect, useRef } from 'react'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { BoardNode } from '@shared/types'
 import { mayRemove } from './removeHooks'
@@ -6,6 +6,8 @@ import { NODE_DEFS } from '../nodes/registry'
 import { activeWs, connectClick, focusRect, useApp } from '../state/store'
 import { groupAt, snap } from './geometry'
 import { Boundary } from '../ui/Boundary'
+import { createAsciiReveal } from 'ascii-reveal'
+import { boardIsRevealed } from '../lib/reveal'
 
 /**
  * Begin a drag that moves the node (and the rest of the selection) with the pointer.
@@ -134,6 +136,23 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
   const def = NODE_DEFS[node.type]
   const ref = useRef<HTMLDivElement>(null)
   const viewport = useApp((s) => s.viewport)
+
+  // A console that arrives after the launch wave decodes itself in: frame, header and status. Its
+  // terminal body carries data-ascii="skip", so live output is never redrawn through the glyph grid.
+  // Attached imperatively because the root's ref is already taken.
+  // ponytail: consoles only. Drop the type check and every new tile does it.
+  useEffect(() => {
+    if (node.type !== 'console' || !boardIsRevealed() || !ref.current) return
+    let live = true
+    const r = createAsciiReveal(ref.current, { preset: 'terminal' })
+    void r.reveal().finally(() => {
+      if (live) r.destroy()
+    })
+    return () => {
+      live = false
+      r.destroy()
+    }
+  }, [node.type])
   const tool = useApp((s) => s.tool)
   // A type this build does not know — a board written by a newer Fleetboard, or edited by hand. It
   // used to render nothing at all: the tile was invisible, unselectable and undeletable, while still
