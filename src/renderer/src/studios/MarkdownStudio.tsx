@@ -8,8 +8,6 @@ import { LinkGraph, type GraphNode } from '../workbench/LinkGraph'
 import { extractLinks, firstHeading, handleMdClick, isMarkdownPath, renderMarkdown } from '../workbench/markdown'
 import { exportMarkdownPdf } from '../workbench/pdf'
 import { baseName, dirname, joinPath, relativeTo, stripExt, isInside } from '../workbench/paths'
-import type { FileStat } from '../workbench/useFileText'
-import type { WriteResult } from '@shared/types'
 import { setUnsaved } from '../lib/unsaved'
 
 type Mode = 'reading' | 'source' | 'graph'

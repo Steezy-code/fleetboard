@@ -322,7 +322,7 @@ export function sweepLeftovers(now = Date.now()) {
       continue
     }
     for (const f of names) {
-      const age = /\.tmp$/.test(f) ? DAY : /\.corrupt-\d+\.json$/.test(f) ? 30 * DAY : 0
+      const age = f.endsWith('.tmp') ? DAY : /\.corrupt-\d+\.json$/.test(f) ? 30 * DAY : 0
       if (!age) continue
       try {
         const file = path.join(dir, f)

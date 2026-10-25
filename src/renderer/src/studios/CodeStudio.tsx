@@ -8,8 +8,7 @@ import { FileTree, ancestors, graft, type Creating, type TreeEntry } from '../wo
 import { FileIcon } from '../workbench/icons'
 import { isImagePath, langFromPath, langLabel } from '../workbench/markdown'
 import { baseName, dirname, joinPath, relativeTo, isInside } from '../workbench/paths'
-import { MAX_TEXT_BYTES, type FileStat } from '../workbench/useFileText'
-import type { WriteResult } from '@shared/types'
+import { MAX_TEXT_BYTES } from '../workbench/useFileText'
 import { setUnsaved } from '../lib/unsaved'
 
 interface Doc {
