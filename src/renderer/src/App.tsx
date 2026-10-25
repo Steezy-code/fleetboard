@@ -1,5 +1,5 @@
 import { TeamGuide } from './chrome/TeamGuide'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useApp } from './state/store'
 import { SCHEMA_VERSION, type Recovery } from '@shared/types'
 import { request, errorText, fb, on, invoke } from './lib/api'
@@ -23,14 +23,28 @@ import { useThemeSync } from './ui/theme'
 import { InboxTray } from './fleet/InboxTray'
 import { useInboxWatcher } from './fleet/inboxModel'
 import { mayDropUnsaved } from './lib/unsaved'
+import { useAsciiReveal } from 'ascii-reveal'
 
 export function App() {
   const project = useApp((s) => s.project)
   const panel = useApp((s) => s.panel)
   const drawer = useApp((s) => s.drawer)
   const focused = useApp((s) => !!s.focusedNode)
+  // One wave over everything on screen the first time the board is up. The glyph grid is measured
+  // from the real elements where they already are, so what scrambles is the shape of the content it
+  // is about to become — no hand-written skeleton to keep in step with the layout.
+  const launch = useAsciiReveal({ preset: 'terminal', revealOnMount: false })
+  const launched = useRef(false)
+
   useThemeSync()
   useInboxWatcher()
+
+  useEffect(() => {
+    if (!project || launched.current) return
+    launched.current = true
+    // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
+    void launch.reveal({ duration: 'cinematic' })
+  }, [project, launch])
 
   useEffect(() => {
     useApp.getState().init()
@@ -111,7 +125,7 @@ export function App() {
   const DrawerC = drawer ? DRAWERS[drawer.name] : null
 
   return (
-    <div className="app">
+    <div className="app" ref={launch.ref}>
       {project ? (
         <>
           <Boundary what="The board" resetKey={project.activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>
