@@ -9,7 +9,7 @@ import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
 import { commandLike, estimateOf, numstat, stampTask } from '@shared/live'
-import { agentById, TEAM_AGENTS } from '@shared/agents'
+import { agentById, TEAM_AGENTS, fleetPromptFor } from '@shared/agents'
 import { agentProfile, removeAgentProfile } from './agent-profile'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
@@ -287,7 +287,7 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
 // ---------------------------------------------------------------- prompts
 
 export function leadPrompt(m: FleetMember) {
-  return [
+  return fleetPromptFor(m.agentId, [
     `You are ${m.name}, the Lead of a Fleetboard team. The user gives you goals; you get them done through workers.`,
     'You have fleet tools (mcp__fleet__*). Rules:',
     '1. Never edit files yourself. Read the repo to understand it, then delegate.',
@@ -303,7 +303,7 @@ export function leadPrompt(m: FleetMember) {
     // agents post as the user: without the mark, Fleetboard would route the comment back as the user's own
     'If you or a worker comment on a pull request, start the comment with 🤖.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
-  ].join('\n')
+  ].join('\n'))
 }
 
 function workerPrompt(m: FleetMember, lead?: FleetMember) {
@@ -328,9 +328,9 @@ export function briefFor(m: FleetMember, lead?: FleetMember, wontTouch: string[]
   if (m.owns?.length) parts.push(`You own: ${m.owns.join(', ')}.`)
   if (wontTouch.length) parts.push(`Do not touch: ${wontTouch.join(', ')}.`)
   if (m.doneWhen) parts.push(`Done when: ${m.doneWhen}.`)
-  parts.push(m.role === 'reviewer' ? 'When finished, call fleet_report with your verdict.' : 'When done, call fleet_report.')
+  parts.push(fleetPromptFor(m.agentId, m.role === 'reviewer' ? 'When finished, call fleet_report with your verdict.' : 'When done, call fleet_report.'))
   // CLIs without a system-prompt flag get the role rules inline
-  if (m.agentId !== 'claude') parts.unshift(workerPrompt(m, lead).replace(/\n/g, ' '))
+  if (m.agentId !== 'claude') parts.unshift(fleetPromptFor(m.agentId, workerPrompt(m, lead)).replace(/\n/g, ' '))
   return parts.join(' ')
 }
 
@@ -1102,7 +1102,9 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   await ctx.ptys.stop(m.id)
   await removeWorktree(s, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
-  if (m.agentId === 'antigravity' || m.agentId === 'freebuff') removeAgentProfile(m.agentId, m.id)
+  if (m.agentId === 'antigravity' || m.agentId === 'freebuff') {
+    try { removeAgentProfile(m.agentId, m.id) } catch (e) { logError('fleet', 'Could not remove stopped agent profile: ' + String(e)) }
+  }
   // its MCP config holds its bearer token
   fs.rmSync(mcpFile(m.id), { force: true })
   changed(s)

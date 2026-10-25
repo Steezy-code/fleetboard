@@ -9,6 +9,8 @@ import { App, FAKE_CLAUDE, makeRepo, makeSandbox } from './harness'
 for (const agent of ['antigravity', 'freebuff'] as const) test(agent + ': chosen lead, inherited worker and reviewer complete a team', {timeout:120_000}, async()=>{
  const sb=makeSandbox(),repo=makeRepo(sb)
  let source=fs.readFileSync(FAKE_CLAUDE,'utf8').replace(/\r\n/g,'\n')
+ if (agent==='antigravity') source=source.replace('`❯ ${input}`','`> ${input}`')
+ if (agent==='freebuff') source=source.replace('`❯ ${input}`','`${input || (state === "working" ? "Add to the current task (/ for commands)" : "Enter a coding task or / for commands")}`')
  const config=agent==='antigravity'?['.gemini','config','mcp_config.json']:['.agents','mcp.json']
  source=source.replace('const mcpServer = (() => {', 'opts.mcpConfig = path.join(os.homedir(), ...'+JSON.stringify(config)+'); opts.allowed.push("mcp__fleet");\nconst mcpServer = (() => {')
  source=source.replace('return Object.values(cfg.mcpServers ?? {})[0]', 'const server=cfg.mcpServers.fleet; return server ? {...server,url:server.url ?? server.serverUrl} : undefined')

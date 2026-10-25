@@ -50,6 +50,9 @@ export function agentProfile(agent: 'antigravity' | 'freebuff', id: string, env:
   linkEntries(path.join(real, '.gemini', 'antigravity-cli'), cliDir, ['settings.json'])
   const settings = read(path.join(real, '.gemini', 'antigravity-cli', 'settings.json'))
   const mcp = read(path.join(real, '.gemini', 'config', 'mcp_config.json'))
+  // Pick a stable terminal layout in Fleetboard when initial setup has not saved one yet.
+  settings.colorScheme ??= 'terminal'
+  settings.altScreenMode ??= 'always'
   if (opts.readOnly) {
     // Plan mode is an instruction prefix, not a permission boundary. Deny writes and all command,
     // browser-actuation and MCP routes, even when the user's settings normally allow them.
@@ -71,5 +74,5 @@ export function agentProfile(agent: 'antigravity' | 'freebuff', id: string, env:
 
 export function removeAgentProfile(agent: string, id: string) {
   // rm removes links/junctions themselves, never their targets.
-  fs.rmSync(profileDir(agent, id), { recursive: true, force: true })
+  fs.rmSync(profileDir(agent, id), { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 }

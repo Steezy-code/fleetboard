@@ -93,6 +93,14 @@ export const AGENTS: AgentDef[] = [
 export const agentById = (id: string, custom: AgentDef[] = []): AgentDef | undefined =>
   AGENTS.find((a) => a.id === id) ?? custom.find((a) => a.id === id)
 
+/** Freebuff's MCP runtime requires its exact server-prefixed function names. Only role
+ * instructions go through this formatter, never user goals, filenames or task text. */
+export function fleetPromptFor(agentId: string, text: string): string {
+  return agentId === 'freebuff'
+    ? text.replace('mcp__fleet__*', 'fleet__fleet_*').replace(/\bfleet_(?!_)[a-z_]+\b/g, (tool) => 'fleet__' + tool)
+    : text
+}
+
 /** Names people say out loud for an agent, used by the voice / command parser. */
 export const AGENT_ALIASES: Record<string, string> = {
   claude: 'claude', 'claude code': 'claude', clod: 'claude', cloud: 'claude', 'cloud code': 'claude',

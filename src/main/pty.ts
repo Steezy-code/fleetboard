@@ -8,7 +8,7 @@ import { claudeHookArgs, hookEnv } from './hooks'
 import { profileEnv } from './profiles'
 import { fleetLaunch, isTeamConsole } from './fleet'
 import { TermScreen, type ScreenView } from './screen'
-import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, type Prompt } from './status'
+import { StatusTracker, TERMINAL_REPLY, answerKeys, detectPrompt, antigravityInputReady, freebuffInputReady, type Prompt } from './status'
 import { activityOf } from './activity'
 import type { AnswerResult, PromptAnswer } from '@shared/prompt'
 import { approvalFor, commandOf, seenOf } from '@shared/approvals'
@@ -437,7 +437,10 @@ export class PtyManager {
    */
   readyForInput(id: string): boolean {
     const s = this.sessions.get(id)
-    if (!s || s.tracker.paused || s.tracker.status !== 'idle') return false
+    if (!s || s.tracker.paused) return false
+    if (s.agentId === 'freebuff') return Date.now() - s.startedAt > 6000 && !s.screen.busy && freebuffInputReady(s.screen.view()) && !detectPrompt(s.screen.view())
+    if (s.tracker.status !== 'idle') return false
+    if (s.agentId === 'antigravity' && (s.screen.busy || !antigravityInputReady(s.screen.view()))) return false
     const quiet = Date.now() - s.tracker.lastOutput
     // wait for the screen to settle: input typed mid-redraw right after startup can get stuck
     if (s.tracker.hooked) return s.tracker.ready && quiet > 1200
@@ -519,7 +522,10 @@ export class PtyManager {
 
   private evaluate(s: Session) {
     const prev = s.tracker.status
-    const next = s.tracker.evaluate(Date.now(), detectPrompt(s.screen.view()))
+    const view = s.screen.view()
+    const prompt = detectPrompt(view)
+    let next = s.tracker.evaluate(Date.now(), prompt)
+    if (s.agentId === 'freebuff' && !s.tracker.paused && !prompt && freebuffInputReady(view)) next = s.tracker.status = 'idle'
     if (next !== prev) this.emit('pty:status', s.id, next)
     this.readActivity(s, next)
     // after a turn (idle, with new output since the last look): find which saved session is this console's
