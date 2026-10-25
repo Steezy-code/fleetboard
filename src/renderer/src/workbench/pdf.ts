@@ -1,4 +1,4 @@
-import { errorText, invoke } from '../lib/api'
+import { errorText, invoke, request } from '../lib/api'
 import { useApp } from '../state/store'
 import { escapeHtml, firstHeading, renderMarkdown } from './markdown'
 
@@ -79,7 +79,7 @@ export async function exportMarkdownPdf(md: string, title: string, opts: { defau
   const out = await invoke<string | null>('dialog:saveFile', def, [{ name: 'PDF', extensions: ['pdf'] }])
   if (!out) return null
   try {
-    await invoke('pdf:fromHtml', markdownToHtmlDocument(md, title), out)
+    await request('pdf:fromHtml', markdownToHtmlDocument(md, title), out)
     app.toast(`Exported ${out.split('/').pop()}`, 'ok')
     return out
   } catch (e: any) {

@@ -4,19 +4,14 @@ import { isUtf8 } from 'node:buffer'
 import { dialog, shell } from 'electron'
 import type { MainContext } from './context'
 import { readRegularFile, readRegularText, writeDurable } from './paths'
-import type { WriteResult } from '@shared/types'
+import type { TreeEntry, WriteResult } from '@shared/types'
 import { toRendererPath } from './platform'
 import { allowedPath, grant, grantDropped, outsideMessage } from './roots'
 
 /** The most a text read hands the renderer: any source file, note or log; past this it is not a text to edit here. */
 const MAX_READ = 32 * 1024 * 1024
 
-export interface TreeEntry {
-  name: string
-  path: string
-  dir: boolean
-  children?: TreeEntry[]
-}
+export type { TreeEntry }
 
 const IGNORE = new Set(['node_modules', '.git', '.next', 'dist', 'out', 'build', '.turbo', '.cache', 'target', '.venv', 'venv', '__pycache__', '.DS_Store'])
 

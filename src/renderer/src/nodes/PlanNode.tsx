@@ -2,7 +2,7 @@ import { Circle, CircleCheck, CircleDashed, CircleDot, Pause, Play, RotateCw, Te
 import type { NodeProps } from './types'
 import { useFleet } from '../engine/fleet'
 import { useApp } from '../state/store'
-import { invoke } from '../lib/api'
+import { invoke, request } from '../lib/api'
 import { useNow } from '../lib/useNow'
 import { checkTrend, commandLike, diffLabel, elapsedLabel, overEstimate, type Timed } from '@shared/live'
 import type { FleetState } from '@shared/fleet'
@@ -49,7 +49,7 @@ function DoneWhen({ fleet }: { fleet: FleetState }) {
           title="Run this check now, on the work merged so far (it runs the code the agents wrote)"
           onClick={(e) => {
             e.stopPropagation()
-            invoke('fleet:runCheck', fleet.projectId)
+            request('fleet:runCheck', fleet.projectId)
           }}
         >
           <RotateCw size={12} />

@@ -10,7 +10,7 @@ import { Wires } from './Wires'
 import { InkLayer } from './InkLayer'
 import { intersects } from './geometry'
 import { groupBox, hiddenIds } from './place'
-import { fileUrl, invoke } from '../lib/api'
+import { fileUrl, request } from '../lib/api'
 
 const within = (box: { x: number; y: number; w: number; h: number }, r: { x: number; y: number; w: number; h: number }) =>
   r.x >= box.x && r.y >= box.y && r.x + r.w <= box.x + box.w && r.y + r.h <= box.y + box.h
@@ -367,7 +367,7 @@ export function Board() {
         const scale = Math.min(1, 640 / img.w)
         app.addNode({ type: 'image', x: p.x + offset, y: p.y + offset, w: img.w * scale, h: img.h * scale, data: { path } })
       } else {
-        const stat = await invoke<{ dir: boolean } | null>('fs:stat', path)
+        const stat = await request('fs:stat', path)
         if (stat && !stat.dir) app.addNode({ type: 'file', x: p.x + offset, y: p.y + offset, data: { path } })
       }
       offset += 30

@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { errorText, invoke } from '../lib/api'
+import type { FileStat } from '@shared/types'
+import { errorText, request } from '../lib/api'
 
 export const MAX_TEXT_BYTES = 3 * 1024 * 1024
 
-export interface FileStat {
-  size: number
-  mtime: number
-  dir: boolean
-}
+export type { FileStat }
 
 export interface FileText {
   text: string | null
@@ -29,7 +26,7 @@ export function useFileText(path: string | null | undefined, pollMs = 3000): Fil
   const load = useCallback(
     async (force = false) => {
       if (!path) return
-      const st = await invoke<FileStat | null>('fs:stat', path).catch(() => null)
+      const st = await request('fs:stat', path).catch(() => null)
       if (live.current !== path) return
       if (!st) {
         mtimeRef.current = 0
@@ -47,7 +44,7 @@ export function useFileText(path: string | null | undefined, pollMs = 3000): Fil
         return
       }
       try {
-        const text = await invoke<string>('fs:read', path)
+        const text = await request('fs:read', path)
         if (live.current !== path) return
         const binary = text.slice(0, 8000).includes('\u0000')
         setState({ text: binary ? null : text, error: null, binary, loading: false, mtime: st.mtime, size: st.size })

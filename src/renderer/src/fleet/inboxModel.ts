@@ -169,7 +169,7 @@ async function answerByRule(id: string, ap: Approval | null) {
   byRule.add(id)
   const name = fleet?.members[id]?.name ?? 'an agent'
   try {
-    const res = await invoke<AnswerResult>('pty:answerByRule', id, allow.answer, ap.command, name, rule.fingerprint).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+    const res = await request('pty:answerByRule', id, allow.answer, ap.command, name, rule.fingerprint).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
     if (!res.ok) {
       // the card shows as usual: the question changed, the console is gone, or what the command runs did
       if (res.reason === 'redefined' && !redefinedSaid.has(`${id}\0${ap.command}`)) {
@@ -192,7 +192,7 @@ async function allowForTeam(id: string, lead: string, ap: Approval) {
   const allow = ap.options.find((o) => o.tone === 'allow')
   if (!ap.command || !allow) return
   // bound to what the command means where the user said yes; without that, this is a plain Allow
-  const fingerprint = await invoke<string | null>('pty:ruleFingerprint', id).catch(() => null)
+  const fingerprint = await request('pty:ruleFingerprint', id).catch(() => null)
   if (fingerprint) addRule(lead, ap.command, fingerprint)
   const fleet = useFleet.getState().state
   for (const [other, a] of Object.entries(approvals)) if (other !== id && teamOf(fleet, other) === lead) void answerByRule(other, a.approval)

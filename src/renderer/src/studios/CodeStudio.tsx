@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronRight, FilePlus2, FolderCode, FolderPlus, Loader2, Pin, RefreshCw, Save, Search, X } from 'lucide-react'
 import { Modal } from '../ui/Modal'
-import { errorText, fileUrl, invoke } from '../lib/api'
+import { errorText, fileUrl, invoke, request } from '../lib/api'
 import { useApp } from '../state/store'
 import { CodeEditor } from '../workbench/CodeEditor'
 import { FileTree, ancestors, graft, type Creating, type TreeEntry } from '../workbench/FileTree'
@@ -48,13 +48,13 @@ export default function CodeStudio(props: { path?: string }) {
 
   const loadTree = useCallback(async () => {
     if (!root) return
-    const t = await invoke<TreeEntry[]>('fs:tree', root, 8).catch(() => [])
+    const t = await request('fs:tree', root, 8).catch(() => [])
     setTree(t)
   }, [root])
 
   /** a folder the first read left out, read once it is opened */
   const loadDir = useCallback(async (dir: string) => {
-    const children = await invoke<TreeEntry[]>('fs:tree', dir, 1).catch(() => null)
+    const children = await request('fs:tree', dir, 1).catch(() => null)
     if (children) setTree((t) => t && graft(t, dir, children))
   }, [])
 
@@ -75,7 +75,7 @@ export default function CodeStudio(props: { path?: string }) {
       setLoadingFile(true)
       setExpanded((s) => new Set([...s, ...ancestors(root, path)]))
       opening.current = path
-      const st = await invoke<FileStat | null>('fs:stat', path).catch(() => null)
+      const st = await request('fs:stat', path).catch(() => null)
       if (opening.current !== path) return
       if (!st || st.dir) {
         setDoc({ path, text: null, saved: '', error: st?.dir ? 'This is a folder' : 'File not found', mtime: 0 })
@@ -85,7 +85,7 @@ export default function CodeStudio(props: { path?: string }) {
         setDoc({ path, text: null, saved: '', error: `Too large to edit (${(st.size / 1024 / 1024).toFixed(1)} MB)`, mtime: st.mtime })
       } else {
         try {
-          const text = await invoke<string>('fs:read', path)
+          const text = await request('fs:read', path)
           if (opening.current !== path) return
           if (text.slice(0, 8000).includes('\u0000')) setDoc({ path, text: null, saved: '', binary: true, mtime: st.mtime })
           else setDoc({ path, text, saved: text, mtime: st.mtime })
@@ -122,9 +122,9 @@ export default function CodeStudio(props: { path?: string }) {
     const id = window.setInterval(async () => {
       const cur = docRef.current
       if (!cur || cur.text == null || cur.text !== cur.saved) return
-      const st = await invoke<FileStat | null>('fs:stat', cur.path).catch(() => null)
+      const st = await request('fs:stat', cur.path).catch(() => null)
       if (st && !st.dir && st.mtime !== cur.mtime && st.size <= MAX_TEXT_BYTES) {
-        const text = await invoke<string>('fs:read', cur.path).catch(() => null)
+        const text = await request('fs:read', cur.path).catch(() => null)
         const now = docRef.current
         if (text != null && now && now.path === cur.path && now.text === now.saved) setDoc({ ...now, text, saved: text, mtime: st.mtime })
       }
@@ -142,22 +142,22 @@ export default function CodeStudio(props: { path?: string }) {
     setSaving(true)
     try {
       // only over what we loaded: an agent may have changed the file since
-      const r = await invoke<WriteResult>('fs:write', cur.path, cur.text, { base: cur.saved })
+      const r = await request('fs:write', cur.path, cur.text, { base: cur.saved })
       if (!r.ok) {
         const disk = r.current
         const name = cur.path.split('/').pop()
         const app = useApp.getState()
         if (await app.confirm({ title: `${name} changed on disk`, body: `It was ${disk === null ? 'deleted' : 'changed'} since you opened it, maybe by an agent. Replace it with your version?`, confirm: 'Replace with mine', danger: true })) {
-          await invoke<WriteResult>('fs:write', cur.path, cur.text)
+          await request('fs:write', cur.path, cur.text)
         } else {
           if (disk !== null && (await app.confirm({ title: 'Load the version on disk?', body: 'Your unsaved edits to it are lost. Otherwise you keep editing yours.', confirm: 'Load the version on disk', danger: true }))) {
-            const st = await invoke<FileStat | null>('fs:stat', cur.path)
+            const st = await request('fs:stat', cur.path)
             setDoc((d) => (d && d.path === cur.path ? { ...d, text: disk, saved: disk, mtime: st?.mtime ?? d.mtime } : d))
           }
           return false
         }
       }
-      const st = await invoke<FileStat | null>('fs:stat', cur.path)
+      const st = await request('fs:stat', cur.path)
       setDoc((d) => (d && d.path === cur.path ? { ...d, saved: cur.text!, mtime: st?.mtime ?? d.mtime } : d))
       flashSaved()
       return true
@@ -209,16 +209,16 @@ export default function CodeStudio(props: { path?: string }) {
     if (!c) return
     const path = joinPath(c.dir, name)
     if (!isInside(root, path) || !relativeTo(root, path)) return toast('Stay inside the project folder', 'warn')
-    if (await invoke<boolean>('fs:exists', path)) return toast(`${name} already exists`, 'warn')
+    if (await request('fs:exists', path)) return toast(`${name} already exists`, 'warn')
     try {
       if (c.kind === 'folder') {
-        await invoke('fs:mkdir', path)
+        await request('fs:mkdir', path)
         setExpanded((s) => new Set([...s, path]))
         setSelectedDir(path)
       } else {
         // not an exists-check and then a write: between the two, an agent writing that same path
         // would have had its file truncated to nothing by this one
-        const r = await invoke<WriteResult>('fs:write', path, '', { base: null })
+        const r = await request('fs:write', path, '', { base: null })
         if (!r.ok) return toast(`${name} already exists`, 'warn')
       }
       await loadTree()
