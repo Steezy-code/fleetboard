@@ -21,3 +21,13 @@ test('what is not a team is refused rather than trusted', () => {
   for (const bad of [null, 1, 'x', [], {}, { projectId: 'p' }, { projectId: '', members: {} }, { projectId: 'p', members: [] }, { projectId: 'p', members: { a: null } }, { projectId: 'p', members: { a: { id: 'a' } } }, { projectId: 'p', members: {}, tasks: 'no' }])
     assert.equal(validFleetState(bad), false, JSON.stringify(bad))
 })
+
+test('a running team keeps the folder it started in; an empty one may follow its project', async () => {
+  const { mayMoveTeam } = await import('../../src/main/fleet')
+  const s = emptyFleet('p', '/repo')
+  assert.equal(mayMoveTeam(s), true, 'nobody on it')
+  s.members = { lead: { id: 'lead', name: 'Lead', role: 'lead', agentId: 'claude', projectId: 'p', cwd: '/repo', status: 'working', createdAt: 0 } }
+  assert.equal(mayMoveTeam(s), false, 'merges land in its folder and worktrees are removed from it: fleet:state must not repoint it')
+  s.members.lead!.status = 'closed'
+  assert.equal(mayMoveTeam(s), true)
+})

@@ -12,7 +12,7 @@ process.env.FLEETBOARD_HOME = home
 const roots = await import('../../src/main/roots')
 
 test('with no board open, only ~/.fleetboard is allowed', () => {
-  assert.equal(roots.insideAllowed(path.join(home, 'app.json')), true)
+  assert.equal(roots.insideAllowed(path.join(home, 'assets', 'pic.png')), true)
   assert.equal(roots.insideAllowed(home), true)
   assert.deepEqual(roots.allowedRoots(), [home], 'the project root is not in the list yet')
   for (const p of ['/etc/passwd', path.join(os.homedir(), 'code', 'anything'), os.tmpdir()]) {

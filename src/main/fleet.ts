@@ -13,6 +13,7 @@ import { agentById } from '@shared/agents'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
+import { allowedPath, outsideMessage } from './roots'
 import { loginEnv } from './env'
 import { NO_HOOKS, ghEnv, run, git as runGit } from './run'
 import { append as journal, answered } from './journal'
@@ -126,9 +127,15 @@ function state(projectId: string, projectPath = ''): FleetState {
     s = emptyFleet(projectId, projectPath)
     states.set(projectId, s)
   }
-  if (projectPath) s.projectPath = projectPath
+  // A running team keeps the folder it started in: merges land there and worktrees are removed from
+  // it, so a later call naming another folder (fleet:state takes one from the renderer) must not move
+  // it. A team with nobody left on it may follow the project to where it is now.
+  if (projectPath && projectPath !== s.projectPath && mayMoveTeam(s)) s.projectPath = projectPath
   return s
 }
+
+/** Whether a team's folder may change: only once nobody on it is still working there. */
+export const mayMoveTeam = (s: FleetState) => !Object.values(s.members).some((m) => m.status !== 'closed')
 
 const saveTimers = new Map<string, NodeJS.Timeout>()
 function changed(s: FleetState) {
@@ -376,7 +383,13 @@ export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, st
   const url = `http://127.0.0.1:${port}/mcp/${m.id}`
   const env: Record<string, string> = { MCP_TOOL_TIMEOUT: '600000' }
   if (m.agentId === 'claude') {
-    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: `Bearer ${memberToken(m.id)}` } } } }, 0o600)
+    // The token stays out of the file: Claude Code expands ${VAR} in an MCP config's headers, so the
+    // file names the variable and the token is in this console's environment, as Codex's is. A file at
+    // a predictable path with the Lead's token in it was readable by every member running as the same
+    // user, which made the role checks only as strong as a `cat`. (A process of the same user can
+    // still read another's environment through /proc: this narrows the reach, it is not isolation.)
+    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: 'Bearer ${FB_MCP_TOKEN}' } } } }, 0o600)
+    env.FB_MCP_TOKEN = memberToken(m.id)
     const lead = m.leadId ? s.members[m.leadId] : undefined
     const args = ['--mcp-config', mcpFile(m.id), '--append-system-prompt', m.role === 'lead' ? leadPrompt(m) : workerPrompt(m, lead)]
     if (m.role === 'worker') args.push('--permission-mode', 'acceptEdits')
@@ -1331,10 +1344,20 @@ export async function register(c: MainContext) {
       return ready.evidence
     } finally { if (verifications.get(projectId) === controller) verifications.delete(projectId) }
   })
-  ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
-  ipc.handle('fleet:startLead', (_e, opts) => startLead(opts))
+  // The folder a team works in arrives over IPC like goal:check's: only an absolute folder Fleetboard
+  // may use (roots.ts). Kept as the renderer wrote it (forward slashes on Windows, like every path the
+  // team state already holds) once it has passed.
+  const teamFolder = (p: unknown, what: string): string | null => (typeof p === 'string' && path.isAbsolute(p) && allowedPath(p, what) ? p : null)
+  ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, teamFolder(projectPath, 'fleet:state') ?? ''))
+  ipc.handle('fleet:startLead', (_e, opts: Parameters<typeof startLead>[0]) => {
+    const projectPath = teamFolder(opts?.projectPath, 'fleet:startLead')
+    if (!projectPath) throw new Error(outsideMessage(opts?.projectPath))
+    return startLead({ ...opts, projectPath })
+  })
   /** whether a team in this folder works in worktrees of its own (a repository with a commit) */
-  ipc.handle('fleet:isolation', async (_e, projectPath: string): Promise<'worktrees' | 'no-commits' | 'no-repo'> => {
+  ipc.handle('fleet:isolation', async (_e, folder: string): Promise<'worktrees' | 'no-commits' | 'no-repo'> => {
+    const projectPath = teamFolder(folder, 'fleet:isolation')
+    if (!projectPath) return 'no-repo'
     if ((await git(projectPath, ['rev-parse', '--verify', 'HEAD'])).ok) return 'worktrees'
     return (await git(projectPath, ['rev-parse', '--git-dir'])).ok ? 'no-commits' : 'no-repo'
   })
@@ -1418,7 +1441,7 @@ export async function register(c: MainContext) {
     if (!s?.ready) return false
     const lead = s.members[s.ready.leadId]
     if (!lead) return false
-    await dismissTeam(s, lead, s.ready.prUrl ? 'keep' : s.ready.commits ? 'keep' : 'force')
+    await dismissTeam(s, lead, s.ready.prUrl || s.ready.commits || (await commitsSinceReady(s, lead)) ? 'keep' : 'force')
     return true
   })
   ipc.handle('fleet:discard', async (_e, projectId: string, leadId?: string) => {
@@ -1588,6 +1611,19 @@ export function stopFleetTicks() {
 
 /** A project's team state, if it has one. */
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
+
+/**
+ * Commits on the Lead's branch past where it started, counted now. The Ready card's count is from
+ * fleet_finish: a Lead that finished with nothing and stayed on for follow-ups could merge work after
+ * it, and Done on that card deleted the branch with -D on the strength of the old zero. Unknown
+ * counts as some, which keeps the branch.
+ */
+export async function commitsSinceReady(s: FleetState, lead: FleetMember): Promise<number> {
+  if (!lead.branch) return 0
+  if (!lead.base) return 1
+  const r = await git(s.projectPath, ['rev-list', '--count', `${lead.base}..refs/heads/${lead.branch}`])
+  return r.ok ? Number(r.out) || 0 : 1
+}
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   verifications.get(s.projectId)?.abort()

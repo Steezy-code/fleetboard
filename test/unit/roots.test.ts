@@ -44,8 +44,12 @@ before(async () => {
 beforeEach(() => roots.resetGrantsForTest())
 
 test('the open project and ~/.fleetboard are allowed, including the roots themselves', () => {
-  for (const p of [project, path.join(project, 'src', 'a.ts'), path.join(project, 'src'), home, path.join(home, 'projects', 'proj1.json')]) {
+  for (const p of [project, path.join(project, 'src', 'a.ts'), path.join(project, 'src'), home, path.join(home, 'assets', 'pic.png'), path.join(home, 'exports', 'doc.pdf')]) {
     assert.equal(roots.insideAllowed(p), true, p)
+  }
+  // ~/.fleetboard's private parts are not, from any root
+  for (const p of [path.join(home, 'app.json'), path.join(home, 'projects', 'proj1.json'), path.join(home, 'profiles', 'x', '.credentials.json'), path.join(home, 'remote.json'), path.join(home, 'fleet', 'p.json'), path.join(home, 'hooks')]) {
+    assert.equal(roots.insideAllowed(p), false, p)
   }
   // a file that does not exist yet, inside the project: writeText creates parents, so this must pass
   assert.equal(roots.insideAllowed(path.join(project, 'docs', 'deep', 'new.md')), true)
@@ -149,7 +153,8 @@ test('a board that claims the whole disk as its folder gets no project root at a
     assert.equal(roots.insideAllowed(path.join(os.homedir(), '.ssh', 'id_ed25519')), false, wide)
     assert.equal(roots.insideAllowed('/etc/passwd'), false, wide)
     // and ~/.fleetboard is still allowed, so the app can still read its own files
-    assert.equal(roots.insideAllowed(path.join(home, 'app.json')), true, wide)
+    assert.equal(roots.insideAllowed(path.join(home, 'assets', 'pic.png')), true, wide)
+    assert.equal(roots.insideAllowed(path.join(home, 'app.json')), false, 'but not the private ones, even with the home folder claimed')
   }
   // back to the real project for whatever runs after this
   assert.ok(store.loadProject('proj1'))

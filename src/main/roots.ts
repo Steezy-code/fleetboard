@@ -183,9 +183,25 @@ export function absolutePath(p: unknown): string | null {
  * already inside the project redirecting a write out of it — which needs write access to the project,
  * and is not reachable from a hostile board file or a hostile markdown file, which is what this is for.
  */
+/**
+ * Inside the app's own folder, what only the main process reads or writes: sign-ins (a profile is a
+ * CLI's config dir, its tokens included), the hook script every Claude console runs, the teams'
+ * MCP tokens and Gemini homes, the phone link's secret, and app.json, which holds the grants
+ * themselves. Allowing all of ~/.fleetboard put each of these in reach of a path out of a board
+ * file, and a write to app.json was a way round mainOwnedGlobal after the next restart.
+ */
+const PRIVATE = ['profiles', 'hooks', 'fleet', 'gemini-homes', 'projects', 'history', 'no-hooks', 'remote.json', 'app.json', 'consoles-running.json', 'usage-cache.json']
+
+/** Inside one of the app folder's private parts (PRIVATE), whatever else would allow it. */
+export function privatePath(abs: string): boolean {
+  return PRIVATE.some((p) => within(abs, path.join(dirs.root, p)))
+}
+
 export function insideAllowed(p: unknown): boolean {
   const abs = absolutePath(p)
   if (!abs) return false
+  // before any root: a project or a grant that contains the app folder does not open these either
+  if (privatePath(abs)) return false
   if (within(abs, dirs.root)) return true
   const project = projectRoot()
   if (project && within(abs, project)) return true
@@ -210,9 +226,23 @@ function once(key: string, say: () => void): void {
  * Returns false so a caller can `if (!allowed(p, 'fs:read')) return null`.
  */
 export function allowed(p: unknown, what: string): boolean {
-  if (insideAllowed(p)) return true
+  return allowedPath(p, what) !== null
+}
+
+/**
+ * The path, made absolute exactly as it was checked, or null when it is refused.
+ *
+ * Callers must use *this* for the operation, never the path they were given. A relative path is
+ * checked against the open project (absolutePath), but fs, git and child processes resolve one against
+ * the main process's working directory — so `.ssh/id_rsa` passed as `<project>/.ssh/id_rsa` and was
+ * then read as `<cwd>/.ssh/id_rsa`, which for an app started from a desktop launcher is the home
+ * folder. The check and the use are the same path only when the use is handed the checked one.
+ */
+export function allowedPath(p: unknown, what: string): string | null {
+  const abs = absolutePath(p)
+  if (abs && insideAllowed(abs)) return abs
   once(`${what}:${String(p)}`, () => logError('roots', `${what} refused: ${String(p)} is outside ${allowedRoots().join(', ')}`))
-  return false
+  return null
 }
 
 /**

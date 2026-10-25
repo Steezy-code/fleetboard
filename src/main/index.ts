@@ -3,6 +3,7 @@ import { guardedIpc } from './ipc'
 import { app, BrowserWindow, dialog, ipcMain, Menu, net, powerMonitor, protocol, session, shell, webContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 import path from 'node:path'
+import fs from 'node:fs'
 import type { MainContext } from './context'
 import { PtyManager } from './pty'
 import { describeAnswer } from '@shared/prompt'
@@ -30,7 +31,7 @@ import { toRendererPath } from './platform'
 import { catchStrayErrors, logError } from './errors'
 import { appPermission, mediaTypesOf, webPermission } from './permissions'
 import * as journal from './journal'
-import { allowed, outsideMessage } from './roots'
+import { allowed, allowedPath, outsideMessage } from './roots'
 import { endOrphans } from './orphans'
 import { definitionFingerprint } from './teamrules'
 import { teamRuleAllowed } from '@shared/approvals'
@@ -189,6 +190,27 @@ const shutdown = () =>
     await ptys.dispose()
   })())
 
+/** The session PDFs are printed in. */
+const PRINT_PARTITION = 'pdf-print'
+/** pages being printed right now: the only file: URLs that session may load */
+const printing = new Set<string>()
+let printGuarded = false
+/**
+ * A page printed from a file may load the file itself and what a data: page could (images over the
+ * network, inline data) — never another local file, which an <iframe src="file:///…"> would otherwise
+ * print into the PDF.
+ */
+function printOnly(page: string) {
+  printing.add(page)
+  setTimeout(() => printing.delete(page), 120_000).unref?.()
+  if (printGuarded) return
+  printGuarded = true
+  session.fromPartition(PRINT_PARTITION).webRequest.onBeforeRequest((details, cb) => {
+    const url = details.url
+    cb({ cancel: !(printing.has(url) || /^(data|https?):/i.test(url)) })
+  })
+}
+
 function registerCore() {
   ctx.ipc.handle('pty:spawn', (_e, req) => ptys.spawn(req))
   ctx.ipc.on('app:background', (_e, color: string) => {
@@ -269,18 +291,30 @@ function registerCore() {
 
   // Render HTML to a real paginated PDF (document studio, markdown export).
   ctx.ipc.handle('pdf:fromHtml', async (_e, html: string, outPath: string) => {
-    if (!allowed(outPath, 'pdf:fromHtml')) throw new Error(outsideMessage(outPath))
+    const target = allowedPath(outPath, 'pdf:fromHtml')
+    if (!target) throw new Error(outsideMessage(outPath))
     // The HTML is the renderer's, rendered markdown today: printed as a page, never run as one. No
     // scripts, a session of its own that keeps nothing, and nowhere to navigate or open a window to.
-    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, partition: 'pdf-print' } })
-    w.webContents.on('will-navigate', (e) => e.preventDefault())
-    w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-    await w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html))
-    const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
-    w.destroy()
-    const fs = await import('node:fs')
-    fs.writeFileSync(outPath, pdf)
-    return outPath
+    //
+    // Loaded from a file rather than a data: URL. Chromium refuses a URL past 2 MiB, and percent-
+    // encoding triples anything that is not ASCII, so a long document failed to export — and the
+    // hidden window, never destroyed on that path, stayed behind for the rest of the session.
+    const page = path.join(dirs.exports, `print-${process.pid}-${Date.now()}.html`)
+    printOnly(pathToFileURL(page).href)
+    const w = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false, partition: PRINT_PARTITION } })
+    try {
+      w.webContents.on('will-navigate', (e) => e.preventDefault())
+      w.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      await fs.promises.writeFile(page, html, 'utf8')
+      await w.loadFile(page)
+      const pdf = await w.webContents.printToPDF({ printBackground: true, pageSize: 'A4', margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 } })
+      await fs.promises.writeFile(target, pdf)
+      return target
+    } finally {
+      if (!w.isDestroyed()) w.destroy()
+      printing.delete(pathToFileURL(page).href)
+      void fs.promises.rm(page, { force: true }).catch(() => {})
+    }
   })
 }
 

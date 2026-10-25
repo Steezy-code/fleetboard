@@ -150,10 +150,14 @@ function history(id) {
 }
 // ------------------------------------------------------------------ MCP
 
+// like Claude Code, ${VAR} in a server's headers is read from the environment (the fleet's bearer
+// token is kept out of the file that way)
+const expand = (v) => String(v).replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, k) => process.env[k] ?? '')
 const mcpServer = (() => {
   try {
     const cfg = JSON.parse(fs.readFileSync(opts.mcpConfig, 'utf8'))
-    return Object.values(cfg.mcpServers ?? {})[0]
+    const server = Object.values(cfg.mcpServers ?? {})[0]
+    return server && { ...server, headers: Object.fromEntries(Object.entries(server.headers ?? {}).map(([k, v]) => [k, expand(v)])) }
   } catch {
     return undefined
   }
