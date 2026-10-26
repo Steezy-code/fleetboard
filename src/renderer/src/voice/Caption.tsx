@@ -2,9 +2,11 @@ import { useApp } from '../state/store'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { useVoice } from './thread'
 import { cancelPending, confirmPending } from './planner'
+import { useAsciiReveal } from 'ascii-reveal'
 
 /** Caption bubble above the command bar: live / final transcript, reply, and plans waiting for "confirm". */
 export function Caption() {
+  const plan = useAsciiReveal({ preset: 'terminal' })
   const phase = useVoice((s) => s.phase)
   const transcript = useVoice((s) => s.transcript)
   const reply = useVoice((s) => s.reply)
@@ -52,7 +54,7 @@ export function Caption() {
         </div>
       )}
       {pending ? (
-        <div className="vc-plan">
+        <div className="vc-plan" ref={plan.ref}>
           <div className="vc-plan-title">Plan · waiting for confirm</div>
           {pending.steps.length > 0 && (
             <ol>

@@ -163,7 +163,9 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
 
   return (
     <div className="console-body no-board-wheel" onMouseDown={() => termRef.current?.focus()}>
-      <div ref={host} className="console-term" data-terminal />
+      {/* a live terminal is left alone: xterm paints into a canvas, and the glyph grid would
+          redraw it character by character every launch */}
+      <div ref={host} className="console-term" data-terminal data-ascii="skip" />
       {phase === 'ask' && (
         <div className="console-overlay">
           <div className="console-ask">
