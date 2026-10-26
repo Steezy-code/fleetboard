@@ -42,6 +42,14 @@ const TWO_WORKERS = {
   }
 }
 
+
+/** A running console's environment, as its process has it (Linux: /proc). */
+async function consoleEnv(id: string): Promise<Record<string, string>> {
+  const info = await app!.invoke('pty:info', id)
+  const raw = fs.readFileSync(`/proc/${info.pid}/environ`, 'utf8')
+  return Object.fromEntries(raw.split('\0').filter(Boolean).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]))
+}
+
 test('a goal goes plan → workers in worktrees → merge → review → Ready → merged into the checkout', async () => {
   const { sb, repo, projectId } = await team(TWO_WORKERS)
   const ready = await waitReady(projectId)
@@ -385,13 +393,18 @@ test('the fleet and hook servers refuse requests without the secret, from a brow
   const { sb, projectId } = await team({ lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Ada' }] } })
   await waitReady(projectId)
   const hooksDir = path.join(sb.fbHome, 'hooks')
-  const mcpFile = fs.readdirSync(hooksDir).find((f) => f.startsWith('mcp-'))!
+  // a member whose console is still running (the Lead stays on after Ready): its token is in its environment
+  const live: string[] = []
+  for (const f of fs.readdirSync(hooksDir).filter((f) => f.startsWith('mcp-'))) if (await app!.invoke('pty:info', f.slice(4, -5))) live.push(f)
+  const mcpFile = live[0]!
   const server = JSON.parse(fs.readFileSync(path.join(hooksDir, mcpFile), 'utf8')).mcpServers.fleet
   const url = new URL(server.url)
   assert.equal(fs.statSync(path.join(hooksDir, mcpFile)).mode & 0o077, 0, 'the MCP config is readable by the user only')
-  const secret = /^Bearer (\S+)$/.exec(server.headers.Authorization)![1]
-  assert.ok(!server.url.includes(secret), 'the secret is not part of the URL')
+  // and holds no token: it names the variable the console's environment carries it in
+  assert.equal(server.headers.Authorization, 'Bearer ${FB_MCP_TOKEN}', 'no secret in the file')
   const member = url.pathname.split('/')[2]
+  const secret = (await consoleEnv(member)).FB_MCP_TOKEN
+  assert.ok(secret && !server.url.includes(secret), 'the secret is in the console’s environment, not the URL')
   const auth = { Authorization: `Bearer ${secret}` }
   const call = (pathname: string, headers: Record<string, string> = auth) =>
     fetch(`http://127.0.0.1:${url.port}${pathname}`, {
@@ -420,9 +433,12 @@ test("a team console's token is good for that console only: a worker cannot call
   const members = Object.values(s.members) as any[]
   const lead = members.find((m) => m.role === 'lead')
   const worker = members.find((m) => m.role === 'worker')
-  const config = (id: string) => JSON.parse(fs.readFileSync(path.join(sb.fbHome, 'hooks', `mcp-${id}.json`), 'utf8')).mcpServers.fleet
-  const { url: leadUrl, headers: leadHeaders } = config(lead.id)
-  const { headers: workerHeaders } = config(worker.id)
+  // the config files name ${FB_MCP_TOKEN}; each console's environment holds the token, and the fake
+  // agent records what it sent with it (workers have exited by now, so their environment is gone)
+  const auth = (name: string) => app!.fakeLog((e) => e.event === 'mcp-auth' && e.name === name).at(-1) as { url: string; headers: Record<string, string> }
+  assert.equal(JSON.parse(fs.readFileSync(path.join(sb.fbHome, 'hooks', `mcp-${lead.id}.json`), 'utf8')).mcpServers.fleet.headers.Authorization, 'Bearer ${FB_MCP_TOKEN}', 'the file holds no token')
+  const { url: leadUrl, headers: leadHeaders } = auth(lead.name)
+  const { headers: workerHeaders } = auth(worker.name)
   const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' }
   const call = (url: string, headers: Record<string, string>, body: unknown = list) =>
     fetch(url, { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: typeof body === 'string' ? body : JSON.stringify(body) })

@@ -12,7 +12,10 @@ src/main/                Electron main process
   index.ts               window, core IPC (pty:*, pdf:fromHtml, win:*, app:*), registers modules
   context.ts             MainContext passed to each module's register(ctx)
   roots.ts               which paths the fs handlers, fbfile:// and git may touch: the project, what the
-                         user granted, the app's own folders
+                         user granted, the app's own folders minus its private parts (sign-ins, tokens,
+                         board files, app.json). allowedPath() returns the path as checked: act on that one
+  teamrules.ts           what a team rule is bound to besides its command: a fingerprint of the files
+                         that define commands (package.json, Makefile, runner configs) in a console's folder
   platform.ts            Linux/Windows differences in one place: console shell (PowerShell on Windows),
                          PATHEXT lookup, npm .cmd wrappers run as node <script>, kill a process tree,
                          junctions instead of symlinks, forward-slash paths for the renderer.
@@ -51,7 +54,8 @@ src/main/                Electron main process
                          review comments, through gh
   sweep.ts               the morning sweep: a read-only health report across all of the user's repos
   live.ts                live team work without a model: stalls, each worker's uncommitted diff, the
-                         charter's done-when run as merged work lands
+                         charter's done-when: the baseline runs on its own, merged work (the agents' code)
+                         only when the user runs it
   knowledge.ts           what a repo's own files say about its checks, owners and style (plain reads)
   skills.ts              Claude Code skills: SKILL.md folders, personal and per project
   starter.ts             first goals for an empty board, read from the repo (a plan, a TODO), never generated
@@ -136,9 +140,13 @@ src/renderer/src/
   and `pty:tail` (rendered text, not the raw stream). Answer a question with `pty:answer` (it re-reads the
   live screen and refuses if the question changed); never type option digits blindly.
 - **Local HTTP servers** take a per-run secret (hooks: in the URL, from the console's environment; fleet
-  MCP: a bearer token, from a 0600 file for Claude and an env var for Codex, never on a command line) and
+  MCP: a bearer token in the console's environment for Claude and Codex — Claude's 0600 config file names
+  the variable — and in its own settings file for Gemini; never on a command line) and
   check requests with `refuse()` (no browser Origin, Host must be 127.0.0.1/localhost). A fleet tool call is
   then checked against the caller's **role**: `tools/list` only decides what a member is told about.
+- **IPC is typed through `IpcContract`** (`shared/ipc-contract.ts`) and called with `request()`. The older
+  channels still on `invoke<T>()` are frozen in `UNTYPED_CHANNELS`: a new channel goes into the contract,
+  and `ipc-contract.test.ts` fails otherwise.
 - **HTML from a repo, a model or a web page goes through `sanitizeHtml`** (`workbench/markdown.ts`), and a URL
   out of it or out of the board file goes through `safeUrl`. `marked` has no sanitizer of its own, so only that
   module may import it (studios/docs/render.ts goes through renderMarkdown) — `test/unit/html-safety.test.ts`

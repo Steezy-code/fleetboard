@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { MainContext } from './context'
 import { type KnowledgeFact, type RepoReading, slug } from '@shared/knowledge'
 import { readRegularText } from './paths'
-import { allowed } from './roots'
+import { allowedPath } from './roots'
 
 // The free half of repo knowledge: what a repo's own files say about how it is checked, who owns what
 // and its house style. No model and no shell — plain reads, the same on Linux and Windows — so it can
@@ -190,5 +190,8 @@ const clip = (s: string, n: number) => {
 export function register(ctx: MainContext) {
   // The renderer names the folder; only one Fleetboard may read anyway is read on its say-so, as the
   // filesystem handlers do (roots.ts). Null, not an error: no knowledge is a state a goal works in.
-  ctx.ipc.handle('knowledge:read', (_e, root: unknown) => (typeof root === 'string' && root.trim() && allowed(root, 'knowledge:read') ? readRepo(path.resolve(root)) : null))
+  ctx.ipc.handle('knowledge:read', (_e, root: unknown) => {
+    const abs = allowedPath(root, 'knowledge:read')
+    return abs ? readRepo(abs) : null
+  })
 }

@@ -24,6 +24,7 @@ export const INVOKE_CHANNELS = [
   "fleet:mergeReady",
   "fleet:openPr",
   "fleet:revertMerge",
+  "fleet:runCheck",
   "fleet:startLead",
   "fleet:state",
   "fleet:verifyReady",
@@ -72,6 +73,7 @@ export const INVOKE_CHANNELS = [
   "pty:pause",
   "pty:prompt",
   "pty:resume",
+  "pty:ruleFingerprint",
   "pty:spawn",
   "pty:tail",
   "recovery:apply",
@@ -168,13 +170,13 @@ const str = (v: unknown) => typeof v === 'string' && v.length <= 2_000_000
 const obj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 const finite = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
 
-const stringFirst = new Set(['store:projectId', 'store:loadProject', 'store:forgetProject', 'store:getGlobal', 'fs:read', 'fs:tree', 'fs:exists', 'fs:mkdir', 'fs:stat', 'fs:grantDropped', 'shell:openExternal', 'shell:openPath', 'shell:showItem', 'cli:cancel', 'pty:kill', 'pty:pause', 'pty:resume', 'pty:buffer', 'pty:tail', 'pty:prompt', 'pty:info', 'fleet:state', 'fleet:isolation', 'fleet:diff', 'fleet:discard', 'fleet:done', 'fleet:openPr', 'fleet:mergeReady', 'fleet:revertMerge', 'fleet:checkOff', 'ci:status', 'ci:failedLog', 'ci:prFeedback', 'git:isRepo', 'git:init', 'git:status', 'git:diff', 'git:show', 'git:commit', 'git:log', 'git:push', 'git:pull', 'git:fetch', 'git:branches', 'git:checkout', 'git:remote', 'git:prList'])
+const stringFirst = new Set(['store:projectId', 'store:loadProject', 'store:forgetProject', 'store:getGlobal', 'fs:read', 'fs:tree', 'fs:exists', 'fs:mkdir', 'fs:stat', 'fs:grantDropped', 'shell:openExternal', 'shell:openPath', 'shell:showItem', 'cli:cancel', 'pty:kill', 'pty:pause', 'pty:resume', 'pty:buffer', 'pty:tail', 'pty:prompt', 'pty:info', 'pty:ruleFingerprint', 'fleet:state', 'fleet:isolation', 'fleet:diff', 'fleet:discard', 'fleet:done', 'fleet:openPr', 'fleet:mergeReady', 'fleet:revertMerge', 'fleet:runCheck', 'fleet:checkOff', 'ci:status', 'ci:failedLog', 'ci:prFeedback', 'git:isRepo', 'git:init', 'git:status', 'git:diff', 'git:show', 'git:commit', 'git:log', 'git:push', 'git:pull', 'git:fetch', 'git:branches', 'git:checkout', 'git:remote', 'git:prList'])
 
 /** Validate high-privilege requests before touching a process, filesystem or shell. */
 export function validateIpc(channel: string, args: unknown[]): void {
   if (!inbound.has(channel)) throw new Error(`Unknown IPC channel: ${channel}`)
   if (stringFirst.has(channel) && !str(args[0])) throw new Error(`Invalid arguments for ${channel}`)
-  const [a, b, c, d] = args
+  const [a, b, c, d, e] = args
   let ok = args.length <= 8
   switch (channel) {
     case 'pty:spawn': ok &&= obj(a) && str(a.id) && str(a.agentId) && str(a.cwd); break
@@ -191,7 +193,7 @@ export function validateIpc(channel: string, args: unknown[]): void {
     case 'store:setSettings': ok &&= obj(a); break
     case 'store:setGlobal': ok &&= str(a) && !['__proto__', 'constructor', 'prototype'].includes(String(a)); break
     case 'remote:enable': ok &&= ['tailscale', 'lan', 'local'].includes(String(a)); break
-    case 'pty:answer': case 'pty:answerByRule': ok &&= str(a) && obj(b) && (str(b.option) || typeof b.yes === 'boolean' || b.enter === true) && (b.seen === undefined || str(b.seen)) && (channel !== 'pty:answerByRule' || (str(c) && str(d))); break
+    case 'pty:answer': case 'pty:answerByRule': ok &&= str(a) && obj(b) && (str(b.option) || typeof b.yes === 'boolean' || b.enter === true) && (b.seen === undefined || str(b.seen)) && (channel !== 'pty:answerByRule' || (str(c) && str(d) && str(e))); break
   }
   if (!ok) throw new Error(`Invalid arguments for ${channel}`)
 }

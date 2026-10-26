@@ -77,6 +77,8 @@ export interface PendingPlan {
   say?: string
   /** the project it is about, and when it was asked: it does not carry over to another, or go stale */
   projectId: string
+  /** the workspace in front of the user when it was asked: its steps are pinned to what was there */
+  workspaceId?: string
   at: number
 }
 
@@ -102,6 +104,11 @@ interface VoiceState {
   download: ModelLoad | null
   /** cancels the running planner call */
   cancelThinking: (() => void) | null
+  /**
+   * The Inbox card in front when push-to-talk began: a spoken "allow" is about that card, and only
+   * answers it if it is still the one in front once the words are transcribed (planner runCommand)
+   */
+  heardFront: string | null
 }
 
 export const useVoice = create<VoiceState>(() => ({
@@ -113,7 +120,8 @@ export const useVoice = create<VoiceState>(() => ({
   captionUntil: 0,
   pending: null,
   download: null,
-  cancelThinking: null
+  cancelThinking: null,
+  heardFront: null
 }))
 
 export const setVoice = (patch: Partial<VoiceState>) => useVoice.setState(patch)

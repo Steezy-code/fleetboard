@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { GoalIdea } from '@shared/types'
 import type { MainContext } from './context'
 import { readRegularText } from './paths'
-import { allowed } from './roots'
+import { allowedPath } from './roots'
 import { git } from './run'
 import { nextPlanItem } from './sweep'
 
@@ -89,5 +89,8 @@ export async function goalIdeas(root: string): Promise<GoalIdea[]> {
 }
 
 export function register(ctx: MainContext) {
-  ctx.ipc.handle('starter:goals', (_e, root: string) => (allowed(root, 'starter:goals') ? goalIdeas(String(root)) : []))
+  ctx.ipc.handle('starter:goals', (_e, root: string) => {
+    const abs = allowedPath(root, 'starter:goals')
+    return abs ? goalIdeas(abs) : []
+  })
 }

@@ -61,14 +61,24 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
     })
     const offInput = term.onData((d) => window.fb.send('pty:write', node.id, d))
     const offResize = term.onResize(({ cols, rows }) => window.fb.send('pty:resize', node.id, cols, rows))
-    const offData = onConsoleData(node.id, (d) => term.write(d))
+    // Output that arrives while the buffer is being fetched is held, not written ahead of it: written
+    // straight away it came out before the replay and then again inside it.
+    let held: string[] | null = []
+    const offData = onConsoleData(node.id, (d) => (held ? held.push(d) : term.write(d)))
+    /** the replay is in: what was held is written, less what the buffer already ends with */
+    const release = (buffer: string | null) => {
+      const pendingOut = (held ?? []).join('')
+      held = null
+      if (pendingOut && !(buffer ?? '').endsWith(pendingOut)) term.write(pendingOut)
+    }
 
     let cancelled = false
     ;(async () => {
       const buffer = await request('pty:buffer', node.id)
       if (cancelled) return
+      if (buffer !== null) term.write(buffer)
+      release(buffer)
       if (buffer !== null) {
-        term.write(buffer)
         setPhase('running')
         // started elsewhere, or before a reload: how it was started is the main process's to say
         const info = await request('pty:info', node.id)
@@ -153,7 +163,9 @@ export default function ConsoleNode({ node }: NodeProps<ConsoleData>) {
 
   return (
     <div className="console-body no-board-wheel" onMouseDown={() => termRef.current?.focus()}>
-      <div ref={host} className="console-term" data-terminal />
+      {/* a live terminal is left alone: xterm paints into a canvas, and the glyph grid would
+          redraw it character by character every launch */}
+      <div ref={host} className="console-term" data-terminal data-ascii="skip" />
       {phase === 'ask' && (
         <div className="console-overlay">
           <div className="console-ask">

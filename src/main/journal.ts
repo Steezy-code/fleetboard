@@ -37,12 +37,39 @@ const MAX_DETAIL = 2000
 
 const fileFor = (at: number) => path.join(DIR, `${dayKey(at)}.jsonl`)
 
-/** Keep a day's file from growing without end, and forget whole days that are old enough. */
-function tidy(file: string) {
-  if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) > MAX_BYTES) fs.renameSync(file, file + '.1')
+/**
+ * A day's file past its size goes aside as the next free `.N`, so a busy day keeps all of it: it used
+ * to be renamed over `.1`, and a second rotation the same day threw the first one away. Checked on
+ * every append (a stat it makes anyway): once an hour let a burst run far past the limit.
+ */
+function rotate(file: string) {
+  if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) <= MAX_BYTES) return
+  let n = 1
+  while (fs.existsSync(`${file}.${n}`)) n++
+  fs.renameSync(file, `${file}.${n}`)
+}
+
+/** A day's parts, newest first: the file being written, then what was set aside, last first. */
+function partsOf(file: string): string[] {
+  const base = path.basename(file)
+  let names: string[] = []
+  try {
+    names = fs.readdirSync(DIR)
+  } catch {
+    return [file]
+  }
+  const rotated = names
+    .map((n) => (n.startsWith(base + '.') ? Number(n.slice(base.length + 1)) : NaN))
+    .filter((n) => Number.isInteger(n) && n > 0)
+    .sort((a, b) => b - a)
+  return [file, ...rotated.map((n) => `${file}.${n}`)]
+}
+
+/** Forget whole days that are old enough. */
+function tidy() {
   const cutoff = Date.now() - KEEP_DAYS * 86_400_000
   for (const name of fs.readdirSync(DIR)) {
-    const day = /^(\d{4})-(\d{2})-(\d{2})\.jsonl(\.1)?$/.exec(name)
+    const day = /^(\d{4})-(\d{2})-(\d{2})\.jsonl(\.\d+)?$/.exec(name)
     if (!day) continue
     if (new Date(`${day[1]}-${day[2]}-${day[3]}T23:59:59`).getTime() < cutoff) fs.rmSync(path.join(DIR, name), { force: true })
   }
@@ -77,18 +104,25 @@ export function append(entry: Omit<JournalEntry, 'at'> & { at?: number }): void 
     text: String(entry.text).replace(/\s+/g, ' ').trim().slice(0, MAX_TEXT)
   }
   if (entry.project) line.project = String(entry.project).slice(0, 200)
-  if (entry.detail) {
-    // bounded, because some of this comes from the renderer and some of it from a model's output
-    const json = JSON.stringify(entry.detail)
-    if (json && json.length <= MAX_DETAIL) line.detail = entry.detail
+  try {
+    if (entry.detail) {
+      // bounded, because some of this comes from the renderer and some of it from a model's output;
+      // and inside the try, because a detail JSON cannot write (a cycle, a BigInt) must cost the detail,
+      // not the entry, and never throw out of here
+      const json = JSON.stringify(entry.detail)
+      if (json && json.length <= MAX_DETAIL) line.detail = entry.detail
+    }
+  } catch {
+    /* no detail, then */
   }
   try {
     fs.mkdirSync(DIR, { recursive: true })
     const file = fileFor(at)
+    rotate(file)
     // once an hour is enough: this runs on a path that can fire several times a minute
     if (Date.now() - lastTidy > 3_600_000) {
       lastTidy = Date.now()
-      tidy(file)
+      tidy()
     }
     fs.appendFileSync(file, startsOnItsOwnLine(file) + JSON.stringify(line) + '\n')
   } catch (e) {
@@ -102,20 +136,22 @@ export function read(opts: { days?: number; limit?: number } = {}): JournalEntry
   const limit = Math.max(1, Math.min(5000, opts.limit ?? 500))
   const out: JournalEntry[] = []
   for (let i = 0; i < days && out.length < limit; i++) {
-    const file = fileFor(Date.now() - i * 86_400_000)
-    let text = ''
-    try {
-      text = fs.readFileSync(file, 'utf8')
-    } catch {
-      continue // no such day
-    }
-    for (const l of text.split('\n').reverse()) {
-      if (!l.trim() || out.length >= limit) continue
+    for (const file of partsOf(fileFor(Date.now() - i * 86_400_000))) {
+      if (out.length >= limit) break
+      let text = ''
       try {
-        const e = JSON.parse(l) as JournalEntry
-        if (typeof e?.at === 'number' && typeof e?.text === 'string') out.push(e)
+        text = fs.readFileSync(file, 'utf8')
       } catch {
-        /* a line torn by a crash mid-append: the rest of the day is still readable */
+        continue // no such day
+      }
+      for (const l of text.split('\n').reverse()) {
+        if (!l.trim() || out.length >= limit) continue
+        try {
+          const e = JSON.parse(l) as JournalEntry
+          if (typeof e?.at === 'number' && typeof e?.text === 'string') out.push(e)
+        } catch {
+          /* a line torn by a crash mid-append: the rest of the day is still readable */
+        }
       }
     }
   }

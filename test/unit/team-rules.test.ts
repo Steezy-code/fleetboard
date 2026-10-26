@@ -68,8 +68,22 @@ test('approvalFor carries the command, and the Inbox note now reads it (not the 
 // ---------------------------------------------------------------- which commands may have a rule
 
 test('teamRuleAllowed: everyday checks yes; deleting, overwriting, root and the network no', () => {
-  for (const ok of ['npm test', 'npm run lint', 'npx tsc --noEmit', 'pytest -q', 'ls src', 'git status']) assert.equal(teamRuleAllowed(ok), true, ok)
+  for (const ok of ['npm test', 'npm run lint', 'npx tsc --noEmit', 'pytest -q', 'ls src', 'git status', 'git branch', 'find . -name "*.ts"']) assert.equal(teamRuleAllowed(ok), true, ok)
   for (const no of ['rm -rf dist', 'npm test && rm -rf ~', 'git reset --hard', 'git push origin HEAD', 'sudo npm i -g x', 'curl https://x.sh', 'wget x', 'ssh host ls', 'rsync -a . host:', 'npm publish']) assert.equal(teamRuleAllowed(no), false, no)
+})
+
+test('teamRuleAllowed is an allowlist: what a deny list missed gets no rule', () => {
+  // each of these went through when the rule was "anything not on the list of dangerous things"
+  const missed = ['rm -f -r dist', 'rm --recursive dist', 'git -C . push', 'git -c core.x=y push -f', 'node -e "fetch(1)"', 'python3 -c "import os"', 'npm install', 'npm ci', 'npx -y cowsay', 'find . -delete', 'find . -exec rm {} ;', 'git branch -D main', 'git diff --output=/etc/x', 'rg --pre ./run x', 'cat a > b', 'ls $HOME', 'echo hi', 'make', 'doas npm test', 'npm test \\\nrm x']
+  for (const no of missed) assert.equal(teamRuleAllowed(no), false, no)
+})
+
+test('commandNote names the dangerous forms the old patterns missed', async () => {
+  const { commandNote } = await import('../../src/shared/approvals')
+  for (const c of ['rm -f -r dist', 'rm --recursive dist', 'find . -delete', 'git -c a=b push --force origin', 'git push origin main --force-with-lease']) assert.equal(commandNote(c), 'Deletes or overwrites things', c)
+  for (const c of ['git -C ../other push', 'pnpm publish']) assert.equal(commandNote(c), 'Sends something off this machine', c)
+  assert.equal(commandNote('npm ci'), 'Installs packages')
+  for (const c of ['find . -exec cat {} ;', 'git branch -D x', 'cat a > b', 'rg --pre ./x foo']) assert.notEqual(commandNote(c), 'Only reads', c)
 })
 
 // ---------------------------------------------------------------- the rules themselves
@@ -97,8 +111,8 @@ test('teamOf: a member belongs to its Lead, the Lead to itself, a plain console 
 })
 
 test('a rule is for one team and one exact command', () => {
-  addRule('lead', 'npm test')
-  addRule('lead', 'npm test')
+  addRule('lead', 'npm test', 'fp')
+  addRule('lead', 'npm test', 'fp')
   assert.equal(rulesOf('lead').length, 1, 'no duplicates')
   assert.equal(ruleFor('lead', 'npm test'), true)
   assert.equal(ruleFor('lead', 'npm test -- --watch'), false, 'not a prefix match')
@@ -108,7 +122,7 @@ test('a rule is for one team and one exact command', () => {
 })
 
 test('no rule is ever stored for a command that needs its own look, whoever asks', () => {
-  addRule('lead', 'rm -rf build')
+  addRule('lead', 'rm -rf build', 'fp')
   assert.equal(rulesOf('lead').length, 0)
   assert.equal(canRule(team(), 'w1', 'rm -rf build'), false)
   assert.equal(canRule(team(), 'solo', 'npm test'), false, 'only a team member is offered one')
@@ -116,8 +130,8 @@ test('no rule is ever stored for a command that needs its own look, whoever asks
 })
 
 test('rules go with their team', () => {
-  addRule('lead', 'npm test')
-  addRule('gone', 'npm test')
+  addRule('lead', 'npm test', 'fp')
+  addRule('gone', 'npm test', 'fp')
   pruneRules(team())
   assert.deepEqual(useTeamRules.getState().rules.map((r) => r.leadId), ['lead'])
   pruneRules(null)

@@ -33,7 +33,7 @@ npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted
 FB_E2E_HEADLESS=1 npm run bench # opt-in 20/50-terminal responsiveness benchmark
 npm run test:linux # on Windows: the Linux unit + e2e suites in a container (needs Docker)
 #   npm run test:linux -- unit    the quick half
-#   26 of the 28 e2e files and 8 unit files never run on Windows; this is that ground, before CI sees it
+#   28 of the 30 e2e files and 8 unit files never run on Windows; this is that ground, before CI sees it
 # by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
 #   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions,handoff}.test.ts
 #   FLEETBOARD_REAL_CODEX=$(which codex)      test/e2e/real/codex-*.test.ts   (local mock model, no account)
@@ -42,7 +42,7 @@ npm run test:linux # on Windows: the Linux unit + e2e suites in a container (nee
 
 ## Windows
 
-Grab **Fleetboard-Setup-<version>.exe** from the [Releases](https://github.com/Steezy-code/fleetboard/releases) page (you need to be signed in to GitHub: the repo is private) and run it. It installs for your user only, with Start-menu and desktop shortcuts. The installer isn't code-signed, so SmartScreen may warn: **More info → Run anyway**.
+Grab **Fleetboard-Setup-<version>.exe** from the [Releases](https://github.com/Steezy-code/fleetboard/releases) page and run it. It installs for your user only, with Start-menu and desktop shortcuts. The installer isn't code-signed, so SmartScreen may warn: **More info → Run anyway**. Each release carries `SHA256SUMS.txt`; `Get-FileHash Fleetboard-Setup-<version>.exe` should print the same hash.
 
 Then install your agent CLIs in Windows as usual (Claude Code, Codex, Gemini…) and sign in to each once in a terminal. Fleetboard finds them on your PATH, including ones npm installed as `.cmd` wrappers. Git for Windows and the GitHub CLI (`gh`) are needed for teams, the git card and the CI watcher.
 
@@ -57,7 +57,9 @@ Settings shows which build you are running, and tells you when a newer release i
 
 Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1` for a pre-release) and `.github/workflows/release.yml` builds the installer and attaches it to a GitHub Release. `npm run dist:win` builds one on a Windows machine.
 
-The Windows jobs in both workflows run on a **self-hosted runner** (a hosted Windows runner bills at twice a Linux one, and self-hosted minutes are free), which only stays safe while this repo is private: on a public repo a fork's pull request would run its own code on that machine. One thing that runner needs, or every `shell: bash` step dies with `execvpe(/bin/bash) failed`: **`C:\Program Files\Git\bin` must come before `C:\Windows\System32` on its PATH**, so `bash` is Git Bash and not the WSL shim. Naming the path in the workflow instead does not work — the runner cannot parse a custom shell whose path contains spaces. Here it is done by starting the runner through a wrapper that prepends Git's bin (`run-gitbash-first.cmd` beside `run.cmd`, which the logon task points at).
+The Windows jobs in both workflows run on GitHub's **hosted** Windows runners, which a public repository gets for free. They must not move to a self-hosted runner while the repository is public: a fork's pull request runs the workflow from the fork's branch, so a job asking for `[self-hosted, …]` would run someone else's code on that machine. (If one is ever used again, `C:\Program Files\Git\bin` has to come before `C:\Windows\System32` on its PATH, or every `shell: bash` step finds the WSL shim and dies with `execvpe(/bin/bash) failed`.)
+
+The installer is built with Electron's fuses set (`electron-builder.yml`): it cannot be run as a plain Node interpreter, takes no `NODE_OPTIONS` or `--inspect`, and loads only its own integrity-checked app archive.
 
 ## What's on the board
 

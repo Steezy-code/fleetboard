@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronRight, FilePlus2, FolderPlus } from 'lucide-react'
-import type { TreeEntry } from '../../../main/fsops'
+import type { TreeEntry } from '@shared/types'
 import { FileIcon, FolderIcon } from './icons'
 import { dirname, relativeTo, stripExt } from './paths'
+import { AsciiSkeleton } from 'ascii-reveal'
 
 export type { TreeEntry }
 
@@ -138,7 +139,11 @@ export function FileTree(p: Props) {
           if (e.children) rows.push(...render(e.children, depth + 1, e.path))
           else {
             unread.push(e.path)
-            rows.push(<div key={e.path + '/…'} className="ftree-none" style={{ paddingLeft: 26 + depth * 14 }}>…</div>)
+            rows.push(
+              <div key={e.path + '/…'} className="ftree-none" style={{ paddingLeft: 26 + depth * 14 }}>
+                <AsciiSkeleton variant="terminal" lines={1} widths={['55%']} animate={false} />
+              </div>
+            )
           }
         }
       } else {

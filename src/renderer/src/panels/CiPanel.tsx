@@ -6,6 +6,7 @@ import { Drawer, Switch } from '../ui/Modal'
 import { CiIcon } from '../chrome/CiBadge'
 import { ciItems, fixCi, fixerFor, refreshCi, setCiAutoFix, useCi, type CiItem } from '../workbench/ciStore'
 import { agentMade, markSent, ownerOf, refreshFeedback, routeFeedback, setAutoRoute, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
+import { AsciiReveal } from 'ascii-reveal'
 
 const ago = (iso: string) => {
   const s = (Date.now() - Date.parse(iso)) / 1000
@@ -136,7 +137,12 @@ function CiRow({ item }: { item: CiItem }) {
           )}
         </div>
       )}
-      {log !== null && <pre className="ci-log scrollable">{log}</pre>}
+      {log !== null && (
+        // 'Loading…' is what showLog() sets first; the real log decodes in over it
+        <AsciiReveal as="pre" className="ci-log scrollable" preset="terminal" loading={log === 'Loading…'}>
+          {log}
+        </AsciiReveal>
+      )}
       {feedback && feedback.comments.length > 0 && <Feedback pr={feedback} />}
     </div>
   )

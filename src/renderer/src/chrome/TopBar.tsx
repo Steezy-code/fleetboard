@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { ArrowLeft, ArrowUpCircle, Briefcase, ChevronDown, Folder, Minus, Plus, Settings, Smartphone, Square, X } from 'lucide-react'
 import type { UpdateCheck } from '../../../main/update'
 import { invoke, on, IS_WIN } from '../lib/api'
@@ -6,8 +7,18 @@ import { allConsoles, useApp } from '../state/store'
 import { UsagePill } from './UsagePill'
 import { closeWorkspaceAsking } from './closeWorkspace'
 
+/** A workspace tab as a string (id, name, its console ids): the project object is new on every camera frame, and a string only changes when the tab does. */
+const SEP = '\u0001'
+const tabOf = (w: { id: string; name: string; nodes: { id: string; type: string }[] }) => [w.id, w.name, w.nodes.filter((n) => n.type === 'console').map((n) => n.id).join(',')].join(SEP)
+
 export function TopBar() {
-  const project = useApp((s) => s.project)!
+  const projectId = useApp((s) => s.project?.id ?? '')
+  const projectName = useApp((s) => s.project?.name ?? '')
+  const activeWorkspaceId = useApp((s) => s.project?.activeWorkspaceId ?? '')
+  const tabs = useApp(useShallow((s) => (s.project?.workspaces ?? []).map(tabOf))).map((t) => {
+    const [id = '', name = '', consoles = ''] = t.split(SEP)
+    return { id, name, consoles: consoles ? consoles.split(',') : [] }
+  })
   const projects = useApp((s) => s.projects)
   const live = useApp((s) => s.live)
   const statuses = useApp((s) => s.statuses)
@@ -25,7 +36,7 @@ export function TopBar() {
       </button>
       <div className="no-drag" style={{ position: 'relative' }}>
         <button className="btn ghost sm" onClick={() => setProjMenu(!projMenu)}>
-          <Folder size={13} /> {project.name} <ChevronDown size={12} />
+          <Folder size={13} /> {projectName} <ChevronDown size={12} />
         </button>
         {projMenu && (
           <div className="menu" style={{ top: 32, left: 0, width: 280 }} onMouseLeave={() => setProjMenu(false)}>
@@ -33,7 +44,7 @@ export function TopBar() {
             {projects.map((p) => (
               <button
                 key={p.id}
-                className={`menu-item ${p.id === project.id ? 'on' : ''}`}
+                className={`menu-item ${p.id === projectId ? 'on' : ''}`}
                 onClick={() => {
                   setProjMenu(false)
                   // it asks about unsaved work and saves this board itself: one question, not two
@@ -62,9 +73,9 @@ export function TopBar() {
         )}
       </div>
       <div className="ws-tabs no-drag">
-        {project.workspaces.map((w) => {
-          const active = w.id === project.activeWorkspaceId
-          const count = w.nodes.filter((n) => n.type === 'console' && live[n.id]).length
+        {tabs.map((w) => {
+          const active = w.id === activeWorkspaceId
+          const count = w.consoles.filter((id) => live[id]).length
           return (
             <div
               key={w.id}
@@ -84,7 +95,7 @@ export function TopBar() {
                 <span>{w.name}</span>
               )}
               {count > 0 && <span className="ws-badge">{count}</span>}
-              {project.workspaces.length > 1 && (
+              {tabs.length > 1 && (
                 <button
                   className="ws-x"
                   title="Close workspace"

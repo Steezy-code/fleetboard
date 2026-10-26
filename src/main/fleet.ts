@@ -14,6 +14,7 @@ import { agentProfile, removeAgentProfile } from './agent-profile'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
+import { allowedPath, outsideMessage } from './roots'
 import { loginEnv } from './env'
 import { NO_HOOKS, ghEnv, run, git as runGit } from './run'
 import { append as journal, answered } from './journal'
@@ -80,11 +81,41 @@ const stateFile = (projectId: string) => path.join(fleetDir, `${assertProjectId(
 /** exported for the test that pins the check above */
 export const stateFileFor = stateFile
 
+/** Enough of a team's shape to load it: anything less is set aside, not trusted to be a team. */
+export function validFleetState(v: unknown): v is FleetState {
+  const o = v as FleetState | null
+  return (
+    !!o &&
+    typeof o === 'object' &&
+    typeof o.projectId === 'string' &&
+    !!o.projectId &&
+    !!o.members &&
+    typeof o.members === 'object' &&
+    !Array.isArray(o.members) &&
+    Object.values(o.members).every((m) => !!m && typeof m === 'object' && typeof m.id === 'string' && typeof m.role === 'string') &&
+    ['tasks', 'messages', 'asks'].every((k) => (o as unknown as Record<string, unknown>)[k] === undefined || Array.isArray((o as unknown as Record<string, unknown>)[k]))
+  )
+}
+
 function loadAll() {
   for (const f of fs.readdirSync(fleetDir)) {
     if (!f.endsWith('.json')) continue
-    const s = readJson<FleetState | null>(path.join(fleetDir, f), null)
-    if (!s) continue
+    const file = path.join(fleetDir, f)
+    const s = readJson<unknown>(file, null)
+    if (s === null) continue
+    if (!validFleetState(s)) {
+      // one unreadable team must not stop the others, nor the app (index.ts used to open no window)
+      logError('fleet', new Error(`${f} is not a team's state; set aside as ${f}.invalid`))
+      try {
+        fs.renameSync(file, `${file}.invalid`)
+      } catch {
+        /* gone meanwhile */
+      }
+      continue
+    }
+    s.tasks ??= []
+    s.messages ??= []
+    s.asks ??= []
     states.set(s.projectId, s)
     for (const m of Object.values(s.members)) memberProject.set(m.id, s.projectId)
   }
@@ -96,9 +127,15 @@ function state(projectId: string, projectPath = ''): FleetState {
     s = emptyFleet(projectId, projectPath)
     states.set(projectId, s)
   }
-  if (projectPath) s.projectPath = projectPath
+  // A running team keeps the folder it started in: merges land there and worktrees are removed from
+  // it, so a later call naming another folder (fleet:state takes one from the renderer) must not move
+  // it. A team with nobody left on it may follow the project to where it is now.
+  if (projectPath && projectPath !== s.projectPath && mayMoveTeam(s)) s.projectPath = projectPath
   return s
 }
+
+/** Whether a team's folder may change: only once nobody on it is still working there. */
+export const mayMoveTeam = (s: FleetState) => !Object.values(s.members).some((m) => m.status !== 'closed')
 
 const saveTimers = new Map<string, NodeJS.Timeout>()
 function changed(s: FleetState) {
@@ -346,7 +383,13 @@ export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, st
   const url = `http://127.0.0.1:${port}/mcp/${m.id}`
   const env: Record<string, string> = { MCP_TOOL_TIMEOUT: '600000' }
   if (m.agentId === 'claude') {
-    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: `Bearer ${memberToken(m.id)}` } } } }, 0o600)
+    // The token stays out of the file: Claude Code expands ${VAR} in an MCP config's headers, so the
+    // file names the variable and the token is in this console's environment, as Codex's is. A file at
+    // a predictable path with the Lead's token in it was readable by every member running as the same
+    // user, which made the role checks only as strong as a `cat`. (A process of the same user can
+    // still read another's environment through /proc: this narrows the reach, it is not isolation.)
+    writeJsonAtomic(mcpFile(m.id), { mcpServers: { fleet: { type: 'http', url, headers: { Authorization: 'Bearer ${FB_MCP_TOKEN}' } } } }, 0o600)
+    env.FB_MCP_TOKEN = memberToken(m.id)
     const lead = m.leadId ? s.members[m.leadId] : undefined
     const args = ['--mcp-config', mcpFile(m.id), '--append-system-prompt', m.role === 'lead' ? leadPrompt(m) : workerPrompt(m, lead)]
     if (m.role === 'worker') args.push('--permission-mode', 'acceptEdits')
@@ -591,7 +634,14 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
   stopCheck(s.projectId)
   delete s.check
   changed(s)
-  await startConsole(s, m)
+  try {
+    await startConsole(s, m)
+  } catch (e) {
+    // no Lead without a console: its worktree goes, and the user is told why (the renderer shows the error)
+    await dismiss(s, m, 'merged')
+    changed(s)
+    throw e
+  }
   post(s, { from: 'user', to: id, kind: 'goal', text: goalMessageFor(charter, opts.goal) })
   // the baseline, so later runs can say "down from 11"
   void runCheck(s, 'start')
@@ -921,7 +971,16 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       }
       const unlinked = !reviewer && !ref && s.tasks.some((t) => !t.owner && t.status === 'todo')
       changed(s)
-      await startConsole(s, w)
+      try {
+        await startConsole(s, w)
+      } catch (e: any) {
+        // its CLI could not start (not installed, a bad path): a member left "working" with no console
+        // held a worker slot and its worktree for good, and nothing would ever report for it
+        if (ref) delete ref.owner
+        await dismiss(s, w, 'merged')
+        changed(s)
+        return fail(`${w.name} could not start: ${String(e?.message ?? e).slice(0, 300)}`)
+      }
       post(s, { from: m.id, to: id, kind: 'brief', text: briefFor(w, m, s.charter?.wontTouch) })
       return text(
         `${w.name} started (${agentById(agentId)?.name}) ${branch ? `in its own worktree on branch ${branch}` : 'in your worktree'}. It has the brief.` +
@@ -1014,7 +1073,9 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       const r = await git(m.cwd, ['merge', '--no-ff', '--no-edit', '-m', `Merge ${w.branch}`, at])
       if (!r.ok) {
         const conflicts = (await git(m.cwd, ['diff', '--name-only', '--diff-filter=U'])).out
-        await git(m.cwd, ['merge', '--abort'])
+        // only a merge this call left half done: one that never started (refused by a dirty tree) has
+        // nothing to abort, and `--abort` is not a command to run on state it did not make
+        if (await unfinishedOperation(m.cwd)) await git(m.cwd, ['merge', '--abort'])
         return fail(`Merge failed${conflicts ? `; conflicts in: ${conflicts.split('\n').join(', ')}` : `: ${r.err.slice(0, 400)}`}. Ask ${w.name} to fix it with fleet_send.`)
       }
       w.status = 'merged'
@@ -1161,19 +1222,23 @@ function startServer(): Promise<number> {
       if (req.method === 'GET') return res.writeHead(405, { Allow: 'POST' }).end()
       if (req.method === 'DELETE') return res.writeHead(200).end()
       if (req.method !== 'POST') return res.writeHead(405).end()
-      let body = ''
+      const chunks: Buffer[] = []
+      let size = 0
       // a long call (fleet_wait, fleet_ask_user) must notice when its caller goes away
       const hangup = new AbortController()
       res.on('close', () => {
         if (!res.writableFinished) hangup.abort()
       })
       let tooBig = false
-      req.on('data', (d) => {
+      // bytes until the end, decoded once: a character split across two chunks was garbled when each
+      // chunk was turned into a string on its own
+      req.on('data', (d: Buffer) => {
         if (tooBig) return
-        body += d
-        if (body.length > MAX_BODY) {
+        size += d.length
+        chunks.push(d)
+        if (size > MAX_BODY) {
           tooBig = true
-          body = ''
+          chunks.length = 0
           res.writeHead(413, { Connection: 'close' }).end()
           req.resume()
         }
@@ -1182,20 +1247,32 @@ function startServer(): Promise<number> {
         if (tooBig) return
         let parsed: any
         try {
-          parsed = JSON.parse(body)
+          parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
         } catch {
           return res.writeHead(400).end()
         }
         const batch = Array.isArray(parsed)
-        const out = (await Promise.all((batch ? parsed : [parsed]).map((x: any) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
-        if (hangup.signal.aborted) return
-        if (!out.length) return res.writeHead(202).end()
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': encoded })
-        res.end(JSON.stringify(batch ? out : out[0]))
+        const messages: unknown[] = batch ? parsed : [parsed]
+        // `null`, a number, a string: no message at all. It used to throw reading `.id` in handleRpc,
+        // inside this handler, which left the request unanswered and the rejection unhandled
+        if (!messages.length || messages.some((x) => !x || typeof x !== 'object' || Array.isArray(x))) return res.writeHead(400).end()
+        try {
+          const out = (await Promise.all(messages.map((x) => handleRpc(caller, x, hangup.signal)))).filter(Boolean)
+          if (hangup.signal.aborted) return
+          if (!out.length) return res.writeHead(202).end()
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Mcp-Session-Id': encoded })
+          res.end(JSON.stringify(batch ? out : out[0]))
+        } catch (e) {
+          logError('fleet', e)
+          if (!res.headersSent) res.writeHead(500).end()
+        }
       })
     })
+    // No limit on a request as a whole: fleet_wait and fleet_ask_user hold one open for as long as it
+    // takes. The headers, though, come before the token is checked, and any program on the machine can
+    // open a connection: one that never finishes sending them is let go after a while.
     server.requestTimeout = 0
-    server.headersTimeout = 0
+    server.headersTimeout = 30_000
     server.keepAliveTimeout = 600_000
     // no loopback to listen on: the app starts without teams (port 0) rather than wait for ever
     server.once('error', (e) => {
@@ -1311,10 +1388,20 @@ export async function register(c: MainContext) {
       return ready.evidence
     } finally { if (verifications.get(projectId) === controller) verifications.delete(projectId) }
   })
-  ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, projectPath))
-  ipc.handle('fleet:startLead', (_e, opts) => startLead(opts))
+  // The folder a team works in arrives over IPC like goal:check's: only an absolute folder Fleetboard
+  // may use (roots.ts). Kept as the renderer wrote it (forward slashes on Windows, like every path the
+  // team state already holds) once it has passed.
+  const teamFolder = (p: unknown, what: string): string | null => (typeof p === 'string' && path.isAbsolute(p) && allowedPath(p, what) ? p : null)
+  ipc.handle('fleet:state', (_e, projectId: string, projectPath?: string) => state(projectId, teamFolder(projectPath, 'fleet:state') ?? ''))
+  ipc.handle('fleet:startLead', (_e, opts: Parameters<typeof startLead>[0]) => {
+    const projectPath = teamFolder(opts?.projectPath, 'fleet:startLead')
+    if (!projectPath) throw new Error(outsideMessage(opts?.projectPath))
+    return startLead({ ...opts, projectPath })
+  })
   /** whether a team in this folder works in worktrees of its own (a repository with a commit) */
-  ipc.handle('fleet:isolation', async (_e, projectPath: string): Promise<'worktrees' | 'no-commits' | 'no-repo'> => {
+  ipc.handle('fleet:isolation', async (_e, folder: string): Promise<'worktrees' | 'no-commits' | 'no-repo'> => {
+    const projectPath = teamFolder(folder, 'fleet:isolation')
+    if (!projectPath) return 'no-repo'
     if ((await git(projectPath, ['rev-parse', '--verify', 'HEAD'])).ok) return 'worktrees'
     return (await git(projectPath, ['rev-parse', '--git-dir'])).ok ? 'no-commits' : 'no-repo'
   })
@@ -1347,7 +1434,14 @@ export async function register(c: MainContext) {
       delete s.check.running
     }
     changed(s)
-    if (!off) void runCheck(s, 'start')
+    if (!off) void runCheck(s, 'user')
+    return true
+  })
+  /** The user runs the charter's check now, on whatever the team has merged so far. */
+  ipc.handle('fleet:runCheck', (_e, projectId: string) => {
+    const s = states.get(projectId)
+    if (!s?.charter?.doneWhen) return false
+    void runCheck(s, 'user')
     return true
   })
   ipc.handle('fleet:diff', async (_e, projectId: string) => {
@@ -1391,7 +1485,7 @@ export async function register(c: MainContext) {
     if (!s?.ready) return false
     const lead = s.members[s.ready.leadId]
     if (!lead) return false
-    await dismissTeam(s, lead, s.ready.prUrl ? 'keep' : s.ready.commits ? 'keep' : 'force')
+    await dismissTeam(s, lead, s.ready.prUrl || s.ready.commits || (await commitsSinceReady(s, lead)) ? 'keep' : 'force')
     return true
   })
   ipc.handle('fleet:discard', async (_e, projectId: string, leadId?: string) => {
@@ -1561,6 +1655,19 @@ export function stopFleetTicks() {
 
 /** A project's team state, if it has one. */
 export const fleetState = (projectId: string): FleetState | undefined => states.get(projectId)
+
+/**
+ * Commits on the Lead's branch past where it started, counted now. The Ready card's count is from
+ * fleet_finish: a Lead that finished with nothing and stayed on for follow-ups could merge work after
+ * it, and Done on that card deleted the branch with -D on the strength of the old zero. Unknown
+ * counts as some, which keeps the branch.
+ */
+export async function commitsSinceReady(s: FleetState, lead: FleetMember): Promise<number> {
+  if (!lead.branch) return 0
+  if (!lead.base) return 1
+  const r = await git(s.projectPath, ['rev-list', '--count', `${lead.base}..refs/heads/${lead.branch}`])
+  return r.ok ? Number(r.out) || 0 : 1
+}
 
 async function dismissTeam(s: FleetState, lead: FleetMember, branch: 'merged' | 'force' | 'keep') {
   verifications.get(s.projectId)?.abort()

@@ -66,7 +66,8 @@ export async function gitEnv(): Promise<Record<string, string>> {
     GIT_PAGER: 'cat',
     GCM_INTERACTIVE: 'never',
     GIT_ASKPASS: '',
-    SSH_ASKPASS: ''
+    SSH_ASKPASS: '',
+    ...HARDENED_CONFIG_ENV
   }
   // and ssh must not wait for a host key or a passphrase either
   if (!env.GIT_SSH_COMMAND) env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes -o ConnectTimeout=6'
@@ -84,7 +85,9 @@ export async function ghEnv(): Promise<Record<string, string>> {
     GH_SPINNER_DISABLED: '1',
     NO_COLOR: '1',
     GIT_TERMINAL_PROMPT: '0',
-    GIT_OPTIONAL_LOCKS: '0'
+    GIT_OPTIONAL_LOCKS: '0',
+    // gh runs git itself, without GIT_OPTS: the same switches reach it through the environment
+    ...HARDENED_CONFIG_ENV
   }
   return ghCache
 }
@@ -101,11 +104,26 @@ export async function ghEnv(): Promise<Record<string, string>> {
 export const GIT_OPTS = ['-c', 'core.fsmonitor=false', '-c', 'log.showSignature=false']
 
 /**
+ * GIT_OPTS again, as environment: config given this way ranks with -c, above a repository's own, and
+ * it reaches every git process started under it — the ones gh starts, and the ones git starts for a
+ * submodule — which -c on the app's own command line does not.
+ */
+export const HARDENED_CONFIG_ENV: Record<string, string> = (() => {
+  const pairs = GIT_OPTS.filter((_, i) => i % 2 === 1).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)])
+  const env: Record<string, string> = { GIT_CONFIG_COUNT: String(pairs.length) }
+  pairs.forEach(([k, v], i) => {
+    env[`GIT_CONFIG_KEY_${i}`] = k!
+    env[`GIT_CONFIG_VALUE_${i}`] = v!
+  })
+  return env
+})()
+
+/**
  * Config keys a repository can set to name a program that the sweep's own git calls (status, log,
  * an opt-in fetch) could run. core.fsmonitor and log.showSignature are switched off for every call
  * above, the pager is cat (gitEnv), and the sweep points hooks at an empty folder; these are the rest.
  */
-const NAMES_A_PROGRAM = /^(filter\..+\.(clean|smudge|process)|credential\.(.+\.)?helper|core\.(sshcommand|gitproxy|askpass)|remote\..+\.(uploadpack|receivepack|vcs)|protocol\..+\.allow|uploadpack\.packobjectshook)$/i
+const NAMES_A_PROGRAM = /^(filter\..+\.(clean|smudge|process)|credential\.(.+\.)?helper|core\.(sshcommand|gitproxy|askpass|alternaterefscommand)|remote\..+\.(uploadpack|receivepack|vcs)|protocol\..+\.allow|uploadpack\.packobjectshook)$/i
 
 /** Filters a repository may name without being suspect: tools the user installed for exactly this. */
 const KNOWN_FILTER = /^"?git[- ](lfs|crypt)"?(\s|$)/i

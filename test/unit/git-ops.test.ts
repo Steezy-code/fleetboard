@@ -135,3 +135,26 @@ test('committing everything is held to the list that was on screen', async () =>
   const ok = await ipcMain.invoke('git:commit', repo, 'all of it', null, shown)
   assert.equal(ok.ok, true, JSON.stringify(ok))
 })
+
+test("a new file's preview is a file of the repository, never one outside it", async () => {
+  // only the folder was checked: a "file" of ../../ led out of the repo and was read whole
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-git-secret-'))
+  const secret = path.join(outside, 'id_ed25519')
+  fs.writeFileSync(secret, 'PRIVATE KEY\n')
+  const up = path.relative(repo, secret)
+  const r = await ipcMain.invoke('git:diff', repo, up, { untracked: true })
+  assert.equal(r.ok, false)
+  assert.doesNotMatch(JSON.stringify(r), /PRIVATE KEY/)
+  assert.equal((await ipcMain.invoke('git:diff', repo, secret, { untracked: true })).ok, false, 'nor as an absolute path')
+  write('fresh.txt', 'new\n')
+  const ok = await ipcMain.invoke('git:diff', repo, 'fresh.txt', { untracked: true })
+  assert.equal(ok.ok, true, 'a real new file still previews')
+  assert.match(ok.diff, /\+new/)
+})
+
+test('git:show checks its folder like every other git handler', async () => {
+  const other = fs.mkdtempSync(path.join(os.tmpdir(), 'fb-git-show-'))
+  execFileSync('git', ['init', '-q'], { cwd: other })
+  assert.deepEqual(await ipcMain.invoke('git:show', other, 'HEAD'), { ok: false, error: 'Folder not found' })
+  assert.equal((await ipcMain.invoke('git:show', repo, 'HEAD')).ok, true)
+})

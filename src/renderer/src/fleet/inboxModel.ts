@@ -7,7 +7,7 @@ import { agentLabel, consoleTail } from '../engine/consoles'
 import { useFleet } from '../engine/fleet'
 import { approvalFor, commandNote, type Approval } from '@shared/approvals'
 import { gateCharter, useCharter } from './charter'
-import { addRule, canRule, pruneRules, ruleFor, rulesOf, teamOf, useTeamRules } from './teamRules'
+import { addRule, canRule, pruneRules, ruleOf, rulesOf, teamOf, useTeamRules } from './teamRules'
 import { awayItem, useAway, useAwayWatcher } from './away'
 import { ciItems, fixCi, useCi, type CiItem } from '../workbench/ciStore'
 import { agentMade, markSent, routeFeedback, unsent, useFeedback, type PrFeedback } from '../workbench/prFeedback'
@@ -156,18 +156,28 @@ async function answerPrompt(consoleId: string, a: PromptAnswer) {
 
 /** Consoles a team rule is answering right now: their card stays out of the tray meanwhile. */
 const byRule = new Set<string>()
+/** console + command already told that its definition files changed: said once, not on every refresh */
+const redefinedSaid = new Set<string>()
 
 /** Answer a team member's prompt with the team's rule, if it has one for exactly this command. */
 async function answerByRule(id: string, ap: Approval | null) {
   const fleet = useFleet.getState().state
   const lead = teamOf(fleet, id)
   const allow = ap?.options.find((o) => o.tone === 'allow')
-  if (!lead || !ap?.command || !allow || !ruleFor(lead, ap.command) || byRule.has(id)) return
+  const rule = lead && ap?.command ? ruleOf(lead, ap.command) : undefined
+  if (!lead || !ap?.command || !allow || !rule || byRule.has(id)) return
   byRule.add(id)
   const name = fleet?.members[id]?.name ?? 'an agent'
   try {
-    const res = await invoke<AnswerResult>('pty:answerByRule', id, allow.answer, ap.command, name).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
-    if (!res.ok) return // the card shows as usual: the question changed, or the console is gone
+    const res = await request('pty:answerByRule', id, allow.answer, ap.command, name, rule.fingerprint).catch((): AnswerResult => ({ ok: false, reason: 'not-live' }))
+    if (!res.ok) {
+      // the card shows as usual: the question changed, the console is gone, or what the command runs did
+      if (res.reason === 'redefined' && !redefinedSaid.has(`${id}\0${ap.command}`)) {
+        redefinedSaid.add(`${id}\0${ap.command}`)
+        useApp.getState().toast(`What \`${ap.command.split('\n')[0]!.slice(0, 40)}\` runs has changed in ${name}'s folder since you allowed it, so it asks you again`, 'warn')
+      }
+      return
+    }
     useApp.getState().setStatus(id, 'working')
     const cmd = ap.command.split('\n')[0]!
     useApp.getState().toast(`Allowed \`${cmd.length > 40 ? cmd.slice(0, 39) + '…' : cmd}\` for ${name}, by your rule for the team`, 'ok')
@@ -178,10 +188,12 @@ async function answerByRule(id: string, ap: Approval | null) {
 }
 
 /** "Allow for the team": answer this one, then everyone on the team already waiting on the same command. */
-function allowForTeam(id: string, lead: string, ap: Approval) {
+async function allowForTeam(id: string, lead: string, ap: Approval) {
   const allow = ap.options.find((o) => o.tone === 'allow')
   if (!ap.command || !allow) return
-  addRule(lead, ap.command)
+  // bound to what the command means where the user said yes; without that, this is a plain Allow
+  const fingerprint = await request('pty:ruleFingerprint', id).catch(() => null)
+  if (fingerprint) addRule(lead, ap.command, fingerprint)
   const fleet = useFleet.getState().state
   for (const [other, a] of Object.entries(approvals)) if (other !== id && teamOf(fleet, other) === lead) void answerByRule(other, a.approval)
   return answerPrompt(id, allow.answer)
@@ -245,6 +257,8 @@ function fetchSpend(key: string, cwds: string[]) {
   if (!cwds.length) return
   invoke<Record<string, Spent | null>>('usage:spentIn', cwds).then(
     (r) => {
+      // a newer card asked meanwhile: this is the old one's spend
+      if (spendKey !== key) return
       spend = r
       refreshInbox()
     },
@@ -364,7 +378,10 @@ function build() {
   const app = useApp.getState()
   const project = app.project
   if (!project) return useInbox.setState({ items: [], front: null })
-  const fleet = useFleet.getState().state
+  // only this project's team: a state still about the one just left would pair its Lead and Ready
+  // card with this project's id on every button
+  const mirrored = useFleet.getState().state
+  const fleet = mirrored && mirrored.projectId === project.id ? mirrored : null
   const consoles = Object.fromEntries(allConsoles().map((c) => [c.id, c]))
   const items: InboxItem[] = []
   const memberName = (id: string) => fleet?.members[id]?.name ?? (consoles[id]?.data.name as string) ?? 'Lead'

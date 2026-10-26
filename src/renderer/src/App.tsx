@@ -1,5 +1,5 @@
 import { TeamGuide } from './chrome/TeamGuide'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useApp } from './state/store'
 import { SCHEMA_VERSION, type Recovery } from '@shared/types'
 import { request, errorText, fb, on, invoke } from './lib/api'
@@ -23,14 +23,48 @@ import { useThemeSync } from './ui/theme'
 import { InboxTray } from './fleet/InboxTray'
 import { useInboxWatcher } from './fleet/inboxModel'
 import { mayDropUnsaved } from './lib/unsaved'
+import { useAsciiReveal } from 'ascii-reveal'
+import { markBoardRevealed, waveKey } from './lib/reveal'
 
 export function App() {
-  const project = useApp((s) => s.project)
+  // primitives only: the project object changes on every camera frame (pan, zoom), and selecting it
+  // here re-rendered the whole app tree, chrome and drawers included, once per frame
+  const hasProject = useApp((s) => !!s.project)
+  const activeWorkspaceId = useApp((s) => s.project?.activeWorkspaceId ?? '')
   const panel = useApp((s) => s.panel)
   const drawer = useApp((s) => s.drawer)
   const focused = useApp((s) => !!s.focusedNode)
+  // One wave over everything on screen the first time the board is up. The glyph grid is measured
+  // from the real elements where they already are, so what scrambles is the shape of the content it
+  // is about to become — no hand-written skeleton to keep in step with the layout.
+  const launch = useAsciiReveal({ preset: 'terminal', revealOnMount: false })
+  const waved = useRef<string | undefined>(undefined)
+  // Home paints placeholders ("Looking…", the empty-board line) until agent detection answers. init()
+  // sets the board list first and asks for agents after, so agents arriving means both have.
+  const homeReady = useApp((s) => s.agents.length > 0)
+
   useThemeSync()
   useInboxWatcher()
+
+  useEffect(() => {
+    // '' is what the selector gives with no board open, and ?? does not treat it as missing
+    const ws = waveKey(activeWorkspaceId || undefined)
+    if (waved.current === ws) return
+    const run = () => {
+      if (waved.current === ws) return
+      waved.current = ws
+      // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
+      const done = () => markBoardRevealed(ws)
+      // marked either way: a wave that could not run must not leave later tiles un-animated
+      void launch.reveal({ duration: 'cinematic' }).then(done, done)
+    }
+    // The wave measures the page when it starts, so a page that is still filling in leaves it drawing
+    // the old layout over the new one. A board has its content already; Home waits for its data,
+    // but not for long: a detection that is slow or has failed must not mean no wave at all.
+    if (hasProject || homeReady) return run()
+    const t = setTimeout(run, 2500)
+    return () => clearTimeout(t)
+  }, [hasProject, activeWorkspaceId, homeReady, launch])
 
   useEffect(() => {
     useApp.getState().init()
@@ -59,6 +93,8 @@ export function App() {
       invoke('app:quit')
     }
     const offConfirm = on('app:confirmQuit', async (n: number) => {
+      // heard: main waits for the answer instead of asking natively (index.ts)
+      fb.send('app:quitAck')
       if (!(await mayDropUnsaved('Quit'))) return
       const ok = await useApp.getState().confirm({
         title: `Quit with ${n} console${n === 1 ? '' : 's'} running?`,
@@ -96,6 +132,10 @@ export function App() {
           )
         return
       }
+      if (r.unreadable) {
+        useApp.getState().toast('The settings file could not be read (it may be locked by another program), so Fleetboard started with default settings and will not save over it. Restart Fleetboard to try again.', 'warn')
+        return
+      }
       const when = r.snapshot ? new Date(Number(/-(\d+)\.json$/.exec(r.snapshot)?.[1])).toLocaleString() : ''
       const what = r.what === 'app' ? 'The settings file' : "This board's file"
       const then = r.snapshot ? `restored the copy saved ${when}` : r.what === 'app' ? 'started with default settings' : 'started an empty board'
@@ -111,11 +151,11 @@ export function App() {
   const DrawerC = drawer ? DRAWERS[drawer.name] : null
 
   return (
-    <div className="app">
-      {project ? (
+    <div className="app" ref={launch.ref}>
+      {hasProject ? (
         <>
-          <Boundary what="The board" resetKey={project.activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>
-            <Board key={project.activeWorkspaceId} />
+          <Boundary what="The board" resetKey={activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>
+            <Board key={activeWorkspaceId} />
           </Boundary>
           <TopBar />
           {/* rails and bars step aside in focus mode; the Inbox stays */}

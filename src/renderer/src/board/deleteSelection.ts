@@ -21,13 +21,22 @@ interface Removed {
   members: [string, string][]
 }
 
-export async function deleteSelection(): Promise<void> {
+export function deleteSelection(): Promise<boolean> {
+  return deleteItems(useApp.getState().selection)
+}
+
+/**
+ * Delete these items of the active workspace (tiles, groups, wires, ink) the way Delete does: live
+ * consoles asked about first, one Undo for the lot. False when nothing went (refused, or nothing there).
+ * Voice's "delete the group" comes through here too, so it gets the same question and the same Undo.
+ */
+export async function deleteItems(ids: string[], opts: { ask?: boolean } = {}): Promise<boolean> {
   const app = useApp.getState()
   const ws = activeWs()
-  if (!ws || !app.selection.length) return
-  const sel = new Set(app.selection)
+  if (!ws || !ids.length) return false
+  const sel = new Set(ids)
   const nodes = ws.nodes.filter((n) => sel.has(n.id))
-  if (!(await mayRemove(nodes))) return
+  if (opts.ask !== false && !(await mayRemove(nodes))) return false
   const groups = ws.groups.filter((g) => sel.has(g.id))
   const gone = new Set([...nodes.map((n) => n.id), ...groups.map((g) => g.id)])
   const removed: Removed = {
@@ -50,9 +59,10 @@ export async function deleteSelection(): Promise<void> {
     wires: w.wires.filter((x) => !wires.has(x.id)),
     ink: w.ink.filter((i) => !ink.has(i.id))
   }))
-  app.setSelection([])
+  app.setSelection(app.selection.filter((id) => !sel.has(id)))
   const count = nodes.length + groups.length + removed.ink.length + removed.wires.filter((w) => sel.has(w.id)).length
   app.toast(`Deleted ${count} ${count === 1 ? 'item' : 'items'}.`, 'info', { label: 'Undo', run: () => restore(removed) })
+  return count > 0
 }
 
 function restore(r: Removed) {

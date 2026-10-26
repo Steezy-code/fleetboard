@@ -295,3 +295,11 @@ test('a project closed lets every door still waiting at the gate go', async () =
   assert.equal(useCharter.getState().pending, null)
   assert.deepEqual((await list()).map((i) => i.kind), [])
 })
+
+test('a team mirrored from the project just left shows nothing in this one', async () => {
+  // fleet:state for the old project could land after the new one opened; its Ready card's buttons
+  // would have paired that Lead and head with this project's id
+  useFleet.setState({ state: { projectId: 'elsewhere', projectPath: '/tmp/other', members: { [lead.id]: { ...lead, projectId: 'elsewhere' } }, tasks: [], messages: [], asks: [], ready: { leadId: lead.id, branch: 'fleet/x', summary: 's', commits: 1, files: ['a'], at: Date.now(), head: 'abc' } } as any })
+  const items = await list()
+  assert.equal(items.filter((i) => i.kind === 'ready').length, 0)
+})

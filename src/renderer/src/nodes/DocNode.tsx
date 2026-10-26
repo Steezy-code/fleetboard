@@ -6,6 +6,7 @@ import { useFileText } from '../workbench/useFileText'
 import { handleMdClick, renderMarkdown } from '../workbench/markdown'
 import { exportMarkdownPdf } from '../workbench/pdf'
 import { baseName, dirname, stripExt } from '../workbench/paths'
+import { AsciiSkeleton, useAsciiReveal } from 'ascii-reveal'
 
 interface DocData {
   /** inline markdown (documents studio output) */
@@ -34,6 +35,7 @@ export default function DocNode({ node }: NodeProps<DocData>) {
   const baseDir = d.path ? dirname(d.path) : useApp.getState().project?.path
   const html = useMemo(() => renderMarkdown(body, { baseDir, wiki: 'text' }), [body, baseDir])
   const [exporting, setExporting] = useState(false)
+  const mdReveal = useAsciiReveal({ preset: 'terminal' })
   const words = useMemo(() => (src.match(/\S+/g) ?? []).length, [src])
 
   async function exportPdf() {
@@ -70,13 +72,13 @@ export default function DocNode({ node }: NodeProps<DocData>) {
         <div className="md paper doc-md" onClick={(e) => handleMdClick(e, { baseDir })}>
           <h1>{title}</h1>
           {loading ? (
-            <p className="doc-dim">Loading…</p>
+            <AsciiSkeleton variant="terminal" lines={6} />
           ) : error ? (
             <p className="doc-dim">{error}</p>
           ) : !src.trim() ? (
             <p className="doc-dim">Empty document</p>
           ) : (
-            <div dangerouslySetInnerHTML={{ __html: html }} />
+            <div ref={mdReveal.ref} dangerouslySetInnerHTML={{ __html: html }} />
           )}
         </div>
       </div>

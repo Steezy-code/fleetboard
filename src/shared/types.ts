@@ -322,6 +322,26 @@ export interface Recovery {
    * was moved and nothing was damaged.
    */
   tooNew?: number
+  /**
+   * The file is there but could not be read (locked, no permission): it was neither set aside nor
+   * written over, and changes this session are not saved to it. Nothing about it is known damaged.
+   */
+  unreadable?: boolean
+}
+
+/** fs:tree: a folder read level by level; a folder without `children` has not been read yet */
+export interface TreeEntry {
+  name: string
+  path: string
+  dir: boolean
+  children?: TreeEntry[]
+}
+
+/** fs:stat */
+export interface FileStat {
+  size: number
+  mtime: number
+  dir: boolean
 }
 
 /** fs:write with a base: refused when the file no longer holds it (current: what it holds now, null if gone) */

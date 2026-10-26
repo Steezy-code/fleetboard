@@ -4,7 +4,7 @@ import tapUrl from './tap.worklet.js?url'
 import { fb } from '../lib/api'
 import { useApp } from '../state/store'
 import { setVoice, useVoice } from './thread'
-import { runCommand } from './planner'
+import { noteListening, runCommand } from './planner'
 import { stopSpeaking, warmUpTts } from './tts'
 
 const RATE = 16000
@@ -64,7 +64,14 @@ function getWorker(): Worker {
 export function warmUpStt(): Promise<void> {
   const model = modelId()
   if (loadedModel && loadedModel !== model) {
-    // model changed in settings: start a fresh worker
+    // model changed in settings: start a fresh worker. What the old one still owed is answered now —
+    // terminated, it never would be, and push-to-talk sat at "transcribing" for good
+    const gone = new Error('The speech model changed; say it again.')
+    pending.forEach((p) => p.reject(gone))
+    pending.clear()
+    loadReject?.(gone)
+    loadResolve = null
+    loadReject = null
     worker?.terminate()
     worker = null
     ready = false
@@ -241,6 +248,7 @@ export async function beginListening() {
   chunks = []
   startedAt = performance.now()
   setVoice({ phase: 'listening', transcript: '', reply: '', level: 0, captionUntil: 0 })
+  noteListening()
   warmUpStt()
     .then(() => {
       // the voice model downloads after the speech model, so the first reply can be spoken by Kokoro sooner

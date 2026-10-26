@@ -43,7 +43,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: refs/tags/${{ env.TAG }}
           fetch-depth: 0 # origin/master, for the check below
@@ -54,7 +54,7 @@ jobs:
           [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::$TAG is not a vX.Y.Z tag"; exit 1; }
           git merge-base --is-ancestor HEAD origin/master || { echo "::error::$TAG is not on master"; exit 1; }
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -73,6 +73,11 @@ jobs:
           npx electron-vite build
           npx electron-builder --win --x64 --publish never
 
+      # a checksum beside the installer: it is not code-signed, so this is how a download can be checked
+      # against what CI built
+      - name: Checksums
+        run: (cd release && sha256sum *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt)
+
       # One call: gh creates it as a draft, uploads, then publishes (which also works with immutable
       # releases on). It fails if a release for this tag exists, so a published installer is never
       # replaced under the same name.
@@ -82,6 +87,6 @@ jobs:
         run: |
           pre=""
           case "$TAG" in *-*) pre="--prerelease" ;; esac
-          gh release create "$TAG" release/*.exe -R "$GITHUB_REPOSITORY" --verify-tag $pre \
+          gh release create "$TAG" release/*.exe release/SHA256SUMS.txt -R "$GITHUB_REPOSITORY" --verify-tag $pre \
             --title "Fleetboard $TAG" \
             --notes "Windows installer: download **Fleetboard-Setup-${TAG#v}.exe** below and run it (it installs for your user only; Windows SmartScreen may warn because the installer isn't code-signed: More info → Run anyway). Then install and sign in to your agent CLIs (Claude Code, Codex, Gemini…) in Windows."

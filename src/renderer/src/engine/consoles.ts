@@ -192,17 +192,31 @@ export const consoleTail = (id: string, chars = 8000) => request('pty:tail', id,
 export const agentLabel = (agentId: string) => agentById(agentId, useApp.getState().settings.customAgents)?.name ?? agentId
 export const agentColor = (agentId: string) => agentById(agentId, useApp.getState().settings.customAgents)?.color ?? '#a8a29e'
 
-/** Resolve a spoken / typed name ("maya", "Maya 2", "codex", "backend") to console ids. */
+/**
+ * How a console, group or agent name is compared, everywhere a name is resolved (here, @mentions in
+ * orchestrator.ts, voice in voice/actions.ts): case, spaces and punctuation aside, so "Maya 2", "maya-2",
+ * "@maya_2" and "maya2" are one name. Each place used to have its own, and a name one of them matched
+ * another did not.
+ */
+export const nameKey = (s: string) => s.toLowerCase().replace(/^@/, '').replace(/[^a-z0-9]+/g, '')
+
+/**
+ * Resolve a spoken / typed name ("maya", "Maya 2", "codex", "backend") to console ids. "all" here is
+ * every console of the project — the orchestrator's broadcast; voice's "all" means the board in front
+ * of the user instead (voice/actions.ts resolveRef), on purpose.
+ */
 export function resolveTargets(word: string): string[] {
   const w = word.toLowerCase().replace(/^@/, '').trim()
+  const key = nameKey(w)
   const consoles = allConsoles()
   const ws = activeWs()
   if (['all', 'everyone', 'everybody', 'all agents', 'all consoles', 'team'].includes(w)) return consoles.map((c) => c.id)
-  const byName = consoles.filter((c) => c.data.name.toLowerCase() === w || c.data.name.toLowerCase().replace(/\s+/g, '') === w.replace(/\s+/g, ''))
+  if (!key) return []
+  const byName = consoles.filter((c) => nameKey(c.data.name) === key)
   if (byName.length) return byName.map((c) => c.id)
-  const group = ws?.groups.find((g) => g.name.toLowerCase() === w || g.role.toLowerCase() === w)
+  const group = ws?.groups.find((g) => nameKey(g.name) === key || nameKey(g.role) === key)
   if (group) return ws!.nodes.filter((n) => n.groupId === group.id && n.type === 'console').map((n) => n.id)
-  const byAgent = consoles.filter((c) => c.data.agentId === w || agentLabel(c.data.agentId).toLowerCase() === w)
+  const byAgent = consoles.filter((c) => nameKey(c.data.agentId) === key || nameKey(agentLabel(c.data.agentId)) === key)
   return byAgent.map((c) => c.id)
 }
 

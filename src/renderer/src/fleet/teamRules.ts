@@ -13,6 +13,11 @@ import { teamRuleAllowed } from '@shared/approvals'
 // delete, overwrite, run as root or reach the network never get a rule (teamRuleAllowed). Each
 // answer a rule gives goes into the Night log, so "what did it say yes to" still has an answer.
 //
+// The command's text is not all a rule is bound to: `npm test` runs whatever package.json says. A
+// rule carries a fingerprint of the files that define such commands, taken in the folder of the
+// console the user said yes to (main/teamrules.ts), and main answers for a member only while its own
+// folder still matches. A worker that rewrites the "test" script is asked again.
+//
 // ponytail: in memory, so a reload forgets the rules and the team asks again — the safe direction
 // to fail in. Persist them with the fleet state only if re-approving after a restart proves a chore.
 
@@ -20,6 +25,8 @@ export interface TeamRule {
   /** the team, by its Lead's console id */
   leadId: string
   command: string
+  /** the definition files where the user said yes (main/teamrules.ts definitionFingerprint) */
+  fingerprint: string
   at: number
 }
 
@@ -36,16 +43,17 @@ export function teamOf(fleet: FleetState | null | undefined, consoleId: string):
 export const canRule = (fleet: FleetState | null | undefined, consoleId: string, command: string | undefined): command is string =>
   !!command && !!teamOf(fleet, consoleId) && teamRuleAllowed(command)
 
-export function addRule(leadId: string, command: string) {
-  if (!teamRuleAllowed(command) || ruleFor(leadId, command)) return
-  useTeamRules.setState((s) => ({ rules: [...s.rules, { leadId, command, at: Date.now() }] }))
+export function addRule(leadId: string, command: string, fingerprint: string) {
+  if (!teamRuleAllowed(command) || !fingerprint || ruleFor(leadId, command)) return
+  useTeamRules.setState((s) => ({ rules: [...s.rules, { leadId, command, fingerprint, at: Date.now() }] }))
 }
 
 export function removeRule(leadId: string, command: string) {
   useTeamRules.setState((s) => ({ rules: s.rules.filter((r) => !(r.leadId === leadId && r.command === command)) }))
 }
 
-export const ruleFor = (leadId: string, command: string) => useTeamRules.getState().rules.some((r) => r.leadId === leadId && r.command === command)
+export const ruleOf = (leadId: string, command: string) => useTeamRules.getState().rules.find((r) => r.leadId === leadId && r.command === command)
+export const ruleFor = (leadId: string, command: string) => !!ruleOf(leadId, command)
 
 export const rulesOf = (leadId: string | null) => (leadId ? useTeamRules.getState().rules.filter((r) => r.leadId === leadId) : [])
 

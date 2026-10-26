@@ -2,7 +2,7 @@
 // critic), each run headless and read-only in the project, think about a topic in parallel. Oracle
 // then merges duplicates and ranks what they came up with. Everything lives in one "brainstorm" node
 // on the board, so the session is saved with the board and each idea keeps its buttons.
-import { extractJson, invoke, runCli } from '../../lib/api'
+import { extractJson, runCli, request } from '../../lib/api'
 import { allConsoles, useApp } from '../../state/store'
 import { sendGoal } from '../../engine/fleet'
 import { findFreeSpot, occupied } from '../../board/place'
@@ -288,8 +288,8 @@ export async function ideaToPlan(nodeId: string, idea: Idea) {
   const root = app.project?.path
   if (!root) return
   const file = `${root}/PLAN.md`
-  const exists = await invoke<boolean>('fs:exists', file)
-  const original = exists ? await invoke<string>('fs:read', file) : null
+  const exists = await request('fs:exists', file)
+  const original = exists ? await request('fs:read', file) : null
   let text = original ?? '# Plan\n'
   const line = `- [ ] **${idea.title}**: ${idea.pitch}${idea.effort ? ` _(effort ${idea.effort})_` : ''}`
   if (!/^## Ideas\s*$/m.test(text)) text = text.replace(/\s*$/, '\n\n## Ideas\n')
@@ -301,7 +301,7 @@ export async function ideaToPlan(nodeId: string, idea: Idea) {
   while (at > head + 1 && !(lines[at - 1] ?? '').trim()) at--
   lines.splice(at, 0, line)
   // base: refuse if PLAN.md changed since we read it (an agent editing it right now)
-  const r = await invoke<{ ok: boolean; reason?: string }>('fs:write', file, lines.join('\n').replace(/\n*$/, '\n'), original === null ? undefined : { base: original })
+  const r = await request('fs:write', file, lines.join('\n').replace(/\n*$/, '\n'), original === null ? undefined : { base: original })
   if (r && r.ok === false) return app.toast('PLAN.md changed just now; try again', 'warn')
   markIdea(nodeId, idea.id, { done: 'plan' })
   app.toast(`Added to PLAN.md: ${idea.title}`, 'ok')

@@ -28,3 +28,12 @@ test('no json', () => {
 test('braces inside strings', () => {
   assert.deepEqual(extractJson('{"say":"use {x} and }"}'), { say: 'use {x} and }' })
 })
+
+test('JSON after a bracket in the prose is still found, and a long reply is quick', async () => {
+  const { extractJson } = await import('@/lib/api')
+  assert.deepEqual(extractJson('As noted in [1], here it is: {"ok": true, "s": "a } in a string"}'), { ok: true, s: 'a } in a string' })
+  const long = 'x }'.repeat(50_000) + ' {"n": 1}'
+  const t = Date.now()
+  assert.deepEqual(extractJson(long), { n: 1 })
+  assert.ok(Date.now() - t < 500, `${Date.now() - t} ms`)
+})

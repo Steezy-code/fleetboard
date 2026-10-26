@@ -23,6 +23,8 @@ export const MAX_ARG_PROMPT = 100_000
  * growing and says so, which makes a JSON reply fail to parse rather than parse to something wrong.
  */
 const MAX_TEXT = 4 * 1024 * 1024
+/** the longest a headless run may take: the longest of them (a document, a brainstorm seat) finish well inside it */
+export const RUN_TIMEOUT_MS = 20 * 60_000
 /** stderr is only ever shown as a tail. */
 const MAX_ERR = 64 * 1024
 /**
@@ -81,6 +83,15 @@ export function register(ctx: MainContext) {
         return resolve({ code: 1, text: String(e) })
       }
       runs.set(req.runId, child)
+      // A headless run ends: a stuck one (a CLI waiting on a login prompt, a model call that never
+      // returns) used to hold its caller — the planner, a loop's judge, a handoff — for good. Ended as
+      // a cancel is, so it reports as unfinished.
+      const ceiling = setTimeout(() => {
+        ctx.emit('cli:chunk', req.runId, `\n[Fleetboard stopped this run after ${Math.round(RUN_TIMEOUT_MS / 60_000)} minutes.]`)
+        kill(req.runId)
+      }, RUN_TIMEOUT_MS)
+      ceiling.unref?.()
+      child.on('exit', () => clearTimeout(ceiling))
       if (isClaude || isAntigravity) {
         // a CLI that exits before reading all of it closes the pipe: that is not our error
         child.stdin!.on('error', () => {})

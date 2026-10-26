@@ -58,3 +58,24 @@ test('nowhere to write is not a reason to stop whatever was being recorded', () 
   assert.deepEqual(read(), [], 'and reading it back is empty rather than a throw')
   fs.rmSync(DIR)
 })
+
+test('a busy day rotates more than once and keeps every part, newest first', async () => {
+  const { append, read } = await import('../../src/main/journal')
+  const big = 'x'.repeat(480)
+  // well past two rotations of 2 MB each
+  for (let i = 0; i < 10_000; i++) append({ kind: 'test.bulk', text: `${i} ${big}` })
+  const all = read({ days: 1, limit: 5000 })
+  assert.equal(all.length, 5000)
+  assert.match(all[0]!.text, /^9999 /, 'the newest first')
+  assert.ok(all.every((e, i) => i === 0 || Number(e.text.split(' ')[0]) < Number(all[i - 1]!.text.split(' ')[0])), 'in order across the parts')
+})
+
+test('a detail that cannot be written as JSON costs the detail, not the entry', async () => {
+  const { append, read } = await import('../../src/main/journal')
+  const cyclic: Record<string, unknown> = {}
+  cyclic.self = cyclic
+  assert.doesNotThrow(() => append({ kind: 'test.cycle', text: 'still here', detail: cyclic }))
+  assert.doesNotThrow(() => append({ kind: 'test.big', text: 'and here', detail: { n: 1n } as never }))
+  const texts = read({ days: 1 }).map((e) => e.text)
+  assert.ok(texts.includes('still here') && texts.includes('and here'))
+})

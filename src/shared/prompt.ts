@@ -33,7 +33,7 @@ export interface Prompt {
  */
 export type PromptAnswer = ({ option: string } | { yes: boolean } | { enter: true }) & { seen?: string }
 
-export type AnswerResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'not-live' }
+export type AnswerResult = { ok: true } | { ok: false; reason: 'gone' | 'changed' | 'not-live' | 'redefined' }
 
 /** What an answer was, in a few words — for the Inbox, a toast, and the journal. */
 export const describeAnswer = (a: PromptAnswer): string =>
