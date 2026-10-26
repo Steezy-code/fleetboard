@@ -1,5 +1,5 @@
 import { TeamGuide } from './chrome/TeamGuide'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useApp } from './state/store'
 import { SCHEMA_VERSION, type Recovery } from '@shared/types'
 import { request, errorText, fb, on, invoke } from './lib/api'
@@ -23,6 +23,8 @@ import { useThemeSync } from './ui/theme'
 import { InboxTray } from './fleet/InboxTray'
 import { useInboxWatcher } from './fleet/inboxModel'
 import { mayDropUnsaved } from './lib/unsaved'
+import { useAsciiReveal } from 'ascii-reveal'
+import { markBoardRevealed, waveKey } from './lib/reveal'
 
 export function App() {
   // primitives only: the project object changes on every camera frame (pan, zoom), and selecting it
@@ -32,8 +34,37 @@ export function App() {
   const panel = useApp((s) => s.panel)
   const drawer = useApp((s) => s.drawer)
   const focused = useApp((s) => !!s.focusedNode)
+  // One wave over everything on screen the first time the board is up. The glyph grid is measured
+  // from the real elements where they already are, so what scrambles is the shape of the content it
+  // is about to become — no hand-written skeleton to keep in step with the layout.
+  const launch = useAsciiReveal({ preset: 'terminal', revealOnMount: false })
+  const waved = useRef<string | undefined>(undefined)
+  // Home paints placeholders ("Looking…", the empty-board line) until agent detection answers. init()
+  // sets the board list first and asks for agents after, so agents arriving means both have.
+  const homeReady = useApp((s) => s.agents.length > 0)
+
   useThemeSync()
   useInboxWatcher()
+
+  useEffect(() => {
+    // '' is what the selector gives with no board open, and ?? does not treat it as missing
+    const ws = waveKey(activeWorkspaceId || undefined)
+    if (waved.current === ws) return
+    const run = () => {
+      if (waved.current === ws) return
+      waved.current = ws
+      // cinematic is the slow showcase wave; 'fast' here keeps data readable in ~400 ms instead
+      const done = () => markBoardRevealed(ws)
+      // marked either way: a wave that could not run must not leave later tiles un-animated
+      void launch.reveal({ duration: 'cinematic' }).then(done, done)
+    }
+    // The wave measures the page when it starts, so a page that is still filling in leaves it drawing
+    // the old layout over the new one. A board has its content already; Home waits for its data,
+    // but not for long: a detection that is slow or has failed must not mean no wave at all.
+    if (hasProject || homeReady) return run()
+    const t = setTimeout(run, 2500)
+    return () => clearTimeout(t)
+  }, [hasProject, activeWorkspaceId, homeReady, launch])
 
   useEffect(() => {
     useApp.getState().init()
@@ -120,7 +151,7 @@ export function App() {
   const DrawerC = drawer ? DRAWERS[drawer.name] : null
 
   return (
-    <div className="app">
+    <div className="app" ref={launch.ref}>
       {hasProject ? (
         <>
           <Boundary what="The board" resetKey={activeWorkspaceId} actions={[{ label: 'Back to home', run: () => useApp.getState().closeProject() }]}>

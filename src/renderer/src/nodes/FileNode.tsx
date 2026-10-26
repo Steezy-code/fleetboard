@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Code2, Eye, FolderOpen, Loader2, SquarePen } from 'lucide-react'
+import { Code2, Eye, FolderOpen, SquarePen } from 'lucide-react'
 import type { NodeProps } from './types'
 import { fileUrl, invoke } from '../lib/api'
 import { useApp } from '../state/store'
@@ -8,6 +8,7 @@ import { CodeEditor } from '../workbench/CodeEditor'
 import { handleMdClick, isImagePath, isMarkdownPath, langFromPath, langLabel, renderMarkdown } from '../workbench/markdown'
 import { FileIcon } from '../workbench/icons'
 import { baseName, dirname, relativeTo } from '../workbench/paths'
+import { AsciiSkeleton } from 'ascii-reveal'
 
 interface FileData {
   path?: string
@@ -87,7 +88,7 @@ export default function FileNode({ node, zoom }: NodeProps<FileData>) {
           </div>
         ) : file.loading ? (
           <div className="empty">
-            <Loader2 size={16} className="spin" />
+            <AsciiSkeleton variant="terminal" lines={6} widths={['80%', '65%', '90%', '55%', '70%', '40%']} />
           </div>
         ) : file.error || file.binary ? (
           <div className="empty">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from '../ui/Modal'
 import { invoke, errorText } from '../lib/api'
 import { useApp } from '../state/store'
+import { AsciiReveal, AsciiSkeleton } from 'ascii-reveal'
 
 // The Inbox itself lives on the command bar now (InboxTray.tsx, inboxModel.ts).
 
@@ -19,15 +20,15 @@ export function FleetDiffPanel({ projectId }: { projectId?: string }) {
   }, [id])
   return (
     <Modal title="Team changes" sub="Everything the team will merge into your branch." width="min(1100px, 94vw)" height="84vh" bare>
-        <pre className="fleet-diff scrollable">
+        <AsciiReveal as="pre" className="fleet-diff scrollable" preset="terminal" loading={diff === null}>
           {diff === null
-            ? 'Loading…'
+            ? <AsciiSkeleton variant="terminal" lines={14} animate={false} />
             : diff.split('\n').map((l, i) => (
                 <span key={i} className={l.startsWith('+') && !l.startsWith('+++') ? 'add' : l.startsWith('-') && !l.startsWith('---') ? 'del' : l.startsWith('@@') ? 'hunk' : l.startsWith('diff ') ? 'file' : ''}>
                   {l + '\n'}
                 </span>
               ))}
-        </pre>
+        </AsciiReveal>
     </Modal>
   )
 }
