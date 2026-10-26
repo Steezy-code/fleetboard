@@ -13,7 +13,7 @@ for (const agent of ['antigravity', 'freebuff'] as const) test(agent + ': chosen
  if (agent==='freebuff') source=source.replace('`❯ ${input}`','`${input || (state === "working" ? "Add to the current task (/ for commands)" : "Enter a coding task or / for commands")}`')
  const config=agent==='antigravity'?['.gemini','config','mcp_config.json']:['.agents','mcp.json']
  source=source.replace('const mcpServer = (() => {', 'opts.mcpConfig = path.join(os.homedir(), ...'+JSON.stringify(config)+'); opts.allowed.push("mcp__fleet");\nconst mcpServer = (() => {')
- source=source.replace('return Object.values(cfg.mcpServers ?? {})[0]', 'const server=cfg.mcpServers.fleet; return server ? {...server,url:server.url ?? server.serverUrl} : undefined')
+ source=source.replace('const mcpUrl = mcpServer?.url', 'const mcpUrl = mcpServer?.url ?? mcpServer?.serverUrl') // Antigravity calls it serverUrl
  source=source.replace('async function turn(prompt) {', 'async function turn(prompt) {\n if(me.role==="solo"){const role=/You are (.+?), (the Lead|a worker|a reviewer)/.exec(prompt);if(role){me.name=role[1];me.role=role[2]==="the Lead"?"lead":role[2]==="a worker"?"worker":"reviewer";if(me.role==="worker")opts.mode="acceptEdits"}}')
  const script=path.join(sb.bin,'agent.mjs');fs.writeFileSync(script,source)
  const bin=agent==='antigravity'?'agy':'freebuff'
