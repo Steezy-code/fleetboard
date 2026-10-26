@@ -6,7 +6,7 @@ import type { AgentAvailability, AgentDef } from '@shared/types'
 // that fixes it, is the difference between a first goal that works and one that quietly does not.
 
 /** The agents the home screen always lists, installed or not: the ones teams are built for. */
-export const MAIN_AGENTS = ['claude', 'codex', 'gemini']
+export const MAIN_AGENTS = ['claude', 'codex', 'gemini', 'antigravity', 'freebuff']
 
 export interface SignIn {
   signedIn: boolean

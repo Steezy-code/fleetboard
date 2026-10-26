@@ -9,7 +9,8 @@ import type { Charter } from '@shared/charter'
 import { charterMessage, coerceCharter } from '@shared/charter'
 import { excludedBy } from '@shared/mergeReview'
 import { commandLike, estimateOf, numstat, stampTask } from '@shared/live'
-import { agentById } from '@shared/agents'
+import { agentById, TEAM_AGENTS, fleetPromptFor } from '@shared/agents'
+import { agentProfile, removeAgentProfile } from './agent-profile'
 import type { MainContext } from './context'
 import { dirs, readJson, writeJsonAtomic } from './paths'
 import { logError } from './errors'
@@ -61,7 +62,6 @@ const uid = (p: string) => `${p}${Date.now().toString(36)}${crypto.randomBytes(3
 const MAX_WORKERS = 4
 const TASK_STATUSES: FleetTask['status'][] = ['todo', 'doing', 'review', 'done', 'blocked']
 /** CLIs that can be team members: they reach the fleet tools over MCP (see fleetLaunch) */
-const TEAM_AGENTS = ['claude', 'codex', 'gemini']
 const WAIT_CAP_MS = 170_000
 
 // ---------------------------------------------------------------- state
@@ -324,7 +324,7 @@ async function removeWorktree(s: FleetState, m: FleetMember, deleteBranch: 'merg
 // ---------------------------------------------------------------- prompts
 
 export function leadPrompt(m: FleetMember) {
-  return [
+  return fleetPromptFor(m.agentId, [
     `You are ${m.name}, the Lead of a Fleetboard team. The user gives you goals; you get them done through workers.`,
     'You have fleet tools (mcp__fleet__*). Rules:',
     '1. Never edit files yourself. Read the repo to understand it, then delegate.',
@@ -340,7 +340,7 @@ export function leadPrompt(m: FleetMember) {
     // agents post as the user: without the mark, Fleetboard would route the comment back as the user's own
     'If you or a worker comment on a pull request, start the comment with 🤖.',
     `Your working directory is a git worktree on branch ${m.branch ?? '(none)'} made from the user's current commit; workers branch from it.`
-  ].join('\n')
+  ].join('\n'))
 }
 
 function workerPrompt(m: FleetMember, lead?: FleetMember) {
@@ -365,9 +365,9 @@ export function briefFor(m: FleetMember, lead?: FleetMember, wontTouch: string[]
   if (m.owns?.length) parts.push(`You own: ${m.owns.join(', ')}.`)
   if (wontTouch.length) parts.push(`Do not touch: ${wontTouch.join(', ')}.`)
   if (m.doneWhen) parts.push(`Done when: ${m.doneWhen}.`)
-  parts.push(m.role === 'reviewer' ? 'When finished, call fleet_report with your verdict.' : 'When done, call fleet_report.')
+  parts.push(fleetPromptFor(m.agentId, m.role === 'reviewer' ? 'When finished, call fleet_report with your verdict.' : 'When done, call fleet_report.'))
   // CLIs without a system-prompt flag get the role rules inline
-  if (m.agentId !== 'claude') parts.unshift(workerPrompt(m, lead).replace(/\n/g, ' '))
+  if (m.agentId !== 'claude') parts.unshift(fleetPromptFor(m.agentId, workerPrompt(m, lead)).replace(/\n/g, ' '))
   return parts.join(' ')
 }
 
@@ -418,6 +418,10 @@ export function fleetLaunch(req: PtySpawnRequest, loginEnvFor: Record<string, st
     if (m.cwd.startsWith(treesDir) && geminiTrusts(s.projectPath, loginEnvFor)) args.push('--skip-trust')
     return { args, env }
   }
+  if (m.agentId === 'antigravity' || m.agentId === 'freebuff') {
+    Object.assign(env, agentProfile(m.agentId, m.id, loginEnvFor, { reviewOnly: m.role === 'reviewer', server: { url, token: memberToken(m.id) } }))
+    return { args: m.role === 'worker' ? [...(agentById(m.agentId)?.editsArgs ?? [])] : [], env }
+  }
   return { args: [], env }
 }
 
@@ -446,8 +450,10 @@ const labelOf = (s: FleetState, id: string) => (id === 'user' ? 'the user' : id 
 
 function render(s: FleetState, msg: FleetMessage) {
   switch (msg.kind) {
-    case 'goal':
-      return msg.text
+    case 'goal': {
+      const lead = s.members[msg.to]
+      return lead && lead.agentId !== 'claude' ? leadPrompt(lead).replace(/\\n/g, ' ') + ' ' + msg.text : msg.text
+    }
     case 'report':
       return `[Fleet] ${labelOf(s, msg.from)} reported: ${msg.text}`
     case 'answer':
@@ -582,6 +588,8 @@ export function leadRestartNote(o: { how: string; team: string; task: string; ch
 
 export async function startLead(opts: { projectId: string; projectPath: string; goal: string; agentId?: string; /** short display name (playbooks pass one; the goal is the full brief) */ title?: string; /** what the user agreed the job is; without one the Lead is given `goal` as typed */ charter?: Charter }): Promise<FleetMember> {
   if (!port) throw new Error('Teams are unavailable: Fleetboard could not start its local team server. The log says why.')
+  const agentId = opts.agentId ?? ctx.settings().teamAgent ?? 'claude'
+  if (!TEAM_AGENTS.includes(agentId)) throw new Error('This CLI cannot join a team: ' + agentId)
   const s = state(opts.projectId, opts.projectPath)
   // A project has one team: the charter, tasks and Ready card below are the new one's. A team left
   // running would go on merging under the new charter's exclusions, and a finished one would lose its
@@ -591,7 +599,6 @@ export async function startLead(opts: { projectId: string; projectPath: string; 
     if (old.branch) trouble(s, `${old.name}'s team was closed to start the new one. Its work is kept on the branch ${old.branch}.`, 'info')
   }
   const id = uid('con')
-  const agentId = opts.agentId ?? 'claude'
   const charter = trustedCharter(opts.charter, opts.goal)
   const title = (opts.title ?? opts.goal).trim()
   const slug = `${slugify(title)}-${id.slice(-4)}`
@@ -771,7 +778,7 @@ const TOOLS: ToolDef[] = [
         task: str('The task, specific and self-contained'),
         owns: strArr('Files or folders this worker may edit; no other worker may own them'),
         done_when: str('A check that proves the task is done, e.g. "npm test passes"'),
-        agent: str('Agent CLI id: claude (default), codex or gemini'),
+        agent: str('Agent CLI id: claude, codex, gemini, antigravity or freebuff. Defaults to the lead’s CLI'),
         name: str('Optional worker name'),
         task_ref: str('The plan task this worker does: its id (from fleet_plan), number or title')
       },
@@ -782,7 +789,7 @@ const TOOLS: ToolDef[] = [
     name: 'fleet_spawn_reviewer',
     roles: ['lead'],
     description: 'Start a read-only reviewer in your integration worktree to check the merged work against the goal and run the checks. It reports a verdict via fleet_wait.',
-    inputSchema: { type: 'object', properties: { scope: str('What to review and against what goal'), agent: str('claude (default) or codex'), name: str('Optional name') }, required: ['scope'] }
+    inputSchema: { type: 'object', properties: { scope: str('What to review and against what goal'), agent: str('claude, codex, gemini, antigravity or freebuff; defaults to the lead’s CLI'), name: str('Optional name') }, required: ['scope'] }
   },
   {
     name: 'fleet_send',
@@ -925,7 +932,7 @@ async function callTool(callerId: string, name: string, raw: unknown, signal?: A
       const reviewer = name === 'fleet_spawn_reviewer'
       if (!reviewer && team().filter((x) => x.role === 'worker' && x.status === 'working').length >= MAX_WORKERS)
         return fail(`You already have ${MAX_WORKERS} workers running. Wait for reports (fleet_wait) before starting more.`)
-      const agentId = String(a.agent ?? '').trim().toLowerCase() || 'claude'
+      const agentId = String(a.agent ?? '').trim().toLowerCase() || m.agentId
       if (!TEAM_AGENTS.includes(agentId))
         return fail(`${agentById(agentId)?.name ?? `"${a.agent}"`} cannot join a team: it has no way to reach the fleet tools. Use ${TEAM_AGENTS.slice(0, -1).join(', ')} or ${TEAM_AGENTS.at(-1)}.`)
       const id = uid('con')
@@ -1156,6 +1163,9 @@ async function dismiss(s: FleetState, m: FleetMember, branch: 'merged' | 'force'
   await ctx.ptys.stop(m.id)
   await removeWorktree(s, m, branch)
   if (m.agentId === 'gemini') removeGeminiTeamHome(m.id)
+  if (m.agentId === 'antigravity' || m.agentId === 'freebuff') {
+    try { removeAgentProfile(m.agentId, m.id) } catch (e) { logError('fleet', 'Could not remove stopped agent profile: ' + String(e)) }
+  }
   // its MCP config holds its bearer token
   fs.rmSync(mcpFile(m.id), { force: true })
   changed(s)
@@ -1306,7 +1316,7 @@ function memberStarted(req: PtySpawnRequest) {
   if (m.role === 'lead') {
     const crew = Object.values(s.members).filter((x) => x.leadId === m.id && x.status !== 'closed')
     const team = crew.length ? crew.map((x) => `${x.name} (${x.role}): ${x.status === 'working' ? 'still working' : x.status}`).join('; ') : 'nobody started yet'
-    post(s, { from: 'user', to: m.id, kind: 'system', text: leadRestartNote({ how, team, task: m.task ?? '', charter: s.charter, resume: !!req.resume }) })
+    post(s, { from: 'user', to: m.id, kind: 'system', text: (m.agentId === 'claude' ? '' : leadPrompt(m).replace(/\\n/g, ' ') + ' ') + leadRestartNote({ how, team, task: m.task ?? '', charter: s.charter, resume: !!req.resume }) })
   } else {
     post(s, { from: m.leadId ?? 'user', to: m.id, kind: 'system', text: `[Fleet] ${how} Carry on with your task. ${briefFor(m, lead, s.charter?.wontTouch)}` })
   }

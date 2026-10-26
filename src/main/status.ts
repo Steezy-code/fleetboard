@@ -252,8 +252,29 @@ function typedList(menu: Menu, region: string[], view: ScreenView, start: number
   return view.alt && !view.cursorHidden && cursor >= menu.top && cursor <= menu.bottom + 1
 }
 
+/** Freebuff redraws its session timer while idle, so output frequency is not a readiness signal. */
+export function freebuffInputReady(view: ScreenView): boolean {
+  const text = view.lines.slice(-26).map(normalizeLine).join('\n')
+  return /Enter a coding task or \/ for commands/.test(text) && !/take over|thinking\.\.\.|working\.\.\./i.test(text)
+}
+
+/** Antigravity's onboarding has quiet pauses; time alone never means its composer is ready. */
+export function antigravityInputReady(view: ScreenView): boolean {
+  const lines = view.lines.map(normalizeLine)
+  while (lines.length && !(lines[lines.length - 1] ?? '').trim()) lines.pop()
+  for (let i = Math.max(1, lines.length - 8); i < lines.length - 1; i++) {
+    if (!/^\s*>\s*(?:Accept-edits mode: file edits auto-approved \(shift\+tab to cycle\))?\s*$/i.test(lines[i] ?? '')) continue
+    if (RULE.test(lines[i - 1] ?? '') && RULE.test(lines[i + 1] ?? '')) return true
+  }
+  return false
+}
+
 export function detectPrompt(view: ScreenView): Prompt | null {
   const raw = view.lines.map(normalizeLine)
+  const recent = raw.slice(-REGION_ROWS)
+  if (/limited access[\s\S]*allows one session[\s\S]*take over/i.test(recent.join('\n'))) {
+    return { reason: 'freebuff-session-limit', kind: 'input', lines: recent.filter((l) => l.trim()), question: 'Freebuff permits one active session on this connection. Taking over would stop another session.' }
+  }
   const cols = view.cols ?? Math.max(80, ...raw.map((l) => l.length))
   let end = raw.length
   while (end > 0 && !lineAt(raw, end - 1).trim()) end--

@@ -11,4 +11,11 @@ test('terminal-only catalog entries do not claim validated orchestration', () =>
   assert.equal(capabilitiesOf('codex').readOnlyPlanner, true)
   assert.equal(capabilitiesOf('gemini').resume, true)
   assert.equal(capabilitiesOf('shell').tier, 'Shell')
+  for (const id of ['antigravity', 'freebuff']) {
+    assert.equal(capabilitiesOf(id).teams, true)
+    assert.equal(capabilitiesOf(id).usage, false)
+    assert.equal(capabilitiesOf(id).resume, false)
+  }
+  assert.equal(capabilitiesOf('antigravity').readOnlyPlanner, true)
+  assert.equal(capabilitiesOf('freebuff').readOnlyPlanner, false)
 })

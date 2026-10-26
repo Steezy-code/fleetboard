@@ -115,7 +115,7 @@ test('a worker on a CLI that cannot reach the fleet tools is refused, not starte
   const { projectId } = await team({ lead: { tasks: [{ task: 'Write a.txt', owns: ['a.txt'], done_when: 'a.txt exists', name: 'Gem', agent: 'aider' }], waitMs: 1000 } })
   const r = await app!.waitFor(() => toolCalls('fleet_spawn_worker')[0], { label: 'spawn answered' })
   assert.equal(r.isError, true)
-  assert.match(r.result, /Aider cannot join a team: .* Use claude, codex or gemini\./)
+  assert.match(r.result, /Aider cannot join a team: .* Use claude, codex, gemini, antigravity or freebuff\./)
   assert.deepEqual(Object.values((await fleet(projectId)).members).map((m: any) => m.name), ['Lead'], 'no worker was started')
 })
 

@@ -62,7 +62,7 @@ test('no agent can be given a prompt that starts with a dash', () => {
 test('the agents offered for untrusted text run read-only headless, and any other falls back to Claude Code', async () => {
   const { readsOnly, readOnlyAgent } = await import('../../src/shared/agents')
   const offered = AGENTS.filter((a) => a.headless && readsOnly(a.id)).map((a) => a.id)
-  assert.deepEqual(offered.sort(), ['claude', 'codex', 'gemini'])
+  assert.deepEqual(offered.sort(), ['antigravity', 'claude', 'codex', 'gemini'])
   const args = (id: string) => AGENTS.find((a) => a.id === id)!.headless!('x')
   assert.deepEqual(args('codex').slice(0, 4), ['exec', '--skip-git-repo-check', '--sandbox', 'read-only'])
   assert.deepEqual(args('gemini').slice(0, 2), ['--approval-mode', 'plan'])

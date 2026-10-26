@@ -23,7 +23,8 @@ export const promptArg = (p: string) => (p.startsWith('-') ? ' ' + p : p)
  * judges and brainstorms feed a run console output, PR comments and model replies, any of which can
  * carry instructions; another CLI's headless mode may edit files or run commands on them.
  */
-const READS_ONLY = new Set(['claude', 'codex', 'gemini'])
+export const TEAM_AGENTS = ['claude', 'codex', 'gemini', 'antigravity', 'freebuff']
+const READS_ONLY = new Set(['claude', 'codex', 'gemini', 'antigravity'])
 export const readsOnly = (agentId: string | undefined) => !!agentId && READS_ONLY.has(agentId)
 /** `agentId` when its headless run reads only, else Claude Code: a planner chosen before this was enforced. */
 export const readOnlyAgent = (agentId: string | undefined) => (readsOnly(agentId) ? agentId! : 'claude')
@@ -48,6 +49,7 @@ export const AGENTS: AgentDef[] = [
     session: { start: (id) => ['--session-id', id], resume: (id) => ['--resume', id] },
     homepage: 'https://github.com/google-gemini/gemini-cli', install: 'npm i -g @google/gemini-cli'
   },
+  { id: 'antigravity', name: 'Antigravity CLI', vendor: 'Google', bin: 'agy', color: '#4285f4', editsArgs: ['--mode', 'accept-edits'], headless: (p) => ['--mode', 'plan', '--disable-slash-commands', '--output-format', 'stream-json', '--print-timeout', '10m', '-p', promptArg(p)], homepage: 'https://antigravity.google/docs/getting-started', install: 'irm https://antigravity.google/cli/install.ps1 | iex' },
   { id: 'grok', name: 'Grok', vendor: 'xAI', bin: 'grok', color: '#e5e5e5', headless: (p) => ['-p', promptArg(p)], homepage: 'https://x.ai/' },
   {
     id: 'opencode', name: 'OpenCode', vendor: 'sst', bin: 'opencode', color: '#f5b740', resumeArgs: ['--continue'],
@@ -65,6 +67,7 @@ export const AGENTS: AgentDef[] = [
   { id: 'droid', name: 'Droid', vendor: 'Factory', bin: 'droid', color: '#f97316', headless: (p) => ['exec', promptArg(p)], homepage: 'https://factory.ai' },
   { id: 'crush', name: 'Crush', vendor: 'Charm', bin: 'crush', color: '#ec4899', yoloArgs: ['--yolo'], headless: (p) => ['run', promptArg(p)], homepage: 'https://github.com/charmbracelet/crush' },
   { id: 'codebuff', name: 'Codebuff', vendor: 'Codebuff', bin: 'codebuff', color: '#22c55e', homepage: 'https://www.codebuff.com' },
+  { id: 'freebuff', name: 'Freebuff', vendor: 'Codebuff', bin: 'freebuff', color: '#16a34a', resumeArgs: ['--continue'], homepage: 'https://freebuff.com', install: 'npm i -g freebuff' },
   { id: 'continue', name: 'Continue', vendor: 'Continue', bin: 'cn', color: '#e2e8f0', headless: (p) => ['-p', promptArg(p)], homepage: 'https://continue.dev' },
   { id: 'kilocode', name: 'Kilo Code', vendor: 'Kilo', bin: 'kilocode', color: '#facc15', homepage: 'https://kilocode.ai' },
   { id: 'qwen', name: 'Qwen Code', vendor: 'Alibaba', bin: 'qwen', color: '#7c3aed', yoloArgs: ['--yolo'], headless: (p) => ['-p', promptArg(p)], homepage: 'https://github.com/QwenLM/qwen-code' },
@@ -90,11 +93,19 @@ export const AGENTS: AgentDef[] = [
 export const agentById = (id: string, custom: AgentDef[] = []): AgentDef | undefined =>
   AGENTS.find((a) => a.id === id) ?? custom.find((a) => a.id === id)
 
+/** Freebuff's MCP runtime requires its exact server-prefixed function names. Only role
+ * instructions go through this formatter, never user goals, filenames or task text. */
+export function fleetPromptFor(agentId: string, text: string): string {
+  return agentId === 'freebuff'
+    ? text.replace('mcp__fleet__*', 'fleet__fleet_*').replace(/\bfleet_(?!_)[a-z_]+\b/g, (tool) => 'fleet__' + tool)
+    : text
+}
+
 /** Names people say out loud for an agent, used by the voice / command parser. */
 export const AGENT_ALIASES: Record<string, string> = {
   claude: 'claude', 'claude code': 'claude', clod: 'claude', cloud: 'claude', 'cloud code': 'claude',
-  codex: 'codex', 'codecs': 'codex', 'code x': 'codex', gemini: 'gemini', 'gemini cli': 'gemini', grok: 'grok',
+  codex: 'codex', 'codecs': 'codex', 'code x': 'codex', gemini: 'gemini', 'gemini cli': 'gemini', antigravity: 'antigravity', 'antigravity cli': 'antigravity', agy: 'antigravity', grok: 'grok',
   opencode: 'opencode', 'open code': 'opencode', aider: 'aider', amp: 'amp', goose: 'goose', cline: 'cline',
-  cursor: 'cursor', copilot: 'copilot', droid: 'droid', crush: 'crush', codebuff: 'codebuff', qwen: 'qwen',
+  cursor: 'cursor', copilot: 'copilot', droid: 'droid', crush: 'crush', codebuff: 'codebuff', freebuff: 'freebuff', 'free buff': 'freebuff', qwen: 'qwen',
   kimi: 'kimi', auggie: 'auggie', shell: 'shell', terminal: 'shell', bash: 'shell'
 }

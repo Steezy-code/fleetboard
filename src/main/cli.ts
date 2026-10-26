@@ -1,3 +1,6 @@
+import crypto from 'node:crypto'
+import { agentProfile, removeAgentProfile } from './agent-profile'
+import { antigravityEvent } from './antigravity-stream'
 import { spawn, type ChildProcess } from 'node:child_process'
 import type { CliRunRequest } from '@shared/types'
 import { agentById, readOnlyAgent } from '@shared/agents'
@@ -44,12 +47,21 @@ export function register(ctx: MainContext) {
 
     let args: string[]
     const isClaude = agent.id === 'claude'
+    const isAntigravity = agent.id === 'antigravity'
+    const profileId = isAntigravity ? 'plan-' + crypto.randomUUID() : undefined
+    const cleanup = () => {
+      if (profileId) try { removeAgentProfile('antigravity', profileId) } catch (e) { console.error('Agent profile cleanup failed', e) }
+    }
     // Claude reads the prompt from stdin: prompts with whole console logs can exceed what argv holds
     if (isClaude) {
       args = ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
       if (req.model) args.push('--model', req.model)
       // the mode too, or a defaultMode of bypass in the user's settings would apply; and no MCP servers
       args.push('--permission-mode', 'default', '--tools', READ_ONLY_TOOLS, '--strict-mcp-config')
+    } else if (isAntigravity) {
+      // The stream protocol sends the prompt through stdin, including prompts over Windows' argv limit.
+      args = [...agent.headless('').slice(0, -2), '--input-format', 'stream-json']
+      if (req.model) args.push('--model', req.model)
     } else {
       if (req.prompt.length > MAX_ARG_PROMPT) {
         const msg = `[This prompt is ${Math.round(req.prompt.length / 1000)} KB, too long to pass to ${agent.name} on its command line. Use Claude Code for it, or include less.]`
@@ -60,12 +72,14 @@ export function register(ctx: MainContext) {
     }
 
     const env = { ...(await loginEnv()), ...profileEnv(agent.id, req.profileId) }
+    if (profileId) Object.assign(env, agentProfile('antigravity', profileId, env, { readOnly: true }))
     return new Promise<{ code: number; text: string }>((resolve) => {
       let child: ChildProcess
       try {
         const l = launch(bin, args, env)
-        child = spawn(l.file, l.args, { cwd: req.cwd, env, stdio: [isClaude ? 'pipe' : 'ignore', 'pipe', 'pipe'], ...launchOptions(l) })
+        child = spawn(l.file, l.args, { cwd: req.cwd, env, stdio: [isClaude || isAntigravity ? 'pipe' : 'ignore', 'pipe', 'pipe'], ...launchOptions(l) })
       } catch (e) {
+        cleanup()
         return resolve({ code: 1, text: String(e) })
       }
       runs.set(req.runId, child)
@@ -78,10 +92,10 @@ export function register(ctx: MainContext) {
       }, RUN_TIMEOUT_MS)
       ceiling.unref?.()
       child.on('exit', () => clearTimeout(ceiling))
-      if (isClaude) {
+      if (isClaude || isAntigravity) {
         // a CLI that exits before reading all of it closes the pipe: that is not our error
         child.stdin!.on('error', () => {})
-        child.stdin!.end(req.prompt)
+        child.stdin!.end(isAntigravity ? JSON.stringify({ event: 'user', message: { content: req.prompt } }) + '\n' : req.prompt)
       }
       let text = ''
       let pending = ''
@@ -99,8 +113,27 @@ export function register(ctx: MainContext) {
         } else text += chunk
         ctx.emit('cli:chunk', req.runId, chunk)
       }
+      const agyLine = (line: string) => {
+        const event = antigravityEvent(line)
+        if (event?.kind === 'text') push(event.text)
+        if (event?.kind === 'activity') ctx.emit('cli:activity', req.runId, event.text)
+        if (event?.kind === 'result') {
+          finalResult = event.text
+          failed = !event.ok
+          if (!text && event.text) push(event.text)
+        }
+      }
       child.stdout!.setEncoding('utf8')
       child.stdout!.on('data', (d: string) => {
+        if (isAntigravity) {
+          pending += d
+          let end: number
+          while ((end = pending.indexOf('\n')) >= 0) {
+            agyLine(pending.slice(0, end))
+            pending = pending.slice(end + 1)
+          }
+          return
+        }
         if (!isClaude) return push(stripAnsi(d))
         pending += d
         let nl: number
@@ -128,16 +161,19 @@ export function register(ctx: MainContext) {
       let err = ''
       child.stderr!.on('data', (d) => (err = (err + d.toString()).slice(-MAX_ERR)))
       child.on('close', (code, signal) => {
+        if (isAntigravity && pending.trim()) agyLine(pending)
+        cleanup()
         runs.delete(req.runId)
         const out = finalResult ?? text
         if (code && !out) ctx.emit('cli:chunk', req.runId, `\n[${agent.name} exited ${code}] ${stripAnsi(err).slice(-600)}`)
         // Not finished: killed by a signal (a crash, the OOM killer, a cancel, whose caller has gone), a
         // result that says it failed, or a Claude stream that ended before its result. Callers save
         // what a finished run returns, a document over the last good one among them.
-        const unfinished = code === null || !!signal || failed || (isClaude && finalResult === null)
+        const unfinished = code === null || !!signal || failed || ((isClaude || isAntigravity) && finalResult === null)
         resolve({ code: code || (unfinished ? 1 : 0), text: out || stripAnsi(err) })
       })
       child.on('error', (e) => {
+        cleanup()
         runs.delete(req.runId)
         resolve({ code: 1, text: String(e) })
       })
