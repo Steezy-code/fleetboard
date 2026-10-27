@@ -8,13 +8,17 @@ import { App, FAKE_CLAUDE, makeRepo, makeSandbox } from './harness'
 
 for (const agent of ['antigravity', 'freebuff'] as const) test(agent + ': chosen lead, inherited worker and reviewer complete a team', {timeout:120_000}, async()=>{
  const sb=makeSandbox(),repo=makeRepo(sb)
+ // The scripted CLI is adapted by string replacement, so a replacement that finds nothing must fail the test
+ // rather than leave the original in place: one quietly stopped matching when the fake's MCP lookup was
+ // rewritten, and only antigravity went red, because only its config needed the patch.
+ const patch=(src:string,from:string,to:string)=>{if(!src.includes(from))throw new Error('the scripted CLI changed under this test; no longer found: '+from.slice(0,60));return src.replace(from,to)}
  let source=fs.readFileSync(FAKE_CLAUDE,'utf8').replace(/\r\n/g,'\n')
- if (agent==='antigravity') source=source.replace('`❯ ${input}`','`> ${input}`')
- if (agent==='freebuff') source=source.replace('`❯ ${input}`','`${input || (state === "working" ? "Add to the current task (/ for commands)" : "Enter a coding task or / for commands")}`')
+ if (agent==='antigravity') source=patch(source,'`❯ ${input}`','`> ${input}`')
+ if (agent==='freebuff') source=patch(source,'`❯ ${input}`','`${input || (state === "working" ? "Add to the current task (/ for commands)" : "Enter a coding task or / for commands")}`')
  const config=agent==='antigravity'?['.gemini','config','mcp_config.json']:['.agents','mcp.json']
- source=source.replace('const mcpServer = (() => {', 'opts.mcpConfig = path.join(os.homedir(), ...'+JSON.stringify(config)+'); opts.allowed.push("mcp__fleet");\nconst mcpServer = (() => {')
- source=source.replace('const mcpUrl = mcpServer?.url', 'const mcpUrl = mcpServer?.url ?? mcpServer?.serverUrl') // Antigravity calls it serverUrl
- source=source.replace('async function turn(prompt) {', 'async function turn(prompt) {\n if(me.role==="solo"){const role=/You are (.+?), (the Lead|a worker|a reviewer)/.exec(prompt);if(role){me.name=role[1];me.role=role[2]==="the Lead"?"lead":role[2]==="a worker"?"worker":"reviewer";if(me.role==="worker")opts.mode="acceptEdits"}}')
+ source=patch(source,'const mcpServer = (() => {', 'opts.mcpConfig = path.join(os.homedir(), ...'+JSON.stringify(config)+'); opts.allowed.push("mcp__fleet");\nconst mcpServer = (() => {')
+ source=patch(source,'const mcpUrl = mcpServer?.url', 'const mcpUrl = mcpServer?.url ?? mcpServer?.serverUrl') // Antigravity calls it serverUrl
+ source=patch(source,'async function turn(prompt) {', 'async function turn(prompt) {\n if(me.role==="solo"){const role=/You are (.+?), (the Lead|a worker|a reviewer)/.exec(prompt);if(role){me.name=role[1];me.role=role[2]==="the Lead"?"lead":role[2]==="a worker"?"worker":"reviewer";if(me.role==="worker")opts.mode="acceptEdits"}}')
  const script=path.join(sb.bin,'agent.mjs');fs.writeFileSync(script,source)
  const bin=agent==='antigravity'?'agy':'freebuff'
  if(process.platform==='win32')fs.writeFileSync(path.join(sb.bin,bin+'.cmd'),'@echo off\r\n"node" "%~dp0\\agent.mjs" %*\r\n')
