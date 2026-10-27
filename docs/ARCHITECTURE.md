@@ -8,9 +8,17 @@ Read `docs/RESEARCH.md` for the feature spec (what each feature must do and look
 ```
 src/shared/types.ts      data model (BoardNode, Workspace, Project, Settings, MemoryCard, Profile, ...)
 src/shared/agents.ts     AGENTS catalog (bin, resumeArgs, yoloArgs, configEnv, headless(prompt))
+src/shared/capabilities.ts  capabilitiesOf(agent): its integration tier (Integrated / Teams / Terminal only / Shell) and what
+                         Fleetboard supports for it (teams, prompts, resume, usage, read-only planning)
+src/shared/recovery.ts   BoardPreview / SnapshotInfo, and portableBoard(): validates an imported board and strips what could
+                         start processes (launch mode, command, profile)
+src/shared/ipc.ts, ipc-contract.ts  channel payload validation; the typed IpcContract and UNTYPED_CHANNELS
 src/main/                Electron main process
   index.ts               window, core IPC (pty:*, pdf:fromHtml, win:*, app:*), registers modules
   context.ts             MainContext passed to each module's register(ctx)
+  ipc.ts                 guardedIpc: only our window's top frame may call a handler; payloads checked by shared/ipc.ts
+  env.ts                 loginEnv() (the login shell's environment, read once), which(bin)
+  paths.ts               ~/.fleetboard folders (FLEETBOARD_HOME overrides), writeJsonAtomic, readRegularText
   roots.ts               which paths the fs handlers, fbfile:// and git may touch: the project, what the
                          user granted, the app's own folders minus its private parts (sign-ins, tokens,
                          board files, app.json). allowedPath() returns the path as checked: act on that one
@@ -49,6 +57,13 @@ src/main/                Electron main process
   fsops.ts               dialogs, fs:tree (level by level, within a budget; deeper folders read when opened),
                          fs:write (atomic; with a base, refuses to overwrite a change made on disk meanwhile), shell:*
   agents.ts              agents:detect
+  agent-profile.ts       a private HOME per Antigravity / Freebuff team console (agent-profiles/<agent>/<id>), with the
+                         fleet MCP server in its config (a read-only run gets a deny list for writes, commands and MCP)
+  antigravity-stream.ts  parses Antigravity's stream-json lines into text / activity / result events (assistant text only)
+  recovery.ts            board snapshots from ~/.fleetboard/history: recovery:list/preview/import/export/apply (an import
+                         goes through portableBoard and a confirm token)
+  update.ts              update:check: one `gh api` call listing this app's own releases (prereleases count, the highest version wins) against the running version; nothing is
+                         downloaded or installed
   git.ts                 the git drawer: status, diffs, commits, push/pull, branches, PRs (gh)
   ci.ts                  the CI watcher: Actions runs for the branch, open PRs' checks, failed logs and
                          review comments, through gh
@@ -188,8 +203,8 @@ src/renderer/src/
   empty editor, which one at a time never showed. `npm run test:e2e:one -- test/e2e/<file>.test.ts`
   runs a single file against the current build.
 - CI (.github/workflows/ci.yml) runs typecheck (twice: `tsconfig.json` and `tsconfig.strict.json`),
-  the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests
-  and the Windows-specific e2e files on Windows. It runs on a pull request and on a push to master —
+  the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests,
+  a build and the Windows-specific e2e files (windows.test.ts, smoke.test.ts) on Windows. It runs on a pull request and on a push to master —
   a branch with a pull request open would otherwise run all of it twice. The Windows installer is
   built on master as a packaging check and not kept: release.yml builds the shipped one from a
   vX.Y.Z tag on master, after the tests pass.

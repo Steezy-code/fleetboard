@@ -1,6 +1,6 @@
 # Fleetboard
 
-A visual board of real terminals for your AI coding agents. Put Claude Code, Codex, Gemini and 30 other agent CLIs on one board, then pan, zoom, group, loop and talk to them. Everything runs on your machine with the subscriptions you already have.
+A visual board of real terminals for your AI coding agents. Put Claude Code, Codex, Gemini and 32 other agent CLIs on one board, then pan, zoom, group, loop and talk to them. Everything runs on your machine with the subscriptions you already have.
 
 A personal project, for Linux and Windows. See [the hardening guide](docs/HARDENING.md) for observed verification, integration support tiers, recovery, accessibility and performance checks. See [docs/RESEARCH.md](docs/RESEARCH.md) for the feature spec — what each feature does and looks like — and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the code is organized.
 
@@ -33,7 +33,7 @@ npm run test:e2e   # the built app driven end to end under Xvfb, with a scripted
 FB_E2E_HEADLESS=1 npm run bench # opt-in 20/50-terminal responsiveness benchmark
 npm run test:linux # on Windows: the Linux unit + e2e suites in a container (needs Docker)
 #   npm run test:linux -- unit    the quick half
-#   28 of the 30 e2e files and 8 unit files never run on Windows; this is that ground, before CI sees it
+#   29 of the 31 e2e files and 8 unit files never run on Windows; this is that ground, before CI sees it
 # by hand, with the real CLIs (see docs/ARCHITECTURE.md, Testing):
 #   FLEETBOARD_REAL_CLAUDE_CONFIG=~/.claude   test/e2e/real/{team,console,sessions,handoff}.test.ts
 #   FLEETBOARD_REAL_CODEX=$(which codex)      test/e2e/real/codex-*.test.ts   (local mock model, no account)
@@ -53,7 +53,7 @@ What's different on Windows:
 - Claude Code's status hooks run through a small script (with Node when it's installed, else PowerShell).
 - Teams link dependencies into their worktrees with junctions, which need no admin rights.
 
-Settings shows which build you are running, and tells you when a newer release is out (one `gh release view`, once a launch); a chip appears in the top bar and opens the release page. Nothing downloads or installs itself.
+Settings shows which build you are running, and tells you when a newer release is out (one `gh api` call listing the app's releases, once a launch); a chip appears in the top bar and opens the release page. Nothing downloads or installs itself.
 
 Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1` for a pre-release) and `.github/workflows/release.yml` builds the installer and attaches it to a GitHub Release. `npm run dist:win` builds one on a Windows machine.
 
@@ -97,7 +97,7 @@ From the bar: **1**–**9** pick a button, **Enter** on an empty bar runs the hi
 
 Your own uncommitted work is never touched: the team works from your last commit in separate worktrees. (That needs a git repository with a commit; in a folder without one, Fleetboard asks before the team works in your files directly.)
 
-Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_spawn_worker`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
+Under the hood each team console is connected to a local MCP server (`fleet_plan`, `fleet_update_task`, `fleet_spawn_worker`, `fleet_spawn_reviewer`, `fleet_send`, `fleet_wait`, `fleet_merge`, `fleet_dismiss`, `fleet_status`, `fleet_ask_user`, `fleet_finish`, `fleet_report`), so it works with Claude Code, Codex and any CLI that speaks MCP.
 
 ## The Inbox on your phone
 
