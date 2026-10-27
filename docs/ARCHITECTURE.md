@@ -62,7 +62,7 @@ src/main/                Electron main process
   antigravity-stream.ts  parses Antigravity's stream-json lines into text / activity / result events (assistant text only)
   recovery.ts            board snapshots from ~/.fleetboard/history: recovery:list/preview/import/export/apply (an import
                          goes through portableBoard and a confirm token)
-  update.ts              update:check: one `gh release view` on this app's own repo against the running version; nothing is
+  update.ts              update:check: one `gh api` call listing this app's own releases (prereleases count, the highest version wins) against the running version; nothing is
                          downloaded or installed
   git.ts                 the git drawer: status, diffs, commits, push/pull, branches, PRs (gh)
   ci.ts                  the CI watcher: Actions runs for the branch, open PRs' checks, failed logs and
@@ -203,7 +203,7 @@ src/renderer/src/
   empty editor, which one at a time never showed. `npm run test:e2e:one -- test/e2e/<file>.test.ts`
   runs a single file against the current build.
 - CI (.github/workflows/ci.yml) runs typecheck (twice: `tsconfig.json` and `tsconfig.strict.json`),
-  the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests
+  the linter, two `npm audit` passes, unit and end-to-end tests on Linux, and typecheck, unit tests,
   a build and the Windows-specific e2e files (windows.test.ts, smoke.test.ts) on Windows. It runs on a pull request and on a push to master —
   a branch with a pull request open would otherwise run all of it twice. The Windows installer is
   built on master as a packaging check and not kept: release.yml builds the shipped one from a

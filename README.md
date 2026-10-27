@@ -53,7 +53,7 @@ What's different on Windows:
 - Claude Code's status hooks run through a small script (with Node when it's installed, else PowerShell).
 - Teams link dependencies into their worktrees with junctions, which need no admin rights.
 
-Settings shows which build you are running, and tells you when a newer release is out (one `gh release view`, once a launch); a chip appears in the top bar and opens the release page. Nothing downloads or installs itself.
+Settings shows which build you are running, and tells you when a newer release is out (one `gh api` call listing the app's releases, once a launch); a chip appears in the top bar and opens the release page. Nothing downloads or installs itself.
 
 Releases are built on Windows by CI: push a tag like `v0.2.0` (or `v0.2.0-win.1` for a pre-release) and `.github/workflows/release.yml` builds the installer and attaches it to a GitHub Release. `npm run dist:win` builds one on a Windows machine.
 
