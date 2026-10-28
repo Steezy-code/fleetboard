@@ -99,7 +99,10 @@ export async function outsideWork(cwd: string): Promise<string[]> {
   // but never the link to the user's own node_modules, which is not a folder the repo could hold
   if (tracked.code !== 0) return LINKED_DIRS.filter((d) => isLink(path.join(cwd, d))).map((d) => `:(exclude)${d}`)
   const has = new Set(tracked.stdout.split('\0').filter(Boolean).map((f) => f.split('/')[0]))
-  return HEAVY_DIRS.filter((d) => !has.has(d)).map((d) => `:(exclude)${d}`)
+  // a folder .gitignore already covers needs no exclude (git add skips it), and since git 2.5x an
+  // exclude naming an ignored path makes `git add` exit 1, which read as "changes could not be staged"
+  const ignored = new Set((await git(cwd, ['check-ignore', '--', ...HEAVY_DIRS])).stdout.split('\n').map((l) => l.trim()).filter(Boolean))
+  return HEAVY_DIRS.filter((d) => !has.has(d) && !ignored.has(d)).map((d) => `:(exclude)${d}`)
 }
 
 async function sampleDiff(s: FleetState, m: FleetMember) {

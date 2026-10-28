@@ -725,6 +725,15 @@ const strArr = (description: string) => ({ type: 'array', items: { type: 'string
 type ToolDef = { name: string; description: string; inputSchema: any; roles: FleetRole[] }
 type ArgSchema = { properties?: Record<string, { type?: string; items?: { type?: string } }>; required?: string[] }
 
+/** A list item a model sent as an object ({title, estimate}) instead of a string: its wording, not "[object Object]". */
+const wordsOf = (x: unknown): string => {
+  if (x && typeof x === 'object') {
+    const o = x as Record<string, unknown>
+    for (const k of ['title', 'label', 'text', 'name', 'task', 'description', 'option']) if (typeof o[k] === 'string' && o[k]) return o[k] as string
+    return JSON.stringify(x)
+  }
+  return String(x ?? '')
+}
 /**
  * A tool call's arguments, held to the tool's own schema before any case reads them. They come from a
  * model, and inputSchema is only advertised (tools/list), never checked: a string where an array was
@@ -741,7 +750,7 @@ export function coerceArgs(schema: ArgSchema | undefined, raw: unknown): Record<
     const v = given[k]
     if (v == null) continue
     if (p.type === 'string') out[k] = String(v)
-    else if (p.type === 'array' && p.items?.type === 'string') out[k] = (Array.isArray(v) ? v : [v]).map((x) => String(x ?? ''))
+    else if (p.type === 'array' && p.items?.type === 'string') out[k] = (Array.isArray(v) ? v : [v]).map(wordsOf)
     else out[k] = v
   }
   return out

@@ -16,6 +16,7 @@ const spawn = toolSchema('fleet_spawn_worker')
 test('a lone string where a list was promised becomes a list of one', () => {
   assert.deepEqual(coerceArgs(spawn, { task: 'x', owns: 'src/a.ts', done_when: 'y' }).owns, ['src/a.ts'])
   assert.deepEqual(coerceArgs(toolSchema('fleet_plan'), { tasks: 'one' }).tasks, ['one'])
+  assert.deepEqual(coerceArgs(toolSchema('fleet_plan'), { tasks: [{ title: 'Add tests', estimate: 5 }, 'two'] }).tasks, ['Add tests', 'two'])
   assert.deepEqual(coerceArgs(spawn, { owns: ['a', 7] }).owns, ['a', '7'])
 })
 

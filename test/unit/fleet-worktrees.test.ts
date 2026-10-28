@@ -147,6 +147,14 @@ test('dependency folders are left out of staging only while the repo tracks noth
   fs.writeFileSync(path.join(repo, 'vendor', 'lib', 'x.go'), 'package lib // edited')
   sh('add', '-A', '--', '.', ...skip)
   assert.match(sh('diff', '--cached', '--name-only'), /vendor\/lib\/x\.go/)
+
+  // a repo that already ignores node_modules needs no exclude for it, and naming one made git exit 1
+  fs.writeFileSync(path.join(repo, '.gitignore'), 'node_modules\n')
+  fs.mkdirSync(path.join(repo, 'node_modules'))
+  fs.writeFileSync(path.join(repo, 'node_modules', 'f.js'), 'x')
+  const skip2 = await outsideWork(repo)
+  assert.ok(!skip2.includes(':(exclude)node_modules'), 'an ignored node_modules is left to .gitignore')
+  sh('add', '-A', '--', '.', ...skip2)
 })
 
 test('Done counts the Lead’s commits when pressed, not when the Ready card was made', async () => {
