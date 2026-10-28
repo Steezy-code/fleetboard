@@ -1,0 +1,71 @@
+/* Motion stays at the edges of the workspace; terminal contents never animate. */
+.wire-arrival { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+.wire.hot .wire-line { stroke: var(--accent-2); }
+.node[data-working]:not(.selected):not(.focused) { border-color: var(--accent-line); }
+.node.agent-activating::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid var(--accent-2);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 20;
+  animation: agent-activate 700ms ease-out both;
+}
+@keyframes agent-activate {
+  0% { opacity: 0; }
+  25% { opacity: 0.8; box-shadow: 0 0 12px var(--accent-soft); }
+  100% { opacity: 0; }
+}
+:root[data-motion='full'] .node.agent-activating::after {
+  animation: agent-trace 850ms ease-out both;
+}
+@keyframes agent-trace {
+  0% { clip-path: inset(0 100% 98% 0); opacity: 1; }
+  30% { clip-path: inset(0 0 98% 0); }
+  65% { clip-path: inset(0); opacity: 1; box-shadow: 0 0 16px var(--accent-line); }
+  100% { clip-path: inset(0); opacity: 0; }
+}
+.board .group { transition: height var(--motion-duration, 240ms) cubic-bezier(0.33, 1, 0.68, 1), opacity var(--motion-duration, 240ms) ease, box-shadow 140ms ease; }
+.board .wires { transition: opacity var(--motion-duration, 240ms) ease; }
+.terminal-corners {
+  position: absolute; inset: 0; border: 2px solid var(--accent-2); border-radius: inherit;
+  pointer-events: none; z-index: 21; opacity: 0;
+  mask: conic-gradient(at 14px 14px, transparent 75%, black 0) 0 0 / calc(100% - 14px) calc(100% - 14px);
+}
+.terminal-arriving .terminal-corners { animation: terminal-corners 450ms ease-out; }
+@keyframes terminal-corners { 0%, 25% { opacity: 0.8; } 100% { opacity: 0; } }
+.attention-beacon { position: absolute; top: 15px; right: 80px; width: 6px; height: 6px; pointer-events: none; z-index: 22; }
+.attention-beacon b, .attention-beacon i { position: absolute; inset: 0; border-radius: 50%; background: var(--warn); }
+.attention-beacon i { background: transparent; border: 1px solid var(--warn); opacity: 0; animation: attention-ring 650ms ease-out; }
+.attention-beacon i:nth-child(2) { animation-delay: 300ms; }
+@keyframes attention-ring { 0% { transform: scale(1); opacity: 0.65; } 100% { transform: scale(4); opacity: 0; } }
+.attention-beacon.still i { display: none; }
+.mm-attention { pointer-events: none; }
+.mm-attention-dot { fill: var(--warn); }
+.mm-attention-ring { fill: none; stroke: var(--warn); opacity: 0; transform-box: fill-box; transform-origin: center; animation: attention-ring 650ms ease-out; }
+.mm-attention-ring.second { animation-delay: 300ms; }
+.mm-attention.still .mm-attention-ring { display: none; }
+.dock-preview { position: absolute; border: 1px dashed var(--accent); background: var(--accent-soft); border-radius: var(--radius); pointer-events: none; z-index: 99999; }
+.board .group.dock-target { border-color: var(--accent-2); box-shadow: 0 0 0 2px var(--accent-line), 0 0 24px var(--accent-soft); }
+.oracle-orb { position: relative; display: inline-flex; flex: 0 0 22px; width: 22px; height: 22px; align-items: center; justify-content: center; }
+.oracle-orb .orb { width: 16px; height: 16px; margin: 0; }
+.oracle-orbit, .oracle-halo { position: absolute; inset: -2px; pointer-events: none; border: 1px solid var(--accent-line); border-radius: 50%; opacity: 0; }
+.oracle-orb.thinking .oracle-orbit { opacity: 1; border-color: transparent; border-top-color: var(--accent-2); border-right-color: var(--accent-line); animation: oracle-orbit 1.4s linear infinite; }
+.oracle-orb.listening .oracle-halo, .oracle-orb.speaking .oracle-halo {
+  opacity: calc(0.3 + var(--audio-level) * 0.7); transform: scale(calc(1 + var(--audio-level) * 0.35));
+  box-shadow: 0 0 12px var(--accent-soft); transition: transform 70ms linear, opacity 70ms linear;
+}
+.oracle-orb.system-speech .oracle-halo { animation: oracle-fallback 1.3s ease-in-out infinite alternate; }
+:root[data-motion='full'] .oracle-halo { border-width: 2px; box-shadow: 0 0 18px var(--accent-line); }
+@keyframes oracle-orbit { to { transform: rotate(360deg); } }
+@keyframes oracle-fallback { from { opacity: 0.3; transform: scale(1); } to { opacity: 0.7; transform: scale(1.2); } }
+:root[data-motion='off'] *, :root[data-motion='off'] *::before, :root[data-motion='off'] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .wire-message { display: none; }
+}

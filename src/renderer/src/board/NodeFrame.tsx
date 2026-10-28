@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef } from 'react'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { BoardNode } from '@shared/types'
 import { mayRemove } from './removeHooks'
@@ -8,6 +8,10 @@ import { groupAt, snap } from './geometry'
 import { Boundary } from '../ui/Boundary'
 import { createAsciiReveal } from 'ascii-reveal'
 import { boardIsRevealed } from '../lib/reveal'
+import { currentMotion, useMotion } from '../ui/motion'
+import { motionDuration } from '@shared/motion'
+import { AttentionBeacon } from '../ui/AttentionBeacon'
+import { dockingPreview } from './docking'
 
 /**
  * Begin a drag that moves the node (and the rest of the selection) with the pointer.
@@ -29,6 +33,7 @@ export function startNodeDrag(e: React.PointerEvent, node: BoardNode, onClick?: 
   const sy = e.clientY
   let dragging = !onClick
   const el = e.currentTarget as HTMLElement
+  const preview = dockingPreview()
   el.setPointerCapture(e.pointerId)
   const move = (ev: PointerEvent) => {
     if (!dragging) {
@@ -43,10 +48,20 @@ export function startNodeDrag(e: React.PointerEvent, node: BoardNode, onClick?: 
     lastY = ev.clientY
     moved += Math.abs(dx) + Math.abs(dy)
     useApp.getState().moveNodes(ids, dx, dy)
+    const ws = activeWs()
+    const current = ws?.nodes.find((n) => n.id === node.id)
+    if (ws && current) preview.update(current, ws.groups)
   }
-  const up = () => {
+  const cleanup = () => {
+    preview.clear()
     el.removeEventListener('pointermove', move)
     el.removeEventListener('pointerup', up)
+    el.removeEventListener('pointercancel', cleanup)
+    el.removeEventListener('lostpointercapture', cleanup)
+    window.removeEventListener('blur', cleanup)
+  }
+  const up = () => {
+    cleanup()
     if (!dragging) return onClick?.()
     if (moved < 2) return
     // snap and update group membership by where each node was dropped
@@ -60,9 +75,13 @@ export function startNodeDrag(e: React.PointerEvent, node: BoardNode, onClick?: 
       useApp.getState().updateNode(id, patch)
       if (g && g.id !== n.groupId) useApp.getState().fitGroup(g.id)
     }
+    preview.settle(ids)
   }
   el.addEventListener('pointermove', move)
   el.addEventListener('pointerup', up)
+  el.addEventListener('pointercancel', cleanup)
+  el.addEventListener('lostpointercapture', cleanup)
+  window.addEventListener('blur', cleanup, { once: true })
 }
 
 function startResize(e: React.PointerEvent, node: BoardNode, edge: 'r' | 'b' | 'rb') {
@@ -136,12 +155,50 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
   const def = NODE_DEFS[node.type]
   const ref = useRef<HTMLDivElement>(null)
   const viewport = useApp((s) => s.viewport)
+  const working = useApp((s) => node.type === 'console' && s.statuses[node.id] === 'working')
+  const needs = useApp((s) => node.type === 'console' && s.statuses[node.id] === 'needs-you')
+  const motion = useMotion()
+  const allowReveal = motion !== 'off'
+  const revealed = useRef(false)
+  const wasWorking = useRef(working)
+  const wasHidden = useRef(hidden)
+  useLayoutEffect(() => {
+    const changed = wasHidden.current !== hidden
+    wasHidden.current = hidden
+    if (!changed || motion === 'off' || !ref.current) return
+    const frames = [
+      { opacity: 0, transform: 'translateY(-8px) scale(0.98)', visibility: 'visible' },
+      { opacity: 1, transform: 'translateY(0) scale(1)', visibility: 'visible' }
+    ]
+    const animation = ref.current.animate(hidden ? frames.reverse() : frames, { duration: motionDuration(motion), easing: 'ease-out' })
+    return () => animation.cancel()
+  }, [hidden, motion])
+  useEffect(() => {
+    const started = working && !wasWorking.current
+    wasWorking.current = working
+    const el = ref.current
+    if (!started || motion === 'off' || hidden || offscreen || !el) return
+    el.classList.remove('agent-activating')
+    void el.offsetWidth
+    el.classList.add('agent-activating')
+    const timer = window.setTimeout(() => el.classList.remove('agent-activating'), 900)
+    return () => { clearTimeout(timer); el.classList.remove('agent-activating') }
+  }, [working, motion, hidden, offscreen])
 
   // A tile that arrives after its board's wave decodes itself in. A console's terminal body carries
   // data-ascii="skip", so live output is never redrawn through the glyph grid.
   // Attached imperatively because the root's ref is already taken.
   useEffect(() => {
-    if (!boardIsRevealed(activeWs()?.id) || !ref.current) return
+    if (!allowReveal || currentMotion() === 'off' || revealed.current || !boardIsRevealed(activeWs()?.id) || !ref.current) return
+    revealed.current = true
+    if (node.type === 'console') {
+      const el = ref.current
+      if (hidden || offscreen) return
+      el.classList.add('terminal-arriving')
+      const animation = el.animate([{ opacity: 0, transform: 'scale(0.98)' }, { opacity: 1, transform: 'scale(1)' }], { duration: currentMotion() === 'full' ? 280 : 180, easing: 'ease-out' })
+      const timer = window.setTimeout(() => el.classList.remove('terminal-arriving'), 500)
+      return () => { animation.cancel(); clearTimeout(timer); el.classList.remove('terminal-arriving') }
+    }
     let live = true
     const r = createAsciiReveal(ref.current, { preset: 'terminal' })
     void r.reveal().finally(() => {
@@ -151,7 +208,7 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       live = false
       r.destroy()
     }
-  }, [])
+  }, [allowReveal, node.type, hidden, offscreen])
   const tool = useApp((s) => s.tool)
   // A type this build does not know — a board written by a newer Fleetboard, or edited by hand. It
   // used to render nothing at all: the tile was invisible, unselectable and undeletable, while still
@@ -176,6 +233,7 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       aria-hidden={hidden || undefined}
       style={{ contentVisibility: offscreen && !focused ? 'hidden' : undefined, left: node.x, top: node.y, width: fr ? fr.w : node.w, height: fr ? fr.h : node.h, zIndex: focused ? 100000 : node.z }}
       data-node-id={node.id}
+      data-working={working || undefined}
       onPointerDown={(e) => {
         if (focused) return e.stopPropagation()
         const a = app()
@@ -188,6 +246,8 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
         e.stopPropagation()
       }}
     >
+      {node.type === 'console' && <span className="terminal-corners" aria-hidden="true" />}
+      {needs && <AttentionBeacon />}
       {!def.chromeless && (
         <div
           className="node-head"

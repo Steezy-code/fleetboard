@@ -11,6 +11,7 @@ let reqId = 0
 let current = 0
 let actx: AudioContext | null = null
 let playing: AudioBufferSourceNode | null = null
+let meterFrame = 0
 const waiting = new Map<number, (a: { audio: Float32Array; rate: number } | null) => void>()
 
 function getWorker(): Worker | null {
@@ -83,7 +84,10 @@ function systemSpeak(text: string, id: number) {
 }
 
 function end(id: number) {
-  if (id === current) setVoice({ speaking: false })
+  if (id === current) {
+    cancelAnimationFrame(meterFrame)
+    setVoice({ speaking: false, outputLevel: null })
+  }
 }
 
 /**
@@ -128,7 +132,23 @@ export async function speak(text: string) {
       end(id)
     }
     playing = src
+    const started = actx.currentTime
+    // Sample the PCM buffer at playback time, without introducing another audio connection.
+    let sampled = 0
+    const meter = (now: number) => {
+      if (id !== current || playing !== src || !actx) return
+      if (now - sampled >= 50) {
+        sampled = now
+        const offset = Math.floor((actx.currentTime - started) * result.rate)
+        const count = Math.min(1024, result.audio.length - offset)
+        let sum = 0
+        for (let i = 0; i < count; i++) sum += result.audio[offset + i] ** 2
+        setVoice({ outputLevel: count > 0 ? Math.min(1, Math.sqrt(sum / count) * 5) : 0 })
+      }
+      meterFrame = requestAnimationFrame(meter)
+    }
     src.start()
+    meterFrame = requestAnimationFrame(meter)
   } catch {
     systemSpeak(t, id)
   }
@@ -136,6 +156,7 @@ export async function speak(text: string) {
 
 export function stopSpeaking() {
   current++
+  cancelAnimationFrame(meterFrame)
   try {
     playing?.stop()
   } catch {
@@ -143,5 +164,5 @@ export function stopSpeaking() {
   }
   playing = null
   window.speechSynthesis?.cancel()
-  setVoice({ speaking: false })
+  setVoice({ speaking: false, outputLevel: null })
 }

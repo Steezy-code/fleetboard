@@ -12,6 +12,7 @@ import { stopSpeaking } from './tts'
 import { useThread, useVoice } from './thread'
 import { primaryIndex, runHelmOption, useHelm } from './helm/helm'
 import { cycleFront, frontItem, runAction, settled, toggleInbox, useInbox } from '../fleet/inboxModel'
+import { OracleOrb } from './OracleOrb'
 
 // Bottom command bar: orb · input (@mentions) · ^ thread · stop · Helm toggle · mic.
 // Hold Space (outside inputs/terminals) or Alt+Space anywhere to talk; Enter submits typed text.
@@ -35,11 +36,10 @@ export function CommandBar() {
     const f = s.items.find((i) => i.key === s.front) ?? s.items[0]
     return f?.replyTo?.label ?? null
   })
-  const orbClass = phase === 'listening' ? 'listening' : phase === 'thinking' || phase === 'transcribing' ? 'thinking' : speaking ? 'speaking' : ''
 
   return (
     <div className={`command-bar ${phase === 'listening' ? 'listening' : ''}`}>
-      <span className={`orb ${orbClass}`} title={speaking ? 'Speaking' : undefined} />
+      <OracleOrb />
       <div className="cb-main">
         {phase === 'listening' ? (
           <div className="cb-listening">

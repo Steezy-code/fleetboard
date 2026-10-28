@@ -7,6 +7,7 @@
 import { useApp, activeWs, allConsoles } from './state/store'
 import { spawnConsoles, sendToConsole, consoleTail, resolveTargets, killConsoles } from './engine/consoles'
 import { synthesize, ttsReady, warmUpTts } from './voice/tts'
+import { useVoice } from './voice/thread'
 import { transcribe, warmUpStt, sttReady } from './voice/stt'
 import { markdownToHtmlDocument } from './workbench/pdf'
 import { renderMarkdown, sanitizeHtml } from './workbench/markdown'
@@ -34,7 +35,7 @@ if ((window as any).fb?.devtools === true) {
     sendToConsole,
     consoleTail,
     resolveTargets,
-    voice: { synthesize, ttsReady, warmUpTts, transcribe, warmUpStt, sttReady },
+    voice: { synthesize, ttsReady, warmUpTts, transcribe, warmUpStt, sttReady, useVoice },
     markdown: { renderMarkdown, sanitizeHtml, renderDocMarkdown },
     handoff,
     sendGoal,

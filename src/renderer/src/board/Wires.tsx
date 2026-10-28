@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useLayoutEffect, useRef } from 'react'
 import type { Workspace } from '@shared/types'
 
 /** What wires are drawn from. Not the workspace itself: its camera changes on every pan frame, and the memo below would never hold. */
@@ -7,12 +7,34 @@ import { center, edgePoint, type Rect } from './geometry'
 import { groupBox, hiddenIds } from './place'
 import { useApp } from '../state/store'
 import { useFleet } from '../engine/fleet'
+import { useMotion } from '../ui/motion'
+
+function MessagePulse({ path, end, full }: { path: string; end: { x: number; y: number }; full: boolean }) {
+  const ref = useRef<SVGGElement>(null)
+  useLayoutEffect(() => {
+    // SVG clocks start when the board mounts, not when a message arrives.
+    ref.current?.querySelectorAll<SVGAnimationElement>('animate, animateMotion').forEach((animation) => {
+      animation.beginElementAt(Number(animation.dataset.delay ?? 0))
+    })
+  }, [])
+  return <g ref={ref} className="wire-message" pointerEvents="none">
+    <circle r={full ? 4 : 2.5} className="wire-pulse" opacity="0">
+      <animate begin="indefinite" attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.85;1" dur="0.65s" fill="freeze" />
+      <animateMotion begin="indefinite" dur="0.65s" path={path} fill="freeze" />
+    </circle>
+    {full && <circle cx={end.x} cy={end.y} r="4" className="wire-arrival" opacity="0">
+      <animate begin="indefinite" data-delay="0.55" attributeName="r" values="4;16" dur="0.4s" fill="freeze" />
+      <animate begin="indefinite" data-delay="0.55" attributeName="opacity" values="0.65;0" dur="0.4s" fill="freeze" />
+    </circle>}
+  </g>
+}
 
 /** Curved orchestrator wires between board items, with a dot travelling along each. */
 export const Wires = memo(function Wires({ nodes, groups, wires }: WireSpace) {
   const ws = { nodes, groups, wires }
   const selection = useApp((s) => s.selection)
   const hot = useFleet((s) => s.hot)
+  const motion = useMotion()
   const folded = hiddenIds(ws)
   // a wire to a console in a collapsed group ends at the group's header, where the console now is
   const rectOf = (id: string): Rect | undefined => {
@@ -31,15 +53,19 @@ export const Wires = memo(function Wires({ nodes, groups, wires }: WireSpace) {
         const dx = (p2.x - p1.x) * 0.45
         const d = `M${p1.x},${p1.y} C${p1.x + dx},${p1.y} ${p2.x - dx},${p2.y} ${p2.x},${p2.y}`
         const sel = selection.includes(w.id)
+        const traffic = [
+          { stamp: hot[`${w.from}>${w.to}`], path: d, end: p2, direction: 'forward' },
+          { stamp: hot[`${w.to}>${w.from}`], path: `M${p2.x},${p2.y} C${p2.x - dx},${p2.y} ${p1.x + dx},${p1.y} ${p1.x},${p1.y}`, end: p1, direction: 'reverse' }
+        ].filter((event) => event.stamp)
         return (
-          <g key={w.id} className={`wire ${sel ? 'selected' : ''} ${hot[`${w.from}>${w.to}`] ? 'hot' : ''}`} onPointerDown={(e) => (e.stopPropagation(), useApp.getState().setSelection([w.id]))}>
+          <g key={w.id} data-wire-from={w.from} className={`wire ${sel ? 'selected' : ''} ${traffic.length ? 'hot' : ''}`} onPointerDown={(e) => (e.stopPropagation(), useApp.getState().setSelection([w.id]))}>
             <path d={d} className="wire-hit" />
             <path d={d} className="wire-line" />
             <circle r="4" className="wire-end" cx={p1.x} cy={p1.y} />
             <circle r="4" className="wire-end" cx={p2.x} cy={p2.y} />
-            <circle r="3.5" className="wire-pulse">
-              <animateMotion dur="2.6s" repeatCount="indefinite" path={d} />
-            </circle>
+            {motion !== 'off' && traffic.map((event) => (
+              <MessagePulse key={`${event.direction}-${event.stamp}`} path={event.path} end={event.end} full={motion === 'full'} />
+            ))}
           </g>
         )
       })}

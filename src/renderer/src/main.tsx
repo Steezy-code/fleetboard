@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import './styles/theme.css'
 import './styles/board.css'
+import './styles/motion.css'
 import { App } from './App'
 import { Boundary } from './ui/Boundary'
 import { catchStrayErrors } from './lib/strayErrors'

@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { completionMotion } from '../ui/completionMotion'
+import { useMotion } from '../ui/motion'
 import { request, errorText } from '../lib/api'
 import { useApp } from '../state/store'
 import { commandLike } from '@shared/live'
@@ -47,6 +49,22 @@ export function InboxTray({ floating }: { floating?: boolean }) {
   const open = useInbox((s) => s.open) && !floating && !folded
   useInbox((s) => s.front)
   const item = frontItem()
+  const motion = useMotion()
+  const card = useRef<HTMLDivElement>(null)
+  const seenReady = useRef<string | null>(null)
+  const ready = item?.kind === 'ready' ? item.ready : null
+  const readyKey = ready ? `${ready.leadId}:${ready.at}:${ready.head ?? ''}` : null
+  const readyLead = ready?.leadId
+  const readyAt = ready?.at
+  useEffect(() => {
+    if (!readyLead || readyAt == null || !readyKey || seenReady.current === readyKey) return
+    seenReady.current = readyKey
+    if (motion === 'off' || Date.now() - readyAt > 30_000) return
+    const workers = Object.values(useFleet.getState().state?.members ?? {})
+      .filter((m) => m.leadId === readyLead && (m.status === 'reported' || m.status === 'merged'))
+      .sort((a, b) => a.createdAt - b.createdAt).map((m) => m.id)
+    return completionMotion(workers, readyLead, card.current)
+  }, [readyKey, readyLead, readyAt, motion])
   if (!item) return null
   const n = items.length
   const idx = items.indexOf(item)
@@ -114,7 +132,7 @@ export function InboxTray({ floating }: { floating?: boolean }) {
           The team's work is on its own branch. <b>Merge</b> brings it into your checkout, and nothing is pushed. <b>View diff</b> shows every line first.
         </Tip>
       )}
-      <div className={`it-card ${folded ? 'folded' : ''}`} key={item.key} data-kind={item.kind}>
+      <div ref={card} className={`it-card ${folded ? 'folded' : ''}`} key={item.key} data-kind={item.kind}>
         {/* folded, the header is the whole card, so clicking it is the obvious way back */}
         <div className="it-head" onClick={folded ? toggleFolded : undefined}>
           <span className={`it-av ${tone}`}>
