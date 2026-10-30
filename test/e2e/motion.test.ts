@@ -53,7 +53,7 @@ test('motion preferences, directional traffic, activation, Tidy and focus', asyn
     await app.eval(() => {
       const s = (window as any).__fleetboard.useApp.getState()
       // A shell tile exercises the real console frame without running an AI agent.
-      s.addNode({ id: 'motion-console', type: 'console', x: 40, y: 300, w: 500, h: 260, data: { agentId: 'shell', name: 'Motion check' } })
+      s.addNode({ id: 'motion-console', type: 'console', x: 40, y: 300, w: 500, h: 260, data: { agentId: 'shell', name: 'Motion check', cwd: s.project.path, createdAt: Date.now() } })
       s.setStatus('motion-console', 'idle')
     })
     await app.waitFor(() => app.eval(() => !!document.querySelector('[data-node-id="motion-console"]')))
@@ -99,8 +99,9 @@ test('terminal entrance, attention, group folding, docking, Oracle and completio
     await app.waitFor(() => app.eval(() => document.documentElement.dataset.motion === 'off' && !!document.querySelector('[data-node-id="dock-card"]')))
     await app.eval(async () => { await (window as any).__fleetboard.useApp.getState().setSettings({ motion: 'full' }) })
     await app.waitFor(() => app.eval(() => document.documentElement.dataset.motion === 'full'))
-    await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ id: 'new-terminal', type: 'console', groupId: 'dock-group', x: 640, y: 350, w: 340, h: 240, data: { agentId: 'shell', name: 'New terminal' } }))
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ id: 'new-terminal', type: 'console', groupId: 'dock-group', x: 640, y: 350, w: 340, h: 240, data: { agentId: 'shell', name: 'New terminal', cwd: (window as any).__fleetboard.useApp.getState().project.path, createdAt: Date.now() } }))
     await app.waitFor(() => app.eval(() => document.querySelector('[data-node-id="new-terminal"]')?.classList.contains('terminal-arriving')), { label: 'terminal materialization' })
+    await app.waitFor(() => app.eval(() => (window as any).__fleetboard.useApp.getState().live['new-terminal']), { label: 'shell is running before folding' })
     await app.eval(() => (window as any).__fleetboard.useApp.getState().setStatus('new-terminal', 'needs-you'))
     await app.waitFor(() => app.eval(() => !!document.querySelector('[data-node-id="new-terminal"] .attention-beacon') && !!document.querySelector('.mm-attention')), { label: 'attention on card and minimap' })
     const originalSize = await app.eval(() => {
