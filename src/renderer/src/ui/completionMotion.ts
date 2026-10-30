@@ -5,13 +5,14 @@ export function completionMotion(workers: string[], leadId: string, card: HTMLEl
   const level = currentMotion()
   if (level === 'off') return () => {}
   const animations: Animation[] = []
-  const step = level === 'full' ? Math.min(90, 500 / Math.max(1, workers.length)) : 30
-  const duration = level === 'full' ? 550 : 260
+  const full = level === 'full'
+  const step = full ? Math.min(220, 1200 / Math.max(1, workers.length)) : 30
+  const duration = full ? 1100 : 260
   const glow = (element: Element | null, delay: number) => {
     if (!element) return
     animations.push(element.animate([
       { boxShadow: '0 0 0 0 transparent' },
-      { boxShadow: '0 0 0 1px var(--ok), 0 0 22px var(--accent-soft)', offset: 0.35 },
+      { boxShadow: full ? '0 0 0 3px var(--ok), 0 0 36px color-mix(in srgb, var(--ok) 40%, transparent)' : '0 0 0 1px var(--ok), 0 0 22px var(--accent-soft)', offset: 0.35 },
       { boxShadow: '0 0 0 0 transparent' }
     ], { duration, delay, easing: 'ease-out' }))
   }

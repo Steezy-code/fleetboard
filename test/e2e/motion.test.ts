@@ -59,6 +59,11 @@ test('motion preferences, directional traffic, activation, Tidy and focus', asyn
     await app.waitFor(() => app.eval(() => !!document.querySelector('[data-node-id="motion-console"]')))
     await app.eval(() => (window as any).__fleetboard.useApp.getState().setStatus('motion-console', 'working'))
     await app.waitFor(() => app.eval(() => document.querySelector('[data-node-id="motion-console"]')!.classList.contains('agent-activating')), { label: 'agent activation' })
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    assert.ok(await app.eval(() => {
+      const el = document.querySelector('[data-node-id="motion-console"]')!
+      return el.classList.contains('agent-activating') && Number(getComputedStyle(el, '::after').opacity) > 0.5
+    }), 'Full activation stays clearly visible beyond the old brief flash')
     // Test the system override as a live media-query change, as well as persisted selection.
     await (app as any).cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
     await app.waitFor(() => app.eval(() => document.documentElement.dataset.motion === 'off'))

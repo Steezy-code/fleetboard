@@ -181,7 +181,7 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
     el.classList.remove('agent-activating')
     void el.offsetWidth
     el.classList.add('agent-activating')
-    const timer = window.setTimeout(() => el.classList.remove('agent-activating'), 900)
+    const timer = window.setTimeout(() => el.classList.remove('agent-activating'), motion === 'full' ? 1800 : 900)
     return () => { clearTimeout(timer); el.classList.remove('agent-activating') }
   }, [working, motion, hidden, offscreen])
 
@@ -195,8 +195,9 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       const el = ref.current
       if (hidden || offscreen) return
       el.classList.add('terminal-arriving')
-      const animation = el.animate([{ opacity: 0, transform: 'scale(0.98)' }, { opacity: 1, transform: 'scale(1)' }], { duration: currentMotion() === 'full' ? 280 : 180, easing: 'ease-out' })
-      const timer = window.setTimeout(() => el.classList.remove('terminal-arriving'), 500)
+      const full = currentMotion() === 'full'
+      const animation = el.animate([{ opacity: 0, transform: full ? 'scale(0.95)' : 'scale(0.98)' }, { opacity: 1, transform: 'scale(1)' }], { duration: full ? 700 : 180, easing: 'ease-out' })
+      const timer = window.setTimeout(() => el.classList.remove('terminal-arriving'), full ? 1400 : 500)
       return () => { animation.cancel(); clearTimeout(timer); el.classList.remove('terminal-arriving') }
     }
     let live = true

@@ -18,12 +18,13 @@
   100% { opacity: 0; }
 }
 :root[data-motion='full'] .node.agent-activating::after {
-  animation: agent-trace 850ms ease-out both;
+  border-width: 2px;
+  animation: agent-trace 1700ms ease-out both;
 }
 @keyframes agent-trace {
   0% { clip-path: inset(0 100% 98% 0); opacity: 1; }
   30% { clip-path: inset(0 0 98% 0); }
-  65% { clip-path: inset(0); opacity: 1; box-shadow: 0 0 16px var(--accent-line); }
+  45%, 70% { clip-path: inset(0); opacity: 1; box-shadow: 0 0 28px var(--accent-line), inset 0 0 12px var(--accent-soft); }
   100% { clip-path: inset(0); opacity: 0; }
 }
 .board .group { transition: height var(--motion-duration, 240ms) cubic-bezier(0.33, 1, 0.68, 1), opacity var(--motion-duration, 240ms) ease, box-shadow 140ms ease; }
@@ -58,6 +59,29 @@
 }
 .oracle-orb.system-speech .oracle-halo { animation: oracle-fallback 1.3s ease-in-out infinite alternate; }
 :root[data-motion='full'] .oracle-halo { border-width: 2px; box-shadow: 0 0 18px var(--accent-line); }
+:root[data-motion='full'] .terminal-arriving .terminal-corners {
+  border-width: 3px; filter: drop-shadow(0 0 7px var(--accent));
+  animation: terminal-corners 1300ms ease-out;
+}
+:root[data-motion='full'] .wire-pulse { filter: drop-shadow(0 0 8px var(--accent)); }
+:root[data-motion='full'] .wire-arrival { stroke-width: 2.5; }
+:root[data-motion='full'] .attention-beacon { width: 8px; height: 8px; }
+:root[data-motion='full'] .attention-beacon b { box-shadow: 0 0 10px var(--warn); }
+:root[data-motion='full'] .attention-beacon i,
+:root[data-motion='full'] .mm-attention-ring { animation: attention-ring-full 1100ms ease-out; stroke-width: 1.5; }
+:root[data-motion='full'] .attention-beacon i:nth-child(2),
+:root[data-motion='full'] .mm-attention-ring.second { animation-delay: 550ms; }
+@keyframes attention-ring-full { 0% { transform: scale(1); opacity: 0.9; } 100% { transform: scale(5); opacity: 0; } }
+:root[data-motion='full'] .dock-preview { border-width: 2px; box-shadow: 0 0 18px var(--accent-soft); }
+:root[data-motion='full'] .board .group.dock-target { box-shadow: 0 0 0 3px var(--accent-line), 0 0 36px var(--accent-line); }
+:root[data-motion='full'] .oracle-orbit { inset: -6px; border-width: 2px; animation-duration: 2s; filter: drop-shadow(0 0 4px var(--accent)); }
+:root[data-motion='full'] .oracle-halo { inset: -5px; }
+:root[data-motion='full'] .oracle-orb.listening .oracle-halo,
+:root[data-motion='full'] .oracle-orb.speaking .oracle-halo {
+  opacity: calc(0.55 + var(--audio-level) * 0.45);
+  transform: scale(calc(1.1 + var(--audio-level) * 0.5));
+  transition-duration: 140ms;
+}
 @keyframes oracle-orbit { to { transform: rotate(360deg); } }
 @keyframes oracle-fallback { from { opacity: 0.3; transform: scale(1); } to { opacity: 0.7; transform: scale(1.2); } }
 :root[data-motion='off'] *, :root[data-motion='off'] *::before, :root[data-motion='off'] *::after {

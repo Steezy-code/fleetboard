@@ -16,6 +16,9 @@ Keep effects theme-aware, leave terminal text stable, and animate meaningful eve
 
 Settings → Appearance → Motion defaults to Subtle. Full increases the accents and timing;
 Off and the system reduced-motion preference disable movement while preserving status markers.
+Full holds activation traces for 1.7 seconds, terminal corners for 1.3 seconds, and message packets
+for 1.1 seconds with a larger arrival ring. Layout/focus transitions take 700 ms, attention rings
+last 1.65 seconds together, and completion highlights linger with staggered worker/lead/card stages.
 The Oracle halo follows mic RMS and synthesized speech PCM; system speech uses a gentle fallback
 pulse because the system voice API does not expose audio samples. Completion highlights only
 reported/merged workers and never delays or disables the Ready card's controls.

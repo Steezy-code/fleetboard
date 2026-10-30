@@ -197,7 +197,7 @@ export function animateCamera(target: Camera, ms = 260) {
   if (!ws) return
   const level = currentMotion()
   if (level === 'off') return useApp.getState().setCamera(target)
-  ms = Math.min(ms, motionDuration(level))
+  ms = level === 'full' ? ms * motionDuration(level) / FOCUS_MS : Math.min(ms, motionDuration(level))
   const from = { ...ws.camera }
   const vp = useApp.getState().viewport
   // animate the world point at the viewport center, so the move doesn't swing sideways

@@ -33,10 +33,11 @@ export function dockingPreview() {
     settle(ids: string[]) {
       clear()
       if (currentMotion() === 'off') return
+      const full = currentMotion() === 'full'
       for (const id of ids) {
         document.querySelector(`[data-node-id="${CSS.escape(id)}"]`)?.animate([
-          { transform: 'scale(1)' }, { transform: 'scale(1.006)', offset: 0.35 }, { transform: 'scale(1)' }
-        ], { duration: currentMotion() === 'full' ? 220 : 140, easing: 'ease-out' })
+          { transform: 'scale(1)' }, { transform: full ? 'scale(1.018)' : 'scale(1.006)', offset: 0.35 }, { transform: 'scale(1)' }
+        ], { duration: full ? 450 : 140, easing: 'ease-out' })
       }
     }
   }

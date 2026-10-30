@@ -5,4 +5,4 @@ export function effectiveMotion(value: unknown, reduced: boolean): MotionLevel {
   return value === 'full' ? 'full' : 'subtle'
 }
 
-export const motionDuration = (level: MotionLevel) => level === 'off' ? 0 : level === 'full' ? 420 : 240
+export const motionDuration = (level: MotionLevel) => level === 'off' ? 0 : level === 'full' ? 700 : 240

@@ -18,13 +18,13 @@ function MessagePulse({ path, end, full }: { path: string; end: { x: number; y: 
     })
   }, [])
   return <g ref={ref} className="wire-message" pointerEvents="none">
-    <circle r={full ? 4 : 2.5} className="wire-pulse" opacity="0">
-      <animate begin="indefinite" attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.85;1" dur="0.65s" fill="freeze" />
-      <animateMotion begin="indefinite" dur="0.65s" path={path} fill="freeze" />
+    <circle r={full ? 6 : 2.5} className="wire-pulse" opacity="0">
+      <animate begin="indefinite" attributeName="opacity" values="0;1;1;0" keyTimes="0;0.05;0.85;1" dur={full ? '1.1s' : '0.65s'} fill="freeze" />
+      <animateMotion begin="indefinite" dur={full ? '1.1s' : '0.65s'} path={path} fill="freeze" />
     </circle>
     {full && <circle cx={end.x} cy={end.y} r="4" className="wire-arrival" opacity="0">
-      <animate begin="indefinite" data-delay="0.55" attributeName="r" values="4;16" dur="0.4s" fill="freeze" />
-      <animate begin="indefinite" data-delay="0.55" attributeName="opacity" values="0.65;0" dur="0.4s" fill="freeze" />
+      <animate begin="indefinite" data-delay="0.95" attributeName="r" values="4;26" dur="0.75s" fill="freeze" />
+      <animate begin="indefinite" data-delay="0.95" attributeName="opacity" values="0.9;0" dur="0.75s" fill="freeze" />
     </circle>}
   </g>
 }
