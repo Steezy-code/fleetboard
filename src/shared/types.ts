@@ -233,6 +233,7 @@ export interface PtyInfo {
 }
 
 export interface Settings {
+  motion: import('./motion').MotionLevel
   autoApprove: boolean
   plannerAgent: string
   /** CLI used by new team leads; workers inherit it unless explicitly chosen. */
@@ -258,6 +259,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  motion: 'subtle',
   autoApprove: false,
   plannerAgent: 'claude',
   teamAgent: 'claude',

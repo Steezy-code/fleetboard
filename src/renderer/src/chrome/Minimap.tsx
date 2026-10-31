@@ -3,6 +3,7 @@ import { useApp, activeWs, stopCameraAnimation } from '../state/store'
 import { agentColor } from '../engine/consoles'
 import { ROLE_TINT } from '@shared/types'
 import { groupBox, hiddenIds, occupied } from '../board/place'
+import { useMotion } from '../ui/motion'
 
 const W = 220
 const H = 140
@@ -22,6 +23,7 @@ export function Minimap() {
   const ws = useApp((s) => s.project?.workspaces.find((w) => w.id === s.project?.activeWorkspaceId))
   const vp = useApp((s) => s.viewport)
   const statuses = useApp((s) => s.statuses)
+  const motion = useMotion()
   if (!show || !ws || (!ws.nodes.length && !ws.groups.length && !ws.ink.length)) return null
 
   const cam = ws.camera
@@ -91,6 +93,13 @@ export function Minimap() {
           )
         })}
         <rect className="mm-view" x={mx(view.x)} y={my(view.y)} width={view.w * k} height={view.h * k} rx={2} />
+        {ws.nodes.filter((n) => statuses[n.id] === 'needs-you').map((n) => {
+          const group = folded.has(n.id) ? ws.groups.find((g) => g.id === n.groupId) : undefined
+          const box = group ? groupBox(group) : n
+          return <g key={n.id} className={`mm-attention ${motion === 'off' ? 'still' : ''}`} transform={`translate(${mx(box.x + box.w / 2)},${my(box.y)})`}>
+            <circle className="mm-attention-ring" r="4" /><circle className="mm-attention-ring second" r="4" /><circle r="2.5" className="mm-attention-dot" />
+          </g>
+        })}
       </svg>
     </div>
   )

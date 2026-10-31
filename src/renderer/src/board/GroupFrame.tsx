@@ -6,6 +6,7 @@ import { activeWs, connectClick, useApp } from '../state/store'
 import { killConsoles, pauseAll, resumeAll } from '../engine/consoles'
 import { snap } from './geometry'
 import { GAP, GROUP_HEAD_H, findFreeSpot, occupied } from './place'
+import { AttentionBeacon } from '../ui/AttentionBeacon'
 
 /**
  * Fold a group down to its header, or open it again. Folded, its consoles keep running at their size
@@ -86,6 +87,7 @@ export const GroupFrame = memo(function GroupFrame({ group, selected }: { group:
       style={{ left: group.x, top: group.y, width: group.w, height: group.collapsed ? Math.min(group.h, GROUP_HEAD_H) : group.h, ['--tint' as any]: tint }}
       data-group-id={group.id}
     >
+      {group.collapsed && needs > 0 && <AttentionBeacon />}
       <div className="group-head" onPointerDown={(e) => startGroupDrag(e, group)} onDoubleClick={() => setEditing(true)}>
         <span className="dot" style={{ background: tint }} />
         {editing ? (

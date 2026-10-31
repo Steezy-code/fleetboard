@@ -17,6 +17,8 @@ import { DEFAULT_SETTINGS, SCHEMA_VERSION, mapWorkspaces } from '@shared/types'
 import { errorText, invoke, request, uid } from '../lib/api'
 import { baseName } from '../workbench/paths'
 import { mayDropUnsaved } from '../lib/unsaved'
+import { currentMotion } from '../ui/motion'
+import { motionDuration } from '@shared/motion'
 
 /**
  * Per-window memory that outlives the page (a crash, a reload) but not the app: sessionStorage belongs
@@ -190,9 +192,12 @@ export function pushView(wsId: string, cam: Camera) {
 // Smooth camera moves. Zoom interpolates in log space so it feels even at every scale.
 let animFrame = 0
 export function animateCamera(target: Camera, ms = 260) {
-  cancelAnimationFrame(animFrame)
+  stopCameraAnimation()
   const ws = activeWs()
   if (!ws) return
+  const level = currentMotion()
+  if (level === 'off') return useApp.getState().setCamera(target)
+  ms = level === 'full' ? ms * motionDuration(level) / FOCUS_MS : Math.min(ms, motionDuration(level))
   const from = { ...ws.camera }
   const vp = useApp.getState().viewport
   // animate the world point at the viewport center, so the move doesn't swing sideways
@@ -205,6 +210,11 @@ export function animateCamera(target: Camera, ms = 260) {
   const t0 = performance.now()
   const ease = (t: number) => 1 - Math.pow(1 - t, 3)
   const step = (now: number) => {
+    if (activeWs()?.id !== ws.id) return stopCameraAnimation()
+    if (currentMotion() === 'off') {
+      stopCameraAnimation()
+      return useApp.getState().setCamera(target)
+    }
     const t = Math.min(1, (now - t0) / ms)
     const k = ease(t)
     const zoom = Math.exp(lz0 + (lz1 - lz0) * k)
@@ -218,7 +228,7 @@ export function animateCamera(target: Camera, ms = 260) {
   const token = ++animToken
   window.clearTimeout(animFallback)
   animFallback = window.setTimeout(() => {
-    if (token !== animToken) return
+    if (token !== animToken || activeWs()?.id !== ws.id) return
     cancelAnimationFrame(animFrame)
     const c = activeWs()?.camera
     if (c && (c.x !== target.x || c.y !== target.y || c.zoom !== target.zoom)) useApp.getState().setCamera(target)
