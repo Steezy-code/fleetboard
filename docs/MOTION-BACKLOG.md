@@ -22,3 +22,30 @@ last 1.65 seconds together, and completion highlights linger with staggered work
 The Oracle halo follows mic RMS and synthesized speech PCM; system speech uses a gentle fallback
 pulse because the system voice API does not expose audio samples. Completion highlights only
 reported/merged workers and never delays or disables the Ready card's controls.
+
+Third pass (implemented):
+
+- Workspace switching: the incoming board settles forward from slightly receded. Trigger: click
+  another tab, add or close a workspace, or anything that moves `activeWorkspaceId`.
+- Wire creation: while the connector holds a source, a dashed curve follows the pointer from that
+  item's edge; the finished wire lights once from end to end. Trigger: Connect in the left rail,
+  click one item, move, click another. Escape, another tool, a workspace switch or the source being
+  removed all cancel it.
+- Inbox arrival: a card that is genuinely new enters with a short rise and one glow across the tray.
+  Trigger: a new item reaching the Inbox. A refresh that rebuilds the same items, and Tab between
+  cards, deliberately stay still.
+- Sticky note creation: the paper unfolds from where it was put down and settles. Trigger: the note
+  tool, or any new `note` tile. Moving, undoing or revisiting an existing note does not replay it.
+- Zoom detail: below 50% cards trade their body for a large label, and get the detail back above
+  62%. The gap is hysteresis, so a trackpad resting on the threshold does not flicker. Status,
+  selection and needs-you markers stay visible at every zoom.
+- Multi-selection: the frames joining the selection are acknowledged once and a quiet dashed
+  boundary is drawn around the whole set. Trigger: select a second item (Shift-click, marquee,
+  Ctrl+A). It lives in board coordinates, so it pans and zooms with the items, and takes no clicks.
+
+Known limits of this pass: a workspace switch animates only the incoming board — the outgoing one is
+unmounted by the board's `key` before it could be animated, and keeping it alive would re-mount the
+live terminals on the board being left. The connector's preview line is drawn at every motion level,
+Off included, because it is an affordance rather than decoration; what Off removes is the dash
+marching along it. Compact labels replace the body of framed cards only: chromeless tiles (notes,
+text, images) are already their own content and are left alone.

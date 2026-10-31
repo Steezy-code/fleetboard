@@ -33,6 +33,7 @@ function MessagePulse({ path, end, full }: { path: string; end: { x: number; y: 
 export const Wires = memo(function Wires({ nodes, groups, wires }: WireSpace) {
   const ws = { nodes, groups, wires }
   const selection = useApp((s) => s.selection)
+  const newWire = useApp((s) => s.newWire)
   const hot = useFleet((s) => s.hot)
   const motion = useMotion()
   const folded = hiddenIds(ws)
@@ -61,6 +62,8 @@ export const Wires = memo(function Wires({ nodes, groups, wires }: WireSpace) {
           <g key={w.id} data-wire-from={w.from} className={`wire ${sel ? 'selected' : ''} ${traffic.length ? 'hot' : ''}`} onPointerDown={(e) => (e.stopPropagation(), useApp.getState().setSelection([w.id]))}>
             <path d={d} className="wire-hit" />
             <path d={d} className="wire-line" />
+            {/* a wire just made by hand, lit from one end to the other once */}
+            {w.id === newWire && <path d={d} className="wire-draw" pathLength="1" />}
             <circle r="4" className="wire-end" cx={p1.x} cy={p1.y} />
             <circle r="4" className="wire-end" cx={p2.x} cy={p2.y} />
             {motion !== 'off' && traffic.map((event) => (

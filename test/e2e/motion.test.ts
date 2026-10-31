@@ -171,3 +171,205 @@ test('terminal entrance, attention, group folding, docking, Oracle and completio
     assert.deepEqual(app.rendererErrors, [])
   } finally { await app.close() }
 })
+
+test('workspace switching, wire preview, inbox arrival, sticky notes, zoom detail and multi-selection', async () => {
+  const sb = makeSandbox()
+  const app = await App.launch({ sandbox: sb })
+  const cdp = (app as any).cdp
+  const headPoint = (id: string) =>
+    app.eval((sel) => {
+      const r = document.querySelector(sel)!.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + 14) }
+    }, `[data-node-id="${id}"] .node-head`)
+  try {
+    await app.openProject(makeRepo(sb))
+    await app.eval(async () => {
+      const s = (window as any).__fleetboard.useApp.getState()
+      await s.setSettings({ motion: 'full' })
+      s.setCamera({ x: 0, y: 0, zoom: 1 })
+      s.addNode({ id: 'polish-c', type: 'checklist', x: 80, y: 700, w: 280, h: 200, data: { items: [] } })
+      s.addNode({ id: 'polish-d', type: 'checklist', x: 620, y: 700, w: 280, h: 200, data: { items: [] } })
+    })
+    await app.waitFor(() => app.eval(() => document.documentElement.dataset.motion === 'full' && !!document.querySelector('[data-node-id="polish-d"]')))
+
+    // Workspace switching: the incoming board settles forward, and mashing tabs cannot leave the
+    // board stuck mid-animation or on the wrong workspace.
+    const first = await app.eval(() => (window as any).__fleetboard.useApp.getState().project.activeWorkspaceId)
+    const second = await app.eval(() => (window as any).__fleetboard.useApp.getState().addWorkspace('Second'))
+    await app.waitFor(() => app.eval(() => document.querySelector('.board')!.getAnimations().length > 0), { label: 'the incoming board settles forward' })
+    await app.eval((ids) => {
+      const s = (window as any).__fleetboard.useApp.getState()
+      for (const id of [ids[0], ids[1], ids[0], ids[1], ids[0]]) s.switchWorkspace(id!)
+    }, [first, second])
+    await app.waitFor(() => app.eval(() => document.querySelector('.board')!.getAnimations().length === 0), { label: 'rapid switches settle instead of queueing' })
+    assert.deepEqual(
+      await app.eval(() => {
+        const s = (window as any).__fleetboard.useApp.getState()
+        return [s.project.activeWorkspaceId, getComputedStyle(document.querySelector('.board')!).transform, document.querySelectorAll('.ws-tab.on').length, !!document.querySelector('[data-node-id="polish-c"]')]
+      }),
+      [first, 'none', 1, true],
+      'the board is left on the workspace the last switch asked for, untransformed, with one tab lit'
+    )
+
+    // Inbox arrival: a new key is an arrival; the same list rebuilt, or cycling the front card, is not.
+    const cardAnimations = () => app.eval(() => document.querySelector('.it-card')?.getAnimations().length ?? -1)
+    const item = (key: string, head: string) => ({ kind: 'notice', key, who: 'Fleet', sub: 'test', since: Date.now(), actions: [], tone: 'info', head, lines: [] })
+    await app.eval((one) => (window as any).__fleetboard.useInbox.setState({ items: [one], front: 'notice:1' }), item('notice:1', 'First'))
+    await app.waitFor(async () => (await cardAnimations()) > 0, { label: 'a new item enters' })
+    await app.waitFor(async () => ((await cardAnimations()) === 0 ? 'still' : false), { label: 'the entrance ends' })
+    await app.eval((one) => (window as any).__fleetboard.useInbox.setState({ items: [one] }), item('notice:1', 'First'))
+    assert.equal(await cardAnimations(), 0, 'a refresh that rebuilds the same item does not animate it')
+    await app.eval((two) => {
+      const f = (window as any).__fleetboard
+      f.useInbox.setState({ items: [...f.useInbox.getState().items, two] })
+    }, item('notice:2', 'Second'))
+    assert.equal(await cardAnimations(), 0, 'an arrival behind the front card leaves the front card alone')
+    await app.eval(() => (window as any).__fleetboard.useInbox.setState({ front: 'notice:2' }))
+    assert.equal(await cardAnimations(), 0, 'cycling to an older card is not an arrival')
+    await app.eval(() => (window as any).__fleetboard.useInbox.setState({ items: [], front: null }))
+
+    // Wire creation: two clicks, with a preview in between that cancels every way out.
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setTool('connector'))
+    const from = await headPoint('polish-c')
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...from, button: 'left', buttons: 1, clickCount: 1 })
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...from, button: 'left', buttons: 0, clickCount: 1 })
+    await app.waitFor(() => app.eval(() => (window as any).__fleetboard.useApp.getState().wireFrom === 'polish-c'), { label: 'the first click arms the source' })
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + 300, y: from.y + 60 })
+    await app.waitFor(() => app.eval(() => /^M[-\d.]+,[-\d.]+ C/.test(document.querySelector('.wire-preview')?.getAttribute('d') ?? '')), { label: 'the preview curves toward the pointer' })
+    assert.equal(await app.eval(() => getComputedStyle(document.querySelector('.wire-preview-layer')!).pointerEvents), 'none', 'the preview never takes a click meant for a card')
+    await app.eval(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    assert.deepEqual(
+      await app.eval(() => [(window as any).__fleetboard.useApp.getState().wireFrom, !!document.querySelector('.wire-preview')]),
+      [null, false],
+      'Escape disarms the connector and takes the preview with it'
+    )
+    await app.eval(() => {
+      const s = (window as any).__fleetboard.useApp.getState()
+      s.setTool('connector')
+      s.setTool('select')
+    })
+    assert.equal(await app.eval(() => (window as any).__fleetboard.useApp.getState().wireFrom), null, 'changing tool drops a half-made wire')
+    await app.eval(() => {
+      const f = (window as any).__fleetboard
+      f.useApp.getState().addNode({ id: 'polish-gone', type: 'checklist', x: 1200, y: 700, w: 240, h: 160, data: { items: [] } })
+      f.useApp.getState().setTool('connector')
+      f.useApp.setState({ wireFrom: 'polish-gone' })
+      f.useApp.getState().removeNodes(['polish-gone'])
+    })
+    assert.equal(await app.eval(() => (window as any).__fleetboard.useApp.getState().wireFrom), null, 'the source being removed cancels the preview')
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setTool('connector'))
+    for (const point of [await headPoint('polish-c'), await headPoint('polish-d')]) {
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', buttons: 1, clickCount: 1 })
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', buttons: 0, clickCount: 1 })
+    }
+    await app.waitFor(() => app.eval(() => !!document.querySelector('.wire-draw')), { label: 'the new wire lights end to end' })
+    assert.deepEqual(
+      await app.eval(() => {
+        const ws = (window as any).__fleetboard.activeWs()
+        return [ws.wires.length, ws.wires[0].from, ws.wires[0].to, (window as any).__fleetboard.useApp.getState().tool]
+      }),
+      [1, 'polish-c', 'polish-d', 'select'],
+      'the second click makes the wire and puts the tool back'
+    )
+    await app.waitFor(() => app.eval(() => !document.querySelector('.wire-draw')), { label: 'the illumination is a one-off' })
+    assert.equal(await app.eval(() => document.querySelectorAll('.wire-message').length), 0, 'drawing a wire is not message traffic')
+
+    // A sticky note unfolds when it is created, and only then.
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().addNode({ id: 'polish-note', type: 'note', x: 1000, y: 700, w: 220, h: 200, data: { text: '', color: '#7fae5c' } }))
+    await app.waitFor(() => app.eval(() => !!document.querySelector('[data-node-id="polish-note"] .note-unfold')), { label: 'a new note unfolds' })
+    await app.waitFor(() => app.eval(() => !document.querySelector('.note-unfold')), { label: 'the unfold ghost removes itself' })
+    await app.eval(() => {
+      const s = (window as any).__fleetboard.useApp.getState()
+      s.moveNodes(['polish-note'], 40, 20)
+      s.setSelection(['polish-note'])
+    })
+    assert.equal(await app.eval(() => !!document.querySelector('.note-unfold')), false, 'moving or selecting an existing note does not replay its creation')
+
+    // Zoom detail: compact labels below the threshold, with hysteresis, and never at the cost of status.
+    await app.eval(() => {
+      const s = (window as any).__fleetboard.useApp.getState()
+      s.addNode({ id: 'polish-console', type: 'console', x: 80, y: 1000, w: 420, h: 240, data: { agentId: 'shell', name: 'Zoom check', cwd: s.project.path, createdAt: Date.now() } })
+    })
+    await app.waitFor(() => app.eval(() => !!document.querySelector('[data-node-id="polish-console"]')))
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setStatus('polish-console', 'needs-you'))
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setCamera({ zoom: 0.4 }))
+    await app.waitFor(() => app.eval(() => document.querySelector('.board')!.classList.contains('zoom-compact')), { label: 'cards drop to compact labels' })
+    assert.ok(
+      await app.eval(() => {
+        const beacon = document.querySelector('[data-node-id="polish-console"] .attention-beacon') as HTMLElement | null
+        const title = document.querySelector('[data-node-id="polish-console"] .node-title') as HTMLElement | null
+        return !!beacon && getComputedStyle(beacon).visibility !== 'hidden' && !!title && parseFloat(getComputedStyle(title).fontSize) > 20
+      }),
+      'compact keeps the needs-you beacon and gives the label a readable size'
+    )
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setCamera({ zoom: 0.55 }))
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(await app.eval(() => document.querySelector('.board')!.classList.contains('zoom-compact')), true, 'inside the hysteresis gap the layout holds still')
+    if (process.env.E2E_SHOTS) await app.screenshot(`${process.env.E2E_SHOTS}/motion-polish-compact.png`)
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setCamera({ zoom: 1 }))
+    await app.waitFor(() => app.eval(() => !document.querySelector('.board.zoom-compact')), { label: 'detail comes back' })
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setStatus('polish-console', 'idle'))
+
+    // Multi-selection: one shared boundary, in board coordinates, that takes no clicks.
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setSelection(['polish-c']))
+    assert.equal(await app.eval(() => !!document.querySelector('.sel-bounds')), false, 'a single item needs no shared boundary')
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setSelection(['polish-c', 'polish-d']))
+    await app.waitFor(() => app.eval(() => !!document.querySelector('.world > .sel-bounds')), { label: 'the boundary is drawn inside the world, so it pans and zooms with the items' })
+    await app.waitFor(() => app.eval(() => document.querySelector('[data-node-id="polish-d"]')!.getAnimations().length > 0), { label: 'the frames joining the selection are acknowledged' })
+    assert.deepEqual(
+      await app.eval(() => {
+        const el = document.querySelector('.sel-bounds') as HTMLElement
+        return [el.style.left, el.style.top, el.style.width, getComputedStyle(el).pointerEvents]
+      }),
+      ['80px', '700px', '820px', 'none'],
+      'the boundary covers both cards and ignores the pointer'
+    )
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setSelection(['polish-c']))
+    assert.equal(await app.eval(() => !!document.querySelector('.sel-bounds')), false, 'the boundary goes the moment the selection does')
+    // Both levels, side by side, for the eyes that have to sign the effects off.
+    if (process.env.E2E_SHOTS) {
+      for (const level of ['full', 'subtle'] as const) {
+        await app.eval(async (motion) => {
+          const s = (window as any).__fleetboard.useApp.getState()
+          await s.setSettings({ motion })
+          s.setSelection(['polish-c', 'polish-d'])
+          s.setTool('connector')
+          ;(window as any).__fleetboard.useApp.setState({ wireFrom: 'polish-c' })
+          s.addNode({ type: 'note', x: 1000, y: 1000, w: 220, h: 200, data: { text: '', color: '#d4a72c' } })
+        }, level)
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        await app.screenshot(`${process.env.E2E_SHOTS}/motion-polish-${level}.png`)
+      }
+      await app.eval(async () => {
+        const s = (window as any).__fleetboard.useApp.getState()
+        s.setTool('select')
+        await s.setSettings({ motion: 'full' })
+      })
+    }
+
+    // Off: nothing keeps moving, and every final state is still there and usable.
+    await app.eval(() => (window as any).__fleetboard.useApp.getState().setSelection(['polish-c', 'polish-d']))
+    await app.eval(async () => { await (window as any).__fleetboard.useApp.getState().setSettings({ motion: 'off' }) })
+    await app.waitFor(() => app.eval(() => document.documentElement.dataset.motion === 'off'))
+    await app.eval(() => {
+      const s = (window as any).__fleetboard.useApp.getState()
+      s.addNode({ id: 'polish-note-off', type: 'note', x: 1400, y: 700, w: 220, h: 200, data: { text: '', color: '#5f97c9' } })
+      s.addWire('polish-c', 'polish-console')
+    })
+    await app.waitFor(() => app.eval(() => !!document.querySelector('[data-node-id="polish-note-off"]')))
+    assert.deepEqual(
+      await app.eval(() => [
+        [...document.querySelectorAll('.board, .board *')].reduce((n, el) => n + el.getAnimations().length, 0),
+        !!document.querySelector('.note-unfold'),
+        !!document.querySelector('.wire-draw'),
+        !!document.querySelector('.sel-bounds'),
+        (window as any).__fleetboard.activeWs().wires.length
+      ]),
+      [0, false, false, true, 2],
+      'off leaves nothing running, while the wire and the shared boundary are there as final states'
+    )
+    assert.deepEqual(app.rendererErrors, [])
+  } finally {
+    await app.close()
+  }
+})
