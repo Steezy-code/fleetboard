@@ -25,6 +25,7 @@ import { useInboxWatcher } from './fleet/inboxModel'
 import { mayDropUnsaved } from './lib/unsaved'
 import { markBoardRevealed, waveKey } from './lib/reveal'
 import { currentMotion, useMotionSync, useMotionReveal } from './ui/motion'
+import { useWorkspaceSwap } from './ui/workspaceSwap'
 
 export function App() {
   // primitives only: the project object changes on every camera frame (pan, zoom), and selecting it
@@ -45,6 +46,7 @@ export function App() {
 
   useThemeSync()
   useMotionSync()
+  useWorkspaceSwap(activeWorkspaceId)
   useInboxWatcher()
 
   useEffect(() => {

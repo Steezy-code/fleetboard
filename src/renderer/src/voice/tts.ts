@@ -139,10 +139,12 @@ export async function speak(text: string) {
       if (id !== current || playing !== src || !actx) return
       if (now - sampled >= 50) {
         sampled = now
-        const offset = Math.floor((actx.currentTime - started) * result.rate)
+        // clamped at both ends: the clock can read before playback began, and a sample past the end
+        // of the buffer is silence, not a crash
+        const offset = Math.max(0, Math.floor((actx.currentTime - started) * result.rate))
         const count = Math.min(1024, result.audio.length - offset)
         let sum = 0
-        for (let i = 0; i < count; i++) sum += result.audio[offset + i] ** 2
+        for (let i = 0; i < count; i++) sum += (result.audio[offset + i] ?? 0) ** 2
         setVoice({ outputLevel: count > 0 ? Math.min(1, Math.sqrt(sum / count) * 5) : 0 })
       }
       meterFrame = requestAnimationFrame(meter)

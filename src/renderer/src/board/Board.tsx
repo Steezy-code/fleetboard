@@ -1,4 +1,5 @@
 import { isTypingTarget } from '../lib/typing'
+import type { Workspace } from '@shared/types'
 import { offscreen } from './visibility'
 import { useEffect, useRef, useState } from 'react'
 import { offerGoal, useGoalIdeas } from '../chrome/goalIdeas'
@@ -8,13 +9,31 @@ import { deleteSelection } from './deleteSelection'
 import { mayDropUnsaved } from '../lib/unsaved'
 import { GroupFrame } from './GroupFrame'
 import { Wires } from './Wires'
+import { WirePreview } from './WirePreview'
 import { InkLayer } from './InkLayer'
 import { intersects } from './geometry'
+import { compactAtZoom } from '@shared/motion'
+import { selectionPulse } from '../ui/selectionMotion'
 import { groupBox, hiddenIds } from './place'
 import { fileUrl, request } from '../lib/api'
 
 const within = (box: { x: number; y: number; w: number; h: number }, r: { x: number; y: number; w: number; h: number }) =>
   r.x >= box.x && r.y >= box.y && r.x + r.w <= box.x + box.w && r.y + r.h <= box.y + box.h
+
+/** The box around everything selected, in board coordinates, so it pans and zooms with them. */
+function selectionBox(ws: Workspace, selection: string[]) {
+  const picked = selection.length > 1 ? new Set(selection) : null
+  if (!picked) return null
+  const boxes = [
+    ...ws.nodes.filter((n) => picked.has(n.id)),
+    ...ws.ink.filter((i) => picked.has(i.id)),
+    ...ws.groups.filter((g) => picked.has(g.id)).map(groupBox)
+  ]
+  if (boxes.length < 2) return null
+  const x = Math.min(...boxes.map((b) => b.x))
+  const y = Math.min(...boxes.map((b) => b.y))
+  return { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y }
+}
 
 /** Zoom Object: fit the current selection. */
 export function zoomToSelection() {
@@ -42,6 +61,9 @@ export function Board() {
   const tool = useApp((s) => s.tool)
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number; mode: 'window' | 'crossing' | 'zoom' } | null>(null)
   const [panning, setPanning] = useState(false)
+  // Cards drop to compact labels when they are too small to read. State, not a style read per frame:
+  // it only changes when a threshold is crossed, so zooming does not rerender the board every frame.
+  const [compact, setCompact] = useState(false)
   const settingsNav = useApp((s) => s.settings.navigation)
   // AutoCAD-style command line: 'zoom' waits for E/P/W/O, 'window' waits for a drag
   const [cmd, setCmdState] = useState<'zoom' | 'window' | null>(null)
@@ -62,6 +84,22 @@ export function Board() {
     el.addEventListener('scroll', pin)
     return () => el.removeEventListener('scroll', pin)
   }, [])
+
+  // Compact labels below the zoom threshold, detail back above it. Hysteresis lives in
+  // compactAtZoom: a single threshold flickers the whole board while a trackpad hovers on it.
+  const zoom = ws?.camera.zoom ?? 1
+  useEffect(() => setCompact((was) => compactAtZoom(zoom, was)), [zoom])
+
+  // A second item joining the selection is acknowledged once; the shared boundary is drawn below.
+  const selectionKey = selection.join(',')
+  const selectedCount = useRef(0)
+  useEffect(() => {
+    const ids = selectionKey ? selectionKey.split(',') : []
+    const grew = ids.length >= 2 && ids.length > selectedCount.current
+    selectedCount.current = ids.length
+    if (!grew) return
+    return selectionPulse(ids)
+  }, [selectionKey])
 
   // viewport size
   useEffect(() => {
@@ -195,6 +233,7 @@ export function Board() {
         else if (app.panel) void mayDropUnsaved('Close').then((ok) => ok && useApp.getState().closePanel())
         else {
           app.setSelection([])
+          // setTool drops a half-made wire with the tool; Escape on the connector alone also disarms it
           app.setTool('select')
         }
       } else if (e.key === 'Home') {
@@ -374,10 +413,11 @@ export function Board() {
   }
 
   const hidden = hiddenIds(ws)
+  const bounds = selectionBox(ws, selection)
   return (
     <div
       ref={ref}
-      className={`board tool-${tool} ${panning ? 'panning' : ''} ${cmd === 'window' ? 'zoom-window' : ''} ${focusedNode ? 'focus-mode' : ''}`}
+      className={`board tool-${tool} ${panning ? 'panning' : ''} ${cmd === 'window' ? 'zoom-window' : ''} ${focusedNode ? 'focus-mode' : ''} ${compact && !focusedNode ? 'zoom-compact' : ''}`}
       style={{
         backgroundSize: `${22 * cam.zoom}px ${22 * cam.zoom}px`,
         backgroundPosition: `${cam.x}px ${cam.y}px`
@@ -391,6 +431,7 @@ export function Board() {
           <GroupFrame key={g.id} group={g} selected={selection.includes(g.id)} />
         ))}
         <Wires nodes={ws.nodes} groups={ws.groups} wires={ws.wires} />
+        <WirePreview ws={ws} boardRef={ref} />
         {ws.nodes.map((n) =>
           n.id === focusedNode ? (
             <NodeFrame key={n.id} node={n} selected={false} zoom={1} maximized />
@@ -398,6 +439,7 @@ export function Board() {
             <NodeFrame key={n.id} node={n} selected={selection.includes(n.id)} zoom={cam.zoom} offscreen={offscreen(n, cam, viewport)} hidden={hidden.has(n.id)} />
           )
         )}
+        {bounds && <div className="sel-bounds" aria-hidden="true" style={{ left: bounds.x, top: bounds.y, width: bounds.w, height: bounds.h }} />}
       </div>
       <InkLayer ws={ws} />
       {marquee && <div className={`marquee ${marquee.mode}`} style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} />}
