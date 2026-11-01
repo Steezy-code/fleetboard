@@ -94,6 +94,8 @@ interface VoiceState {
   speaking: boolean
   /** mic RMS, 0..1 */
   level: number
+  /** Measured synthesized speech RMS; null when using the system voice. */
+  outputLevel: number | null
   /** live / final transcript shown in the caption */
   transcript: string
   /** last system reply shown in the caption */
@@ -115,6 +117,7 @@ export const useVoice = create<VoiceState>(() => ({
   phase: 'idle',
   speaking: false,
   level: 0,
+  outputLevel: null,
   transcript: '',
   reply: '',
   captionUntil: 0,

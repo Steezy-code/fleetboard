@@ -6,7 +6,8 @@ import { useFileText } from '../workbench/useFileText'
 import { handleMdClick, renderMarkdown } from '../workbench/markdown'
 import { exportMarkdownPdf } from '../workbench/pdf'
 import { baseName, dirname, stripExt } from '../workbench/paths'
-import { AsciiSkeleton, useAsciiReveal } from 'ascii-reveal'
+import { AsciiSkeleton } from 'ascii-reveal'
+import { useMotionReveal } from '../ui/motion'
 
 interface DocData {
   /** inline markdown (documents studio output) */
@@ -35,7 +36,7 @@ export default function DocNode({ node }: NodeProps<DocData>) {
   const baseDir = d.path ? dirname(d.path) : useApp.getState().project?.path
   const html = useMemo(() => renderMarkdown(body, { baseDir, wiki: 'text' }), [body, baseDir])
   const [exporting, setExporting] = useState(false)
-  const mdReveal = useAsciiReveal({ preset: 'terminal' })
+  const mdReveal = useMotionReveal({ preset: 'terminal' })
   const words = useMemo(() => (src.match(/\S+/g) ?? []).length, [src])
 
   async function exportPdf() {

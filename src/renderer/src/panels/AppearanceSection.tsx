@@ -8,6 +8,7 @@ const ACCENTS = ['#ff4a2b', '#e8a93a', '#c6f432', '#3ecf8e', '#2dd4bf', '#4c8dff
 export function AppearanceSection() {
   const theme = useApp((s) => s.settings.theme)
   const accent = useApp((s) => s.settings.accent)
+  const motion = useApp((s) => s.settings.motion)
   const set = useApp.getState().setSettings
   const current = themeById(theme)
   const shown = (isHexColor(accent) ? accent : current.tokens.accent).toLowerCase()
@@ -23,6 +24,16 @@ export function AppearanceSection() {
         ))}
       </div>
       <div className="settings-rows" style={{ marginTop: 14 }}>
+        <div className="settings-row">
+          <label htmlFor="motion-setting">Motion
+            <div className="muted small">Subtle keeps effects brief. Full adds brighter traces and arrival rings. System reduced motion always takes priority.</div>
+          </label>
+          <select id="motion-setting" className="select" style={{ width: 120, flexShrink: 0 }} value={motion} onChange={(e) => set({ motion: e.target.value as 'off' | 'subtle' | 'full' })}>
+            <option value="off">Off</option>
+            <option value="subtle">Subtle</option>
+            <option value="full">Full</option>
+          </select>
+        </div>
         <div className="settings-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 10 }}>
           <div>
             <div>Accent color</div>

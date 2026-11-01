@@ -202,7 +202,7 @@ export function wireFleet() {
 
   on('fleet:traffic', ({ from, to }: { from: string; to: string }) => {
     const until = Date.now() + 1800
-    useFleet.setState((s) => ({ hot: { ...s.hot, [`${from}>${to}`]: until, [`${to}>${from}`]: until } }))
+    useFleet.setState((s) => ({ hot: { ...s.hot, [`${from}>${to}`]: Math.max(until, (s.hot[`${from}>${to}`] ?? 0) + 1) } }))
     setTimeout(() => useFleet.setState((s) => ({ hot: Object.fromEntries(Object.entries(s.hot).filter(([, t]) => t > Date.now())) })), 1900)
   })
 

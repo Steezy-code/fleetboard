@@ -7,7 +7,8 @@ import { metricOf, TokensChart, type TokenMetric } from '../continuity/TokensCha
 import { hasBudget, startUsageWatch, toneColor, usedPct, USAGE_AGENT_IDS, USAGE_AGENT_META, useUsage } from '../continuity/usageStore'
 import { fmtDay, fmtDuration, fmtInt, fmtReset, fmtTokens, fmtUntil, prettyModel } from '../continuity/format'
 import type { UsageAgent } from '../continuity/types'
-import { AsciiSkeleton, useAsciiReveal } from 'ascii-reveal'
+import { AsciiSkeleton } from 'ascii-reveal'
+import { useMotionReveal } from '../ui/motion'
 
 /** Usage drawer: plan-window estimates, activity heatmap, stats, and a tokens sub-view. */
 export default function UsagePanel({ agent: initial }: { agent?: UsageAgent }) {
@@ -298,7 +299,7 @@ function TokensView() {
   const loading = useUsage((s) => s.loading)
   const [metric, setMetric] = useState<TokenMetric>('all')
   const [span, setSpan] = useState<'30' | 'all'>('30')
-  const card = useAsciiReveal({ preset: 'terminal' })
+  const card = useMotionReveal({ preset: 'terminal' })
   if (!report)
     return <div className="empty">{loading ? <AsciiSkeleton variant="terminal" lines={4} widths={['70%', '85%', '60%', '45%']} /> : 'No data yet'}</div>
   const days = report.days.slice(-30)

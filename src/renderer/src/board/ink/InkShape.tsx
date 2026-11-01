@@ -84,7 +84,7 @@ export const InkShape = memo(function InkShape({ item, hideText }: { item: InkIt
   const fillOpacity = item.fill && hasAlpha(item.fill) ? 1 : 0.22
   const clipId = `inkclip-${item.id}`
   return (
-    <g opacity={item.opacity ?? 1} className="ink-item">
+    <g opacity={item.opacity ?? 1} className="ink-item" data-ink-id={item.id}>
       {item.kind !== 'label' && (
         <>
           {built.fill && <path d={built.fill} fill={item.fill} fillOpacity={fillOpacity} stroke="none" />}
