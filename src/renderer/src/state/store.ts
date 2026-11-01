@@ -93,6 +93,8 @@ interface AppState {
   viewport: { w: number; h: number }
   /** first end of a wire while the connector tool is active */
   wireFrom: string | null
+  /** a wire just created by hand, lit end to end once (cleared on its own) */
+  newWire: string | null
 
   // app
   init: () => Promise<void>
@@ -177,6 +179,28 @@ export const newWorkspace = (name: string): Workspace => ({
 
 export const MIN_ZOOM = 0.05
 export const MAX_ZOOM = 4
+/** How long a hand-made wire stays lit, and how long a brand-new tile may still claim its entrance. */
+export const WIRE_DRAW_MS = 900
+const BORN_MS = 1500
+
+/**
+ * Tiles created just now, as opposed to loaded, restored or moved. A board file knows nothing about
+ * which of its tiles is new, so creation has to say so here; the frame consumes the mark once, and
+ * anything left unclaimed (a tile created on a board that is not on screen) ages out.
+ */
+const bornAt = new Map<string, number>()
+export function markBorn(id: string) {
+  const now = Date.now()
+  for (const [key, at] of bornAt) if (now - at > BORN_MS) bornAt.delete(key)
+  bornAt.set(id, now)
+}
+/** True once, for a tile created in the last moment. */
+export function claimBorn(id: string) {
+  const at = bornAt.get(id)
+  if (at === undefined) return false
+  bornAt.delete(id)
+  return Date.now() - at <= BORN_MS
+}
 
 // "Zoom Previous": views saved before each fit / focus / zoom window, per workspace.
 const viewHistory = new Map<string, Camera[]>()
@@ -351,6 +375,7 @@ export const useApp = create<AppState>((set, get) => {
     confirms: [],
     viewport: { w: window.innerWidth, h: window.innerHeight },
     wireFrom: null,
+    newWire: null,
 
     init: async () => {
       const [settings, projects] = await Promise.all([request('store:settings'), invoke<ProjectMeta[]>('store:projects')])
@@ -446,7 +471,7 @@ export const useApp = create<AppState>((set, get) => {
     switchWorkspace: (id) => {
       restoreFocusInstantly()
       mutateProject((p) => ({ ...p, activeWorkspaceId: id }))
-      set({ selection: [], focusedNode: null })
+      set({ selection: [], focusedNode: null, wireFrom: null })
     },
     renameWorkspace: (id, name) =>
       mutateProject((p) => ({ ...p, workspaces: mapWorkspaces(p, (w) => (w.id === id ? { ...w, name } : w)) })),
@@ -482,6 +507,7 @@ export const useApp = create<AppState>((set, get) => {
         const node: BoardNode = { data: {}, ...n, id, x, y, w, h, z: maxZ(ws) + 1 }
         return { ...ws, nodes: [...ws.nodes, node] }
       })
+      markBorn(id)
       return id
     },
     updateNode: (id, patch) =>
@@ -513,7 +539,9 @@ export const useApp = create<AppState>((set, get) => {
       if (get().focusedNode && ids.includes(get().focusedNode!)) get().exitFocus()
       get()._removeNodes(ids)
     },
-    _removeNodes: (ids: string[]) =>
+    _removeNodes: (ids: string[]) => {
+      // the armed source going away leaves a preview pointing at nothing
+      if (get().wireFrom && ids.includes(get().wireFrom!)) set({ wireFrom: null })
       mutateWs((ws) => {
         const s = new Set(ids)
         return {
@@ -523,7 +551,8 @@ export const useApp = create<AppState>((set, get) => {
           ink: ws.ink.filter((i) => !s.has(i.id)),
           groups: ws.groups.filter((g) => !s.has(g.id))
         }
-      }),
+      })
+    },
     bringToFront: (id) =>
       mutateWs((ws) => {
         const top = maxZ(ws)
@@ -561,11 +590,17 @@ export const useApp = create<AppState>((set, get) => {
       }),
     addWire: (from, to) => {
       const id = uid('wire')
-      mutateWs((ws) =>
-        ws.wires.some((w) => (w.from === from && w.to === to) || (w.from === to && w.to === from))
-          ? ws
-          : { ...ws, wires: [...ws.wires, { id, from, to }] }
-      )
+      let added = false
+      mutateWs((ws) => {
+        if (ws.wires.some((w) => (w.from === from && w.to === to) || (w.from === to && w.to === from))) return ws
+        added = true
+        return { ...ws, wires: [...ws.wires, { id, from, to }] }
+      })
+      // one end-to-end illumination on the new wire, then back to an ordinary wire
+      if (added && currentMotion() !== 'off') {
+        set({ newWire: id })
+        window.setTimeout(() => get().newWire === id && set({ newWire: null }), WIRE_DRAW_MS)
+      }
       return id
     },
     removeWire: (id) => mutateWs((ws) => ({ ...ws, wires: ws.wires.filter((w) => w.id !== id) })),
@@ -634,7 +669,8 @@ export const useApp = create<AppState>((set, get) => {
       get().zoomToRect(item, 40, 1.1)
       set({ selection: [id] })
     },
-    setTool: (tool) => set({ tool }),
+    // leaving the connector drops a half-made wire: its preview must never outlive the tool
+    setTool: (tool) => set(tool === 'connector' ? { tool } : { tool, wireFrom: null }),
     setSelection: (selection) => set({ selection }),
     setFocusedNode: (id) => (id ? get().enterFocus(id) : get().exitFocus()),
     enterFocus: (id) => {

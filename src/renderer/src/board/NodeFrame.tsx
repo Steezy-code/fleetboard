@@ -1,9 +1,9 @@
-import { memo, useEffect, useLayoutEffect, useRef } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Maximize2, Minimize2, X } from 'lucide-react'
 import type { BoardNode } from '@shared/types'
 import { mayRemove } from './removeHooks'
 import { NODE_DEFS } from '../nodes/registry'
-import { activeWs, connectClick, focusRect, useApp } from '../state/store'
+import { activeWs, claimBorn, connectClick, focusRect, useApp } from '../state/store'
 import { groupAt, snap } from './geometry'
 import { Boundary } from '../ui/Boundary'
 import { createAsciiReveal } from 'ascii-reveal'
@@ -158,6 +158,18 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
   const working = useApp((s) => node.type === 'console' && s.statuses[node.id] === 'working')
   const needs = useApp((s) => node.type === 'console' && s.statuses[node.id] === 'needs-you')
   const motion = useMotion()
+  // claimed once, by the mount that follows the creation: a note that is moved, restored with an
+  // Undo or shown again on a board switch is not a new note and must not unfold a second time
+  const [unfold, setUnfold] = useState(() => node.type === 'note' && currentMotion() !== 'off' && claimBorn(node.id))
+  // Off cancels the animation rather than ending it, so animationend never comes and the ghost
+  // would sit there as a solid rectangle over the note. The timer is the same guarantee for an
+  // animation that never starts (a tab in the background, say).
+  useEffect(() => {
+    if (!unfold) return
+    if (motion === 'off') return setUnfold(false)
+    const timer = window.setTimeout(() => setUnfold(false), 1000)
+    return () => clearTimeout(timer)
+  }, [unfold, motion])
   const allowReveal = motion !== 'off'
   const revealed = useRef(false)
   const wasWorking = useRef(working)
@@ -248,6 +260,9 @@ export const NodeFrame = memo(function NodeFrame({ node, selected, zoom, maximiz
       }}
     >
       {node.type === 'console' && <span className="terminal-corners" aria-hidden="true" />}
+      {/* A note just created unfolds from where it was put down. A ghost of the paper, not the note
+          itself: the real note is usable from the first frame, and its text and caret never move. */}
+      {unfold && <span className="note-unfold" aria-hidden="true" style={{ background: node.data.color ?? undefined }} onAnimationEnd={() => setUnfold(false)} />}
       {needs && <AttentionBeacon />}
       {!def.chromeless && (
         <div

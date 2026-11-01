@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { completionMotion } from '../ui/completionMotion'
 import { useMotion } from '../ui/motion'
+import { arrivedKeys, eventDuration } from '@shared/motion'
 import { request, errorText } from '../lib/api'
 import { useApp } from '../state/store'
 import { commandLike } from '@shared/live'
@@ -51,6 +52,8 @@ export function InboxTray({ floating }: { floating?: boolean }) {
   const item = frontItem()
   const motion = useMotion()
   const card = useRef<HTMLDivElement>(null)
+  const tray = useRef<HTMLDivElement>(null)
+  const seenKeys = useRef<Set<string> | null>(null)
   const seenReady = useRef<string | null>(null)
   const ready = item?.kind === 'ready' ? item.ready : null
   const readyKey = ready ? `${ready.leadId}:${ready.at}:${ready.head ?? ''}` : null
@@ -65,6 +68,40 @@ export function InboxTray({ floating }: { floating?: boolean }) {
       .sort((a, b) => a.createdAt - b.createdAt).map((m) => m.id)
     return completionMotion(workers, readyLead, card.current)
   }, [readyKey, readyLead, readyAt, motion])
+
+  // A genuinely new item arriving: a brief entrance on the card and one glow across the tray.
+  // Keyed on which keys exist, not on the items array (rebuilt on every refresh) and not on which
+  // card is in front (Tab cycles that), so a refresh and a cycle both stay still.
+  const itemKeys = items.map((i) => i.key).join('\n')
+  useEffect(() => {
+    const keys = itemKeys ? itemKeys.split('\n') : []
+    const before = seenKeys.current
+    seenKeys.current = new Set(keys)
+    // first pass: whatever is already waiting at load has not just arrived
+    if (!before || motion === 'off') return
+    const arrived = arrivedKeys(before, keys)
+    const front = frontItem()
+    if (!front || !arrived.includes(front.key)) return
+    const duration = eventDuration(motion)
+    const animations = [
+      card.current?.animate(
+        [
+          { opacity: 0.2, transform: `translateY(${motion === 'full' ? 10 : 5}px)` },
+          { opacity: 1, transform: 'translateY(0)' }
+        ],
+        { duration, easing: 'cubic-bezier(0.33, 1, 0.68, 1)' }
+      ),
+      tray.current?.animate(
+        [
+          { boxShadow: '0 0 0 0 transparent' },
+          { boxShadow: `0 0 0 1px var(--accent-line), 0 0 ${motion === 'full' ? 28 : 14}px var(--accent-soft)`, offset: 0.4 },
+          { boxShadow: '0 0 0 0 transparent' }
+        ],
+        { duration: duration + 200, easing: 'ease-out' }
+      )
+    ].filter((a): a is Animation => !!a)
+    return () => animations.forEach((a) => a.cancel())
+  }, [itemKeys, motion])
   if (!item) return null
   const n = items.length
   const idx = items.indexOf(item)
@@ -74,7 +111,7 @@ export function InboxTray({ floating }: { floating?: boolean }) {
   const dot = item.consoleId ? agentColor((allConsoles().find((c) => c.id === item.consoleId)?.data.agentId as string) ?? '') : undefined
 
   return (
-    <div className={`inbox-tray ${floating ? 'floating' : ''}`} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
+    <div ref={tray} className={`inbox-tray ${floating ? 'floating' : ''}`} onPointerDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()}>
       <div className="it-top">
         <span className="it-count">
           {need > 0 && <b>{need} need{need === 1 ? 's' : ''} you</b>}
