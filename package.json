@@ -52,7 +52,7 @@
     "ascii-reveal": "github:quanhoangindex/ascii-reveal#f602e204232d2d31de2b67c66a166bcdbde51602",
     "highlight.js": "^11.12.0",
     "kokoro-js": "^1.2.1",
-    "lucide-react": "^1.59.0",
+    "lucide-react": "^1.61.0",
     "marked": "^18.1.1",
     "node-pty": "^1.1.0",
     "zustand": "^5.0.15"
